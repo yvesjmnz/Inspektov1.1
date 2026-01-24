@@ -29,7 +29,7 @@ body {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 130px;
+  padding-top: 40px;
 }
 
 .hero-section {
@@ -70,14 +70,37 @@ body {
 
 .hero-right {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  gap: 40px;
+  width: 100%;
   align-items: center;
+}
+
+.right-column-left {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+}
+
+.right-column-right {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.process-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .steps-list {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 28px;
 }
 
 .step-item {
@@ -101,11 +124,74 @@ body {
   font-weight: 700;
 }
 
-.step-text {
-  font-size: 16px;
+.step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.step-title {
+  font-size: 18px;
+  font-weight: 700;
   color: white;
-  line-height: 1.6;
-  padding-top: 8px;
+  margin: 0;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.step-description {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.5;
+  margin: 0;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.support-card {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  padding: 24px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.support-heading {
+  font-size: 18px;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.support-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.support-intro {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0;
+  line-height: 1.5;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.support-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.support-content p {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  margin: 0;
+  line-height: 1.4;
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
 }
 

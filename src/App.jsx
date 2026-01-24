@@ -66,18 +66,44 @@ function HomePage() {
           </div>
 
           <div className="hero-right">
-            <div className="steps-list">
-              <div className="step-item">
-                <div className="step-circle">1</div>
-                <div className="step-text">Submit your complaint details</div>
+            <div className="right-column-left">
+              <h3 className="process-title">How Inspekto Works</h3>
+              <div className="steps-list">
+                <div className="step-item">
+                  <div className="step-circle">1</div>
+                  <div className="step-content">
+                    <h4 className="step-title">Report a concern</h4>
+                    <p className="step-description">File a complaint with details and supporting evidence.</p>
+                  </div>
+                </div>
+                <div className="step-item">
+                  <div className="step-circle">2</div>
+                  <div className="step-content">
+                    <h4 className="step-title">We take action</h4>
+                    <p className="step-description">Our team reviews the report and coordinates inspection.</p>
+                  </div>
+                </div>
+                <div className="step-item">
+                  <div className="step-circle">3</div>
+                  <div className="step-content">
+                    <h4 className="step-title">Stay informed</h4>
+                    <p className="step-description">Track progress and receive updates.</p>
+                  </div>
+                </div>
               </div>
-              <div className="step-item">
-                <div className="step-circle">2</div>
-                <div className="step-text">We review and investigate</div>
-              </div>
-              <div className="step-item">
-                <div className="step-circle">3</div>
-                <div className="step-text">Get resolution and updates</div>
+            </div>
+
+            <div className="right-column-right">
+              <div className="support-card">
+                <h3 className="support-heading">Permit-related concerns?</h3>
+                <div className="support-section">
+                  <p className="support-intro">For business permit–related concerns (new applications, renewals, Go Manila access, account or inspection status):</p>
+                  <div className="support-content">
+                    <p><strong>Facebook:</strong> Bureau of Permits Manila</p>
+                    <p><strong>Email:</strong> permits@manila.gov.ph</p>
+                    <p><strong>Phone:</strong> (02) 8527-0871</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
