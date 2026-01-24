@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import VerifyEmail from './modules/complaints_module/pages/VerifyEmail';
 import RequestVerification from './modules/complaints_module/pages/RequestVerification';
+import EmailVerificationModal from './modules/complaints_module/pages/EmailVerificationModal';
 import ComplaintForm from './modules/complaints_module/pages/ComplaintForm';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -9,6 +10,7 @@ import './App.css';
 function App() {
   const [currentPage, setCurrentPage] = useState('home');
   const [verifiedEmail, setVerifiedEmail] = useState(null);
+  const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
 
   useEffect(() => {
     const path = window.location.pathname;
@@ -39,14 +41,27 @@ function App() {
       case 'complaint':
         return <ComplaintForm verifiedEmail={verifiedEmail} />;
       default:
-        return <HomePage />;
+        return <HomePage onOpenVerificationModal={() => setIsVerificationModalOpen(true)} />;
     }
   };
 
-  return renderPage();
+  return (
+    <>
+      {renderPage()}
+      <EmailVerificationModal 
+        isOpen={isVerificationModalOpen} 
+        onClose={() => setIsVerificationModalOpen(false)} 
+      />
+    </>
+  );
 }
 
-function HomePage() {
+function HomePage({ onOpenVerificationModal }) {
+  const handleSubmitComplaint = (e) => {
+    e.preventDefault();
+    onOpenVerificationModal();
+  };
+
   return (
     <div className="home-container">
       <Header />
@@ -56,9 +71,12 @@ function HomePage() {
             <h2>Report Business Violations</h2>
             <p>Help us maintain business compliance and protect consumers through transparent reporting.</p>
             <div className="hero-buttons">
-              <a href="/request-verification" className="btn btn-outline btn-red">
+              <button 
+                onClick={handleSubmitComplaint}
+                className="btn btn-outline btn-red"
+              >
                 Submit a Complaint
-              </a>
+              </button>
               <a href="#" className="btn btn-outline btn-blue">
                 Track Complaint Status
               </a>
