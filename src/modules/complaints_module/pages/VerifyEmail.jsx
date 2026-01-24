@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { verifyEmail } from '../lib/api';
+import { verifyEmail } from '../../../lib/api';
 import './VerifyEmail.css';
 
 export default function VerifyEmail() {

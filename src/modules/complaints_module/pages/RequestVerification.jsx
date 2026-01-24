@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { requestEmailVerification } from '../lib/api';
+import { requestEmailVerification } from '../../../lib/api';
 import './RequestVerification.css';
 
 export default function RequestVerification() {

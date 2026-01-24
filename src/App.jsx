@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import VerifyEmail from './components/VerifyEmail';
-import RequestVerification from './components/RequestVerification';
-import ComplaintForm from './components/ComplaintForm';
+import VerifyEmail from './modules/complaints_module/pages/VerifyEmail';
+import RequestVerification from './modules/complaints_module/pages/RequestVerification';
+import ComplaintForm from './modules/complaints_module/pages/ComplaintForm';
 import './App.css';
 
 function App() {

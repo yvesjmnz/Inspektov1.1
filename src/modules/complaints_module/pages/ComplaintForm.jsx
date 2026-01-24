@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { submitComplaint, getBusinesses, uploadImage } from '../lib/complaints';
+import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/complaints';
 import './ComplaintForm.css';
 
 export default function ComplaintForm({ verifiedEmail }) {
