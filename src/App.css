@@ -10,7 +10,7 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #f9fafb;
+  background: linear-gradient(rgba(0, 102, 204, 0.3), rgba(0, 82, 163, 0.3)), url('/bg.jpg') center/cover fixed;
   color: #1f2937;
 }
 
@@ -18,30 +18,6 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-}
-
-.header {
-  background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%);
-  color: white;
-  padding: 40px 20px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(0, 51, 102, 0.1);
-}
-
-.header-content {
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.logo {
-  font-size: 36px;
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-.tagline {
-  font-size: 18px;
-  opacity: 0.9;
 }
 
 .main-content {
@@ -118,13 +94,6 @@ body {
   line-height: 1.6;
 }
 
-.footer {
-  background: #1f2937;
-  color: white;
-  text-align: center;
-  padding: 24px 20px;
-  margin-top: auto;
-}
 
 .btn {
   display: inline-block;
@@ -174,18 +143,6 @@ body {
 }
 
 @media (max-width: 480px) {
-  .header {
-    padding: 24px 20px;
-  }
-
-  .logo {
-    font-size: 28px;
-  }
-
-  .tagline {
-    font-size: 16px;
-  }
-
   .hero h2 {
     font-size: 24px;
   }

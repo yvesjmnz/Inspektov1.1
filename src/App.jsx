@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import VerifyEmail from './modules/complaints_module/pages/VerifyEmail';
 import RequestVerification from './modules/complaints_module/pages/RequestVerification';
 import ComplaintForm from './modules/complaints_module/pages/ComplaintForm';
+import Header from './components/Header';
+import Footer from './components/Footer';
 import './App.css';
 
 function App() {
@@ -47,13 +49,7 @@ function App() {
 function HomePage() {
   return (
     <div className="home-container">
-      <header className="header">
-        <div className="header-content">
-          <h1 className="logo">Inspekto</h1>
-          <p className="tagline">Complaint Management System</p>
-        </div>
-      </header>
-
+      <Header />
       <main className="main-content">
         <section className="hero">
           <h2>Report Business Violations</h2>
@@ -82,9 +78,7 @@ function HomePage() {
         </section>
       </main>
 
-      <footer className="footer">
-        <p>Inspekto - Complaint Management System</p>
-      </footer>
+      <Footer />
     </div>
   );
 }
