@@ -51,29 +51,35 @@ function HomePage() {
     <div className="home-container">
       <Header />
       <main className="main-content">
-        <section className="hero">
-          <h2>Report Business Violations</h2>
-          <p>Help us maintain business compliance and protect consumers through transparent reporting.</p>
-          <a href="/request-verification" className="btn btn-primary btn-large">
-            Submit a Complaint
-          </a>
-        </section>
+        <section className="hero-section">
+          <div className="hero-left">
+            <h2>Report Business Violations</h2>
+            <p>Help us maintain business compliance and protect consumers through transparent reporting.</p>
+            <div className="hero-buttons">
+              <a href="/request-verification" className="btn btn-outline btn-red">
+                Submit a Complaint
+              </a>
+              <a href="#" className="btn btn-outline btn-blue">
+                Track Complaint Status
+              </a>
+            </div>
+          </div>
 
-        <section className="features">
-          <div className="feature-card">
-            <div className="feature-icon">1</div>
-            <h3>Request Verification</h3>
-            <p>Enter your email to receive a verification link</p>
-          </div>
-          <div className="feature-card">
-            <div className="feature-icon">2</div>
-            <h3>Verify Email</h3>
-            <p>Click the link in your email to verify your identity</p>
-          </div>
-          <div className="feature-card">
-            <div className="feature-icon">3</div>
-            <h3>Submit Complaint</h3>
-            <p>Fill out the complaint form with details and evidence</p>
+          <div className="hero-right">
+            <div className="steps-list">
+              <div className="step-item">
+                <div className="step-circle">1</div>
+                <div className="step-text">Submit your complaint details</div>
+              </div>
+              <div className="step-item">
+                <div className="step-circle">2</div>
+                <div className="step-text">We review and investigate</div>
+              </div>
+              <div className="step-item">
+                <div className="step-circle">3</div>
+                <div className="step-text">Get resolution and updates</div>
+              </div>
+            </div>
           </div>
         </section>
       </main>
