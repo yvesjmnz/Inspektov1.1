@@ -3,11 +3,19 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #f0f4f8 0%, #ffffff 100%);
+  background: linear-gradient(rgba(0, 102, 204, 0.3), rgba(0, 82, 163, 0.3)), url('/bg.jpg') center/cover fixed;
   padding: 20px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
+}
+
+/* Ensure complaint page uses the same background as the app */
+.dash-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(rgba(0, 102, 204, 0.3), rgba(0, 82, 163, 0.3)), url('/bg.jpg') center/cover fixed;
 }
 
 .complaint-form-card {
@@ -245,6 +253,32 @@
   padding: 16px 32px;
   font-size: 18px;
   width: 100%;
+}
+
+/* Ensure buttons are visible inside the complaint form (override global App.css) */
+.complaint-form .btn {
+  border: none !important; /* remove global white border */
+}
+
+.complaint-form .btn.btn-secondary,
+.complaint-form .btn.btn-secondary:hover,
+.complaint-form .btn.btn-secondary:focus,
+.complaint-form .btn.btn-secondary:active {
+  background: #e5e7eb !important; /* solid light gray */
+  color: #0f172a !important;      /* dark text */
+  border: 1px solid #d1d5db !important; /* subtle border */
+  box-shadow: none !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 200px;  /* fixed equal width */
+  height: 42px;  /* consistent height */
+}
+
+/* Prevent overlay issues from suggestions list */
+.complaint-form .file-upload {
+  position: relative;
+  z-index: 20; /* keep above any dropdown */
 }
 
 @media (max-width: 640px) {
