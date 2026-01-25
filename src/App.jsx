@@ -4,6 +4,12 @@ import RequestVerification from './modules/complaints_module/pages/RequestVerifi
 import EmailVerificationModal from './modules/complaints_module/pages/EmailVerificationModal';
 import ComplaintForm from './modules/complaints_module/pages/ComplaintForm';
 import TrackComplaint from './modules/complaints_module/pages/TrackComplaint';
+import Login from './modules/complaints_module/pages/Login';
+import DashboardHome from './modules/dashboard_module/pages/DashboardHome';
+import DashboardDirector from './modules/dashboard_module/pages/DashboardDirector';
+import DashboardHeadInspector from './modules/dashboard_module/pages/DashboardHeadInspector';
+import DashboardInspector from './modules/dashboard_module/pages/DashboardInspector';
+import MissionOrderEditor from './modules/dashboard_module/pages/MissionOrderEditor';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import './App.css';
@@ -30,6 +36,18 @@ function App() {
       setCurrentPage('complaint');
     } else if (path === '/track-complaint') {
       setCurrentPage('track-complaint');
+    } else if (path === '/login') {
+      setCurrentPage('login');
+    } else if (path === '/dashboard') {
+      setCurrentPage('dashboard');
+    } else if (path === '/dashboard/director') {
+      setCurrentPage('dashboard-director');
+    } else if (path === '/dashboard/head-inspector') {
+      setCurrentPage('dashboard-head-inspector');
+    } else if (path === '/dashboard/inspector') {
+      setCurrentPage('dashboard-inspector');
+    } else if (path === '/mission-order') {
+      setCurrentPage('mission-order');
     } else {
       setCurrentPage('home');
     }
@@ -45,6 +63,18 @@ function App() {
         return <ComplaintForm verifiedEmail={verifiedEmail} />;
       case 'track-complaint':
         return <TrackComplaint />;
+      case 'login':
+        return <Login />;
+      case 'dashboard':
+        return <DashboardHome />;
+      case 'dashboard-director':
+        return <DashboardDirector />;
+      case 'dashboard-head-inspector':
+        return <DashboardHeadInspector />;
+      case 'dashboard-inspector':
+        return <DashboardInspector />;
+      case 'mission-order':
+        return <MissionOrderEditor />;
       default:
         return <HomePage onOpenVerificationModal={() => setIsVerificationModalOpen(true)} />;
     }
