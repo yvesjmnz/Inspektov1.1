@@ -159,8 +159,7 @@ function HomePage({ onOpenVerificationModal }) {
         <section className="band-light">
           <div className="band-wrap grid-2">
             <div className="permit-left">
-              <div className="chip"><span className="dot"></span> Bureau of Permits</div>
-              <h2>Have permit-related concerns?</h2>
+                            <h2>Have permit-related concerns?</h2>
               <p>For business permit applications, renewals, Go Manila access, account status, or inspection scheduling — contact the Bureau of Permits directly.</p>
               <a className="text-link" href="#">Visit Bureau of Permits →</a>
             </div>
