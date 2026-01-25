@@ -161,7 +161,7 @@ function HomePage({ onOpenVerificationModal }) {
             <div className="permit-left">
                             <h2>Have permit-related concerns?</h2>
               <p>For business permit applications, renewals, Go Manila access, account status, or inspection scheduling — contact the Bureau of Permits directly.</p>
-              <a className="text-link" href="#">Visit Bureau of Permits →</a>
+              <a className="text-link" href="https://www.facebook.com/bureauofpermitsmnl/" target="_blank" rel="noopener noreferrer">Visit Bureau of Permits →</a>
             </div>
             <div className="permit-right">
               <div className="mini-cards">
