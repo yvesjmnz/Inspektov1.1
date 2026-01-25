@@ -100,69 +100,89 @@ function HomePage({ onOpenVerificationModal }) {
   return (
     <div className="home-container">
       <Header />
-      <main className="main-content">
-        <div className="dash-card" style={{ maxWidth: 1300, width: '100%', background: 'rgba(255,255,255,0.85)', borderRadius: 16, padding: 28, border: '1px solid rgba(255,255,255,0.2)', boxShadow: '0 12px 34px rgba(0,0,0,0.14)', backdropFilter: 'blur(6px)' }}>
-          <section className="hero-section">
-            <div className="hero-left">
-              <h2 style={{ color: '#0f172a', textShadow: 'none' }}>Report Business Violations</h2>
-              <p style={{ color: '#334155', textShadow: 'none' }}>Help us maintain business compliance and protect consumers through transparent reporting.</p>
-              <div className="hero-buttons">
-                <button 
-                  onClick={handleSubmitComplaint}
-                  className="btn btn-red"
-                >
-                  Submit a Complaint
-                </button>
-                <a href="/track-complaint" className="btn btn-blue">
-                  Track Complaint Status
-                </a>
+      <main className="home-standalone">
+        <section className="hero-wrap">
+          <div className="hero-grid">
+            <div className="hero-col">
+              <h1 className="hero-title">Report <span className="accent">Business</span> Violations</h1>
+              <p className="hero-sub">Protect your community. Report non-compliant businesses and help maintain fair trade practices in Manila.</p>
+              <div className="hero-actions">
+                <button onClick={handleSubmitComplaint} className="pill-btn pill-primary">File a Report</button>
+                <a href="/track-complaint" className="pill-btn pill-outline">Track Your Case</a>
               </div>
             </div>
-
-            <div className="hero-right">
-              <div className="right-column-left">
-                <h3 className="process-title" style={{ color: '#0f172a', textShadow: 'none' }}>How Inspekto Works</h3>
-                <div className="steps-list">
-                  <div className="step-item">
-                    <div className="step-circle" style={{ borderColor: '#2563eb', color: '#2563eb' }}>1</div>
-                    <div className="step-content">
-                      <h4 className="step-title" style={{ color: '#0f172a', textShadow: 'none' }}>Report a concern</h4>
-                      <p className="step-description" style={{ color: '#475569', textShadow: 'none' }}>File a complaint with details and supporting evidence.</p>
-                    </div>
-                  </div>
-                  <div className="step-item">
-                    <div className="step-circle" style={{ borderColor: '#2563eb', color: '#2563eb' }}>2</div>
-                    <div className="step-content">
-                      <h4 className="step-title" style={{ color: '#0f172a', textShadow: 'none' }}>We take action</h4>
-                      <p className="step-description" style={{ color: '#475569', textShadow: 'none' }}>Our team reviews the report and coordinates inspection.</p>
-                    </div>
-                  </div>
-                  <div className="step-item">
-                    <div className="step-circle" style={{ borderColor: '#2563eb', color: '#2563eb' }}>3</div>
-                    <div className="step-content">
-                      <h4 className="step-title" style={{ color: '#0f172a', textShadow: 'none' }}>Stay informed</h4>
-                      <p className="step-description" style={{ color: '#475569', textShadow: 'none' }}>Track progress and receive updates.</p>
-                    </div>
-                  </div>
+            <div className="hero-col">
+              <div className="mock-card">
+                <div className="mock-top">
+                  <span className="b b1"></span><span className="b b2"></span><span className="b b3"></span>
                 </div>
-              </div>
-
-              <div className="right-column-right">
-                <div className="support-card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                  <h3 className="support-heading" style={{ color: '#0f172a', textShadow: 'none' }}>Permit-related concerns?</h3>
-                  <div className="support-section">
-                    <p className="support-intro" style={{ color: '#334155', textShadow: 'none' }}>For business permit–related concerns (new applications, renewals, Go Manila access, account or inspection status):</p>
-                    <div className="support-content">
-                      <p style={{ color: '#475569' }}><strong>Facebook:</strong> Bureau of Permits Manila</p>
-                      <p style={{ color: '#475569' }}><strong>Email:</strong> permits@manila.gov.ph</p>
-                      <p style={{ color: '#475569' }}><strong>Phone:</strong> (02) 8527-0871</p>
-                    </div>
-                  </div>
-                </div>
+                <div className="mock-lines"></div>
+                <div className="mock-upload">Upload Evidence</div>
+                <div className="mock-lines small"></div>
+                <div className="mock-cta">Ready to submit? <span className="mock-go">→</span></div>
               </div>
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
+
+        <section className="band-dark">
+          <div className="band-wrap">
+            <div className="band-header">
+              <div className="label">Simple Process</div>
+              <h2>How It Works</h2>
+            </div>
+            <div className="step-cards">
+              <div className="step-card">
+                <div className="step-num">01</div>
+                <h3>Submit Your Report</h3>
+                <p>Fill out the complaint form with business details, violation type, and supporting evidence.</p>
+              </div>
+              <div className="step-card">
+                <div className="step-num">02</div>
+                <h3>Investigation Begins</h3>
+                <p>Our inspection team reviews your case and schedules on-site verification if needed.</p>
+              </div>
+              <div className="step-card">
+                <div className="step-num">03</div>
+                <h3>Get Notified</h3>
+                <p>Receive real-time updates via email as your case progresses.</p>
+              </div>
+              <div className="step-card">
+                <div className="step-num">04</div>
+                <h3>Case Resolution</h3>
+                <p>View the final outcome and any enforcement actions taken against violations.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="band-light">
+          <div className="band-wrap grid-2">
+            <div className="permit-left">
+              <div className="chip"><span className="dot"></span> Bureau of Permits</div>
+              <h2>Have permit-related concerns?</h2>
+              <p>For business permit applications, renewals, Go Manila access, account status, or inspection scheduling — contact the Bureau of Permits directly.</p>
+              <a className="text-link" href="#">Visit Bureau of Permits →</a>
+            </div>
+            <div className="permit-right">
+              <div className="mini-cards">
+                <div className="mini-card">
+                  <div className="mini-title">Email us at</div>
+                  <div className="mini-val">permits@manila.gov.ph</div>
+                </div>
+                <div className="mini-card">
+                  <div className="mini-title">Call us at</div>
+                  <div className="mini-val">(02) 8527-0871</div>
+                </div>
+              </div>
+              <div className="hours-card">
+                <div className="mini-title">Office Hours</div>
+                <div className="mini-val strong">Monday – Friday, 8:00 AM – 5:00 PM</div>
+                <div className="mini-sub">Except holidays</div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
 
       <Footer />

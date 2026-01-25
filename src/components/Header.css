@@ -1,26 +1,29 @@
 .header {
-  background: transparent;
+  background: rgba(31, 41, 55, 0.5);
   color: white;
-  padding: 24px 20px;
+  padding: 16px 0;
   box-shadow: none;
 }
 
 .header-content {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .logo-section {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 12px;
   justify-content: flex-start;
 }
 
 .logo-image {
-  width: 80px;
-  height: 80px;
+  width: 45px;
+  height: 45px;
   border-radius: 8px;
   object-fit: cover;
   flex-shrink: 0;
@@ -34,7 +37,7 @@
 }
 
 .logo {
-  font-size: 32px;
+  font-size: 22px;
   font-weight: 700;
   margin: 0;
   line-height: 1;
@@ -42,7 +45,7 @@
 }
 
 .tagline {
-  font-size: 14px;
+  font-size: 12px;
   opacity: 0.9;
   margin: 0;
   font-weight: 500;
@@ -51,22 +54,22 @@
 
 @media (max-width: 768px) {
   .logo-image {
-    width: 50px;
-    height: 50px;
+    width: 40px;
+    height: 40px;
   }
 
   .logo {
-    font-size: 28px;
+    font-size: 20px;
   }
 
   .tagline {
-    font-size: 13px;
+    font-size: 12px;
   }
 }
 
 @media (max-width: 480px) {
   .header {
-    padding: 16px 20px;
+    padding: 12px 0;
   }
 
   .logo-section {
@@ -74,15 +77,15 @@
   }
 
   .logo-image {
-    width: 45px;
-    height: 45px;
+    width: 36px;
+    height: 36px;
   }
 
   .logo {
-    font-size: 24px;
+    font-size: 18px;
   }
 
   .tagline {
-    font-size: 12px;
+    font-size: 11px;
   }
 }
