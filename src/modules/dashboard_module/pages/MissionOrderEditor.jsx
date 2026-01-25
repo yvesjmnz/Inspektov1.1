@@ -51,7 +51,52 @@ export default function MissionOrderEditor() {
         if (!mounted) return;
 
         setTitle(data?.title || `Mission Order ${String(data?.id || '').slice(0, 8)}…`);
-        setContent(data?.content || '<p><strong>MISSION ORDER</strong></p><p>Start typing…</p>');
+        setContent(
+          data?.content ||
+            [
+              '<div style="font-family: serif; line-height: 1.5;">',
+              '<p style="text-align:center; font-size: 18px;"><strong>MISSION ORDER</strong></p>',
+              '<br/>',
+              '<p><strong>TO:</strong> FIELD INSPECTOR [INSPECTOR NAME]</p>',
+              '<p><strong>SUBJECT:</strong> TO CONDUCT INSPECTION ON THE BUSINESS ESTABLISHMENT IDENTIFIED AS [BUSINESS NAME] WITH ADDRESS AT [ADDRESS]</p>',
+              '<p><strong>DATE OF INSPECTION: </strong>[INSERT DATE]</p>',
+              '<p><strong>DATE OF ISSUANCE: </strong>[INSERT DATE]</p>',
+              '<br/>',
+              '<p style="text-align:justify;">In the interest of public service, you are hereby ordered to conduct inspection of the aforementioned establishment, for the following purposes:</p>',
+              
+              // Tabbed List using padding-left
+              '<p style="text-align:justify; padding-left: 40px;">a) To verify the existence and authenticity of the Business Permits and other applicable permits, certificates, and other necessary documents, the completeness of the requirements therein.</p>',
+              '<p style="text-align:justify; padding-left: 40px;">b) To check actual business operation of the subject establishment.</p>',
+              '<p style="text-align:justify; padding-left: 40px;">c) To check compliance of said establishment with existing laws, ordinance, regulations relative to health & sanitation, fire safety, engineering & electrical installation standards.</p>',
+              
+              '<br/>',
+              '<p style="text-align:justify;">You are hereby directed to identify yourself by showing proper identification and act with due courtesy and politeness in the implementation of this Order. All inspectors shall wear their IDs in such manner as the public will be informed of their true identity.</p>',
+              '<br/>',
+              '<p style="text-align:justify;"><strong>You should also inform the owner or representative of the establishment being inspected that they may verify the authenticity of this Mission Order, or ask questions, or lodge complaints, thru our telephone number (02) 8527-0871 or email at permits@manila.gov.ph</strong></p>',
+              '<br/>',
+              '<p style="text-align:justify;">This Order is in effect until [INSERT DATE] and any Order inconsistent herewith is hereby revoked and/or amended accordingly.</p>',
+              '<br/><br/>',
+
+              // Signature Table for side-by-side names
+              '<table style="width: 100%; border: none; border-collapse: collapse;">',
+                '<tr>',
+                  '<td style="width: 50%; vertical-align: top;">',
+                    '<p style="margin: 0;">Recommending approval:</p>',
+                    '<br/><br/>',
+                    '<p style="margin: 0;"><strong>LEVI FACUNDO</strong></p>',
+                    '<p style="margin: 0;">Director</p>',
+                  '</td>',
+                  '<td style="width: 50%; vertical-align: top;">',
+                    '<p style="margin: 0;">Approved by:</p>',
+                    '<br/><br/>',
+                    '<p style="margin: 0;"><strong>MANUEL M. ZARCAL</strong></p>',
+                    '<p style="margin: 0;">Secretary to the Mayor</p>',
+                  '</td>',
+                '</tr>',
+              '</table>',
+              '</div>'
+            ].join('')
+        );
       } catch (e) {
         if (!mounted) return;
         setError(e?.message || 'Failed to load mission order.');
@@ -149,7 +194,8 @@ export default function MissionOrderEditor() {
               className="mo-editor"
               contentEditable={!loading}
               suppressContentEditableWarning
-              dangerouslySetInnerHTML={{ __html: content }}
+              // Don't use dangerouslySetInnerHTML here; we manually sync innerHTML only when loading initial content.
+              // Re-rendering innerHTML on each keystroke resets the caret to the beginning.
               onInput={() => setContent(editorRef.current?.innerHTML ?? '')}
             />
           </div>
