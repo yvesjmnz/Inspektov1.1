@@ -3,6 +3,7 @@ import VerifyEmail from './modules/complaints_module/pages/VerifyEmail';
 import RequestVerification from './modules/complaints_module/pages/RequestVerification';
 import EmailVerificationModal from './modules/complaints_module/pages/EmailVerificationModal';
 import ComplaintForm from './modules/complaints_module/pages/ComplaintForm';
+import TrackComplaint from './modules/complaints_module/pages/TrackComplaint';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import './App.css';
@@ -27,6 +28,8 @@ function App() {
       setCurrentPage('request-verification');
     } else if (path === '/complaint') {
       setCurrentPage('complaint');
+    } else if (path === '/track-complaint') {
+      setCurrentPage('track-complaint');
     } else {
       setCurrentPage('home');
     }
@@ -40,6 +43,8 @@ function App() {
         return <RequestVerification />;
       case 'complaint':
         return <ComplaintForm verifiedEmail={verifiedEmail} />;
+      case 'track-complaint':
+        return <TrackComplaint />;
       default:
         return <HomePage onOpenVerificationModal={() => setIsVerificationModalOpen(true)} />;
     }
@@ -77,7 +82,7 @@ function HomePage({ onOpenVerificationModal }) {
               >
                 Submit a Complaint
               </button>
-              <a href="#" className="btn btn-outline btn-blue">
+              <a href="/track-complaint" className="btn btn-outline btn-blue">
                 Track Complaint Status
               </a>
             </div>
