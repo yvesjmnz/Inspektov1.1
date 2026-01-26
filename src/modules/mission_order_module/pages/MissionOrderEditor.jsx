@@ -402,20 +402,9 @@ export default function MissionOrderEditor() {
                       title="Click to remove"
                       onClick={() => removeInspector(id)}
                       disabled={syncingAssignments}
-                      style={{
-                        borderRadius: 999,
-                        padding: '6px 10px',
-                        fontWeight: 800,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        border: '1px solid #e2e8f0',
-                        background: '#f8fafc',
-                        cursor: syncingAssignments ? 'not-allowed' : 'pointer',
-                      }}
                     >
-                      <span>{label}</span>
-                      <span aria-hidden="true" style={{ fontWeight: 900 }}>×</span>
+                      <span className="mo-chip-label">{label}</span>
+                      <span aria-hidden="true" className="mo-chip-x">×</span>
                     </button>
                   );
                 })
