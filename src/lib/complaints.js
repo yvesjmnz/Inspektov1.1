@@ -48,7 +48,7 @@ export async function getComplaintById(complaintId) {
   return data;
 }
 
-export async function uploadImage(file, bucket = 'storage-images') {
+export async function uploadImage(file, bucket = 'complaint-images') {
   const fileName = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${file.name}`;
   const { data, error } = await supabase.storage
     .from(bucket)
@@ -63,6 +63,6 @@ export async function uploadImage(file, bucket = 'storage-images') {
   return publicUrl.publicUrl;
 }
 
-export async function uploadDocument(file, bucket = 'storage-images') {
+export async function uploadDocument(file, bucket = 'complaint-images') {
   return uploadImage(file, bucket);
 }

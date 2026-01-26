@@ -3,6 +3,7 @@ import VerifyEmail from './modules/complaints_module/pages/VerifyEmail';
 import RequestVerification from './modules/complaints_module/pages/RequestVerification';
 import EmailVerificationModal from './modules/complaints_module/pages/EmailVerificationModal';
 import ComplaintForm from './modules/complaints_module/pages/ComplaintForm';
+import ComplaintConfirmation from './modules/complaints_module/pages/ComplaintConfirmation';
 import TrackComplaint from './modules/complaints_module/pages/TrackComplaint';
 import Login from './modules/complaints_module/pages/Login';
 import DashboardHome from './modules/dashboard_module/pages/DashboardHome';
@@ -34,6 +35,8 @@ function App() {
       setCurrentPage('request-verification');
     } else if (path === '/complaint') {
       setCurrentPage('complaint');
+    } else if (path === '/complaint-confirmation') {
+      setCurrentPage('complaint-confirmation');
     } else if (path === '/track-complaint') {
       setCurrentPage('track-complaint');
     } else if (path === '/login') {
@@ -61,6 +64,8 @@ function App() {
         return <RequestVerification />;
       case 'complaint':
         return <ComplaintForm verifiedEmail={verifiedEmail} />;
+      case 'complaint-confirmation':
+        return <ComplaintConfirmation />;
       case 'track-complaint':
         return <TrackComplaint />;
       case 'login':

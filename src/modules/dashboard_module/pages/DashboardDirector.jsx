@@ -181,7 +181,8 @@ export default function DashboardDirector() {
                 <tr>
                   <th style={{ width: 90 }}>ID</th>
                   <th>Business</th>
-                  <th style={{ width: 160 }}>Status</th>
+                  <th style={{ width: 240 }}>Status</th>
+                  <th style={{ width: 180 }}>Authenticity Level</th>
                   <th style={{ width: 200 }}>Submitted</th>
                   <th style={{ width: 220 }}>Actions</th>
                 </tr>
@@ -189,7 +190,7 @@ export default function DashboardDirector() {
               <tbody>
                 {filteredComplaints.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
                       {loading ? 'Loading…' : 'No records found.'}
                     </td>
                   </tr>
@@ -205,23 +206,28 @@ export default function DashboardDirector() {
                       <td>
                         <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
                       </td>
+                      <td>{c?.authenticity_level ?? '—'}</td>
                       <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
                       <td>
                         {tab === 'queue' ? (
                           <div className="dash-row-actions">
                             <button
                               type="button"
-                              className="dash-btn dash-btn-success"
+                              className="dash-btn dash-btn-success dash-btn-icon"
                               onClick={() => updateComplaintStatus(c.id, 'approved')}
+                              aria-label="Approve"
+                              title="Approve"
                             >
-                              Approve
+                              ✓
                             </button>
                             <button
                               type="button"
-                              className="dash-btn dash-btn-danger"
+                              className="dash-btn dash-btn-danger dash-btn-icon"
                               onClick={() => updateComplaintStatus(c.id, 'declined')}
+                              aria-label="Decline"
+                              title="Decline"
                             >
-                              Decline
+                              ✕
                             </button>
                           </div>
                         ) : (
