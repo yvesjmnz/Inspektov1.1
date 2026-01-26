@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { requestEmailVerification } from '../../../lib/api';
+import { supabase } from '../../../lib/supabase';
 import './EmailVerificationModal.css';
 
 export default function EmailVerificationModal({ isOpen, onClose }) {
@@ -8,6 +9,58 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [checkingToken, setCheckingToken] = useState(false);
+
+  // Check for valid token when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      checkForValidToken();
+    }
+  }, [isOpen]);
+
+  const checkForValidToken = async () => {
+    setCheckingToken(true);
+    try {
+      const emailInput = prompt('Enter your email to check for valid verification token:');
+      if (!emailInput) {
+        setCheckingToken(false);
+        return;
+      }
+
+      // Query email_verification_tokens table for valid tokens
+      const { data, error: queryError } = await supabase
+        .from('email_verification_tokens')
+        .select('email, expires_at, used_at')
+        .eq('email', emailInput.toLowerCase())
+        .is('used_at', null)
+        .order('expires_at', { ascending: false })
+        .limit(1);
+
+      if (queryError) {
+        setCheckingToken(false);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const token = data[0];
+        const expiresAt = new Date(token.expires_at);
+
+        // Check if token is still valid (not expired)
+        if (expiresAt > new Date()) {
+          // Valid token found, redirect to complaint form
+          window.location.href = `/complaint?email=${encodeURIComponent(emailInput)}`;
+          return;
+        }
+      }
+
+      // No valid token found, set email for verification request
+      setEmail(emailInput);
+    } catch (err) {
+      console.error('Token check error:', err);
+    } finally {
+      setCheckingToken(false);
+    }
+  };
 
   // Handle Escape key press
   useEffect(() => {

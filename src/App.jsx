@@ -115,6 +115,18 @@ function App() {
       } else if (path === '/request-verification') {
         setCurrentPage('request-verification');
       } else if (path === '/complaint') {
+        // Check for email parameter (from token verification)
+        const emailParam = params.get('email');
+
+        if (!mounted) return;
+
+        if (!emailParam) {
+          // No email parameter, redirect to request verification
+          window.location.href = '/request-verification';
+          return;
+        }
+
+        setVerifiedEmail(decodeURIComponent(emailParam));
         setCurrentPage('complaint');
       } else if (path === '/complaint-confirmation') {
         setCurrentPage('complaint-confirmation');

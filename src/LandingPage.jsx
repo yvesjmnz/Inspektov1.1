@@ -5,7 +5,8 @@ import './LandingPage.css';
 function LandingPage({ onOpenVerificationModal }) {
   const handleSubmitComplaint = (e) => {
     e.preventDefault();
-    onOpenVerificationModal();
+    // Navigate to request verification to get email token
+    window.location.href = '/request-verification';
   };
 
   return (

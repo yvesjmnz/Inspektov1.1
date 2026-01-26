@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, TileLayer } from 'react-leaflet';
 import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/complaints';
+import { supabase } from '../../../lib/supabase';
 import './ComplaintForm.css';
 
 export default function ComplaintForm({ verifiedEmail }) {
@@ -38,6 +39,8 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [proximityVerified, setProximityVerified] = useState(false);
+  const [proximityTag, setProximityTag] = useState(null);
 
   const primaryImageInputRef = useRef(null);
   const additionalImageInputRef = useRef(null);
@@ -88,6 +91,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   const selectBusiness = (business) => {
     setFormData((prev) => ({
       ...prev,
+      business_pk: business.business_pk,
       business_name: business.business_name,
       business_address: business.business_address,
     }));
@@ -234,28 +238,119 @@ export default function ComplaintForm({ verifiedEmail }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
-  const detectLocation = () => {
-    setError(null);
-
-    if (!navigator.geolocation) {
-      setError('Geolocation is not supported by this browser/device.');
+  const verifyBusinessProximity = async () => {
+    if (!formData.reporter_lat || !formData.reporter_lng) {
+      setError('Location not available.');
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
+    if (!formData.business_name) {
+      setError('Select a business first.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('verify-business-proximity', {
+        body: {
+          business_pk: formData.business_pk,
+          reporter_lat: formData.reporter_lat,
+          reporter_lng: formData.reporter_lng,
+          threshold_meters: 200,
+        },
+      });
+
+      // Fail-open: always allow continuation, but warn if far
+      if (invokeError || !data?.ok) {
+        // Verification failed, but allow continuation
+        setProximityTag('Verification Unavailable');
         setFormData((prev) => ({
           ...prev,
-          reporter_lat: pos.coords.latitude,
-          reporter_lng: pos.coords.longitude,
+          tags: [...new Set([...prev.tags, 'Verification Unavailable'])],
         }));
-      },
-      (err) => {
-        setError(err?.message || 'Unable to retrieve location.');
-      },
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
+        return;
+      }
+
+      const tag = data.tag;
+      setProximityTag(tag);
+      setFormData((prev) => ({
+        ...prev,
+        tags: [...new Set([...prev.tags, tag])],
+      }));
+
+      // Warn if far, but don't block
+      if (tag === 'Failed Location Verification') {
+        setError(
+          `You appear to be ${Math.round(data.distance_meters)}m away from the business. ` +
+          `You can still submit, but being far away may affect how your complaint is reviewed.`
+        );
+      }
+    } catch (err) {
+      // Fail-open: allow continuation on error
+      setProximityTag('Verification Unavailable');
+      setFormData((prev) => ({
+        ...prev,
+        tags: [...new Set([...prev.tags, 'Verification Unavailable'])],
+      }));
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const requestDeviceLocation = () => {
+    if (!('geolocation' in navigator)) {
+      setError('Geolocation is not supported by this browser/device.');
+      return Promise.resolve();
+    }
+
+    setError(null);
+    setLoading(true);
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+
+          setFormData((prev) => ({
+            ...prev,
+            reporter_lat: lat,
+            reporter_lng: lng,
+          }));
+
+          setLoading(false);
+          resolve();
+        },
+        (err) => {
+          const message =
+            err.code === err.PERMISSION_DENIED
+              ? 'Location permission was denied. Please enable it in your browser settings.'
+              : err.code === err.POSITION_UNAVAILABLE
+                ? 'Location is unavailable. Please try again.'
+                : 'Location request timed out. Please try again.';
+
+          setError(message);
+          setLoading(false);
+          resolve();
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      );
+    });
+  };
+
+  const detectLocation = async () => {
+    await requestDeviceLocation();
+    if (formData.reporter_lat && formData.reporter_lng) {
+      await verifyBusinessProximity();
+    }
+  };
+
+  useEffect(() => {
+    requestDeviceLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const goNext = () => {
     setError(null);
@@ -334,18 +429,16 @@ export default function ComplaintForm({ verifiedEmail }) {
 
       const created = await submitComplaint(complaintPayload);
 
-      // Call edge function for emails (best-effort)
+      // Call send-complaint-confirmation edge function (best-effort)
       try {
-        await fetch('/functions/v1/request-email-verification', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        await supabase.functions.invoke('send-complaint-confirmation', {
+          body: {
             email: formData.reporter_email,
-            complaint_id: created?.id,
-            type: 'complaint_submitted',
-          }),
+            complaintId: created?.id,
+          },
         });
-      } catch {
+      } catch (emailErr) {
+        console.error('Failed to send confirmation email:', emailErr);
         // ignore email errors here; submission is already successful
       }
 
@@ -439,7 +532,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                   }
                   className="form-input"
                   required
-                  disabled={!!verifiedEmail}
+                  disabled={true}
                 />
                 <div className="inline-note">We will send updates to this email address.</div>
               </div>
