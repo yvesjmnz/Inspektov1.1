@@ -41,6 +41,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [proximityVerified, setProximityVerified] = useState(false);
   const [proximityTag, setProximityTag] = useState(null);
+  const [locationCheckAttempted, setLocationCheckAttempted] = useState(false);
 
   const primaryImageInputRef = useRef(null);
   const additionalImageInputRef = useRef(null);
@@ -341,6 +342,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   };
 
   const detectLocation = async () => {
+    setLocationCheckAttempted(true);
     await requestDeviceLocation();
     if (formData.reporter_lat && formData.reporter_lng) {
       await verifyBusinessProximity();
@@ -558,29 +560,31 @@ export default function ComplaintForm({ verifiedEmail }) {
                 </div>
               </div>
 
-              <div className="form-group">
-                <label>Map Preview</label>
-                <div className="map-box">
-                  {formData.reporter_lat != null && formData.reporter_lng != null ? (
-                    <MapContainer
-                      center={[formData.reporter_lat, formData.reporter_lng]}
-                      zoom={18}
-                      style={{ height: '100%', width: '100%' }}
-                      scrollWheelZoom={false}
-                    >
-                      <TileLayer
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      />
-                      <Marker position={[formData.reporter_lat, formData.reporter_lng]} />
-                    </MapContainer>
-                  ) : (
-                    <div style={{ padding: 12, color: '#0f172a', fontWeight: 800 }}>
-                      Capture location to preview on map.
-                    </div>
-                  )}
+              {locationCheckAttempted && (
+                <div className="form-group">
+                  <label>Map Preview</label>
+                  <div className="map-box">
+                    {formData.reporter_lat != null && formData.reporter_lng != null ? (
+                      <MapContainer
+                        center={[formData.reporter_lat, formData.reporter_lng]}
+                        zoom={18}
+                        style={{ height: '100%', width: '100%' }}
+                        scrollWheelZoom={false}
+                      >
+                        <TileLayer
+                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        />
+                        <Marker position={[formData.reporter_lat, formData.reporter_lng]} />
+                      </MapContainer>
+                    ) : (
+                      <div style={{ padding: 12, color: '#0f172a', fontWeight: 800 }}>
+                        Location could not be captured. Please try again.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           ) : null}
 

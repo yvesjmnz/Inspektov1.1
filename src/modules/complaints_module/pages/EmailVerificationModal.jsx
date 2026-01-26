@@ -9,36 +9,21 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [checkingToken, setCheckingToken] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
 
-  // Check for valid token when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      checkForValidToken();
-    }
-  }, [isOpen]);
-
-  const checkForValidToken = async () => {
-    setCheckingToken(true);
+  const checkForValidToken = async (emailToCheck) => {
     try {
-      const emailInput = prompt('Enter your email to check for valid verification token:');
-      if (!emailInput) {
-        setCheckingToken(false);
-        return;
-      }
-
       // Query email_verification_tokens table for valid tokens
       const { data, error: queryError } = await supabase
         .from('email_verification_tokens')
         .select('email, expires_at, used_at')
-        .eq('email', emailInput.toLowerCase())
+        .eq('email', emailToCheck.toLowerCase())
         .is('used_at', null)
         .order('expires_at', { ascending: false })
         .limit(1);
 
       if (queryError) {
-        setCheckingToken(false);
-        return;
+        return false;
       }
 
       if (data && data.length > 0) {
@@ -47,18 +32,18 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
 
         // Check if token is still valid (not expired)
         if (expiresAt > new Date()) {
-          // Valid token found, redirect to complaint form
-          window.location.href = `/complaint?email=${encodeURIComponent(emailInput)}`;
-          return;
+          // Valid token found, show redirecting message then navigate
+          setRedirecting(true);
+          setTimeout(() => {
+            window.location.href = `/complaint?email=${encodeURIComponent(emailToCheck)}`;
+          }, 1500);
+          return true;
         }
       }
-
-      // No valid token found, set email for verification request
-      setEmail(emailInput);
+      return false;
     } catch (err) {
       console.error('Token check error:', err);
-    } finally {
-      setCheckingToken(false);
+      return false;
     }
   };
 
@@ -87,6 +72,15 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
     setLoading(true);
 
     try {
+      // Check for valid token first
+      const hasValidToken = await checkForValidToken(email);
+      
+      // If valid token found, checkForValidToken will redirect
+      if (hasValidToken) {
+        return;
+      }
+
+      // No valid token, send verification email
       await requestEmailVerification(email);
       setSuccess(true);
       setSubmitted(true);
@@ -126,7 +120,16 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
         </div>
         <div className="modal-divider"></div>
 
-        {submitted && success ? (
+        {redirecting ? (
+          <div className="modal-body success">
+            <div className="success-icon">✓</div>
+            <h3>Great! We Found Your Verification</h3>
+            <p className="success-email">Taking you to the complaint form...</p>
+            <p className="info-text">
+              We found a valid verification for <strong>{email}</strong>. You're all set to submit your complaint.
+            </p>
+          </div>
+        ) : submitted && success ? (
           <div className="modal-body success">
             <div className="success-icon">✓</div>
             <h3>Verification Email Sent</h3>
