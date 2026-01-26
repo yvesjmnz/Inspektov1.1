@@ -30,6 +30,9 @@ export default function DashboardDirector() {
   const [complaints, setComplaints] = useState([]);
   const [search, setSearch] = useState('');
 
+  const [previewImage, setPreviewImage] = useState(null);
+  const closePreview = () => setPreviewImage(null);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = '/login';
@@ -42,7 +45,7 @@ export default function DashboardDirector() {
     try {
       let query = supabase
         .from('complaints')
-        .select('*')
+        .select('id, status, created_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls')
         .order('created_at', { ascending: false })
         .limit(200);
 
@@ -228,13 +231,14 @@ export default function DashboardDirector() {
                   <th style={{ width: 240 }}>Status</th>
                   <th style={{ width: 180 }}>Authenticity Level</th>
                   <th style={{ width: 200 }}>Submitted</th>
-                  <th style={{ width: 220 }}>Actions</th>
+                  <th style={{ width: 280 }}>Evidence</th>
+                  {tab === 'queue' ? <th style={{ width: 220 }}>Actions</th> : null}
                 </tr>
               </thead>
               <tbody>
                 {filteredComplaints.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
+                    <td colSpan={tab === 'queue' ? 7 : 6} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
                       {loading ? 'Loading…' : 'No records found.'}
                     </td>
                   </tr>
@@ -253,7 +257,48 @@ export default function DashboardDirector() {
                       <td>{c?.authenticity_level ?? '—'}</td>
                       <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
                       <td>
-                        {tab === 'queue' ? (
+                        <div style={{ display: 'grid', gap: 8 }}>
+                          {c?.complaint_description ? (
+                            <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                              {String(c.complaint_description).slice(0, 220)}
+                              {String(c.complaint_description).length > 220 ? '…' : ''}
+                            </div>
+                          ) : (
+                            <div style={{ color: '#64748b', fontWeight: 700 }}>No description</div>
+                          )}
+
+                          {Array.isArray(c?.image_urls) && c.image_urls.length > 0 ? (
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              {c.image_urls.slice(0, 3).map((url) => (
+                                <img
+                                  key={url}
+                                  src={url}
+                                  alt="Evidence"
+                                  onClick={() => setPreviewImage(url)}
+                                  style={{
+                                    width: 68,
+                                    height: 46,
+                                    objectFit: 'cover',
+                                    borderRadius: 10,
+                                    border: '1px solid #e2e8f0',
+                                    cursor: 'pointer',
+                                  }}
+                                  loading="lazy"
+                                />
+                              ))}
+                              {c.image_urls.length > 3 ? (
+                                <span style={{ color: '#64748b', fontWeight: 800, alignSelf: 'center' }}>
+                                  +{c.image_urls.length - 3} more
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
+                          )}
+                        </div>
+                      </td>
+                      {tab === 'queue' ? (
+                        <td>
                           <div className="dash-row-actions">
                             <button
                               type="button"
@@ -276,10 +321,8 @@ export default function DashboardDirector() {
                               ✕
                             </button>
                           </div>
-                        ) : (
-                          <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
-                        )}
-                      </td>
+                        </td>
+                      ) : null}
                     </tr>
                   ))
                 )}
@@ -292,6 +335,21 @@ export default function DashboardDirector() {
           </div>
         </section>
       </main>
+      {/* Image Preview Overlay */}
+      {previewImage ? (
+        <div
+          className="image-overlay"
+          onClick={closePreview}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="overlay-content" onClick={(e) => e.stopPropagation()}>
+            <button className="overlay-close" onClick={closePreview} aria-label="Close">&times;</button>
+            <img src={previewImage} alt="Evidence Preview" className="overlay-full-img" />
+          </div>
+        </div>
+      ) : null}
+
       <Footer />
     </div>
   );
