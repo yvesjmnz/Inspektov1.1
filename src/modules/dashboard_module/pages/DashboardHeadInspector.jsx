@@ -32,50 +32,27 @@ export default function DashboardHeadInspector() {
   const [creatingForId, setCreatingForId] = useState(null);
   const [toast, setToast] = useState('');
 
-  const [inspectors, setInspectors] = useState([]);
-  const [selectedInspectorByComplaintId, setSelectedInspectorByComplaintId] = useState({});
-  const [assignmentsByComplaintId, setAssignmentsByComplaintId] = useState({});
-  const [assigningForComplaintId, setAssigningForComplaintId] = useState(null);
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = '/login';
   };
 
-  const loadInspectors = async () => {
-    setError('');
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, role')
-        .eq('role', 'inspector')
-        .order('full_name', { ascending: true });
-
-      if (error) throw error;
-      setInspectors(data || []);
-    } catch (e) {
-      setError(e?.message || 'Failed to load inspectors.');
-      setInspectors([]);
-    }
-  };
-
+  
   const loadApprovedComplaints = async () => {
     setError('');
     setLoading(true);
 
     try {
       let query = supabase
-        .from('complaints')
+        .from('v_head_inspector_queue')
         .select('*')
-        .in('status', ['approved', 'Approved'])
         .order('approved_at', { ascending: false })
-        .order('created_at', { ascending: false })
         .limit(200);
 
       const searchVal = search.trim();
       if (searchVal) {
         query = query.or(
-          `business_name.ilike.%${searchVal}%,business_address.ilike.%${searchVal}%,reporter_email.ilike.%${searchVal}%`
+          `business_name.ilike.%${searchVal}%,business_address.ilike.%${searchVal}%,complaint_id::text.ilike.%${searchVal}%`
         );
       }
 
@@ -91,25 +68,9 @@ export default function DashboardHeadInspector() {
     }
   };
 
-  const loadAssignmentsForComplaint = async (complaintId) => {
-    const missionOrderId = await getOrCreateMissionOrderId(complaintId);
-
-    const { data, error } = await supabase
-      .from('mission_order_assignments')
-      .select('id, mission_order_id, inspector_id, assigned_at')
-      .eq('mission_order_id', missionOrderId)
-      .order('assigned_at', { ascending: true });
-
-    if (error) throw error;
-
-    const ids = (data || []).map((row) => row.inspector_id);
-    setAssignmentsByComplaintId((prev) => ({ ...prev, [complaintId]: ids }));
-    return { missionOrderId, inspectorIds: ids };
-  };
-
+  
   useEffect(() => {
     loadApprovedComplaints();
-    loadInspectors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -166,32 +127,33 @@ export default function DashboardHeadInspector() {
     setCreatingForId(complaintId);
 
     try {
-      const complaint = complaints.find((x) => x.id === complaintId);
-      if (!complaint) throw new Error('Complaint not found in current list. Please refresh and try again.');
+      // Using the view, rows are keyed by complaint_id (not id)
+      const row = complaints.find((x) => x.complaint_id === complaintId);
+      if (!row) throw new Error('Complaint not found in current list. Please refresh and try again.');
+
+      // If there is already a mission order, just open it.
+      if (row.mission_order_id) {
+        window.location.assign(`/mission-order?id=${row.mission_order_id}`);
+        return;
+      }
 
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
       const userId = userData?.user?.id;
       if (!userId) throw new Error('Not authenticated. Please login again.');
 
-      // Prevent duplicates: if a mission order already exists for this complaint, do not create.
-      const { data: existing, error: existingError } = await supabase
-        .from('mission_orders')
-        .select('id, status, created_at')
-        .eq('complaint_id', complaintId)
-        .order('created_at', { ascending: false })
-        .limit(1);
+      // Fetch the complaint details from the source table to build MO content.
+      const { data: complaint, error: complaintError } = await supabase
+        .from('complaints')
+        .select('id, business_name, business_address, complaint_description')
+        .eq('id', complaintId)
+        .single();
 
-      if (existingError) throw existingError;
+      if (complaintError) throw complaintError;
 
-      if (existing && existing.length > 0) {
-        window.location.assign(`/mission-order?id=${existing[0].id}`);
-        return;
-      }
-
-      const businessName = complaint.business_name || 'N/A';
-      const businessAddress = complaint.business_address || 'N/A';
-      const complaintDesc = escapeHtml(complaint.complaint_description || '');
+      const businessName = complaint?.business_name || row.business_name || 'N/A';
+      const businessAddress = complaint?.business_address || row.business_address || 'N/A';
+      const complaintDesc = escapeHtml(complaint?.complaint_description || '');
 
       const title = `Mission Order - ${businessName}`;
       const content = `<h2 style="text-align:center;">MISSION ORDER</h2>
@@ -233,140 +195,13 @@ export default function DashboardHeadInspector() {
     }
   };
 
-  const assignInspector = async (complaintId) => {
-    setError('');
-    setToast('');
-
-    const inspectorId = selectedInspectorByComplaintId[complaintId];
-    if (!inspectorId) {
-      setError('Please select an inspector first.');
-      return;
-    }
-
-    setAssigningForComplaintId(complaintId);
-
-    try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      const userId = userData?.user?.id;
-      if (!userId) throw new Error('Not authenticated. Please login again.');
-
-      const missionOrderId = await getOrCreateMissionOrderId(complaintId);
-
-      // Prevent duplicate assignment of the same inspector to the same mission order
-      const { data: existing, error: existingError } = await supabase
-        .from('mission_order_assignments')
-        .select('id')
-        .eq('mission_order_id', missionOrderId)
-        .eq('inspector_id', inspectorId)
-        .limit(1);
-
-      if (existingError) throw existingError;
-      if (existing && existing.length > 0) {
-        setToast('This inspector is already assigned to this mission order.');
-        return;
-      }
-
-      const { error: insertError } = await supabase
-        .from('mission_order_assignments')
-        .insert([
-          {
-            mission_order_id: missionOrderId,
-            inspector_id: inspectorId,
-            assigned_by: userId,
-            // status default: 'assigned'
-          },
-        ]);
-
-      if (insertError) throw insertError;
-
-      // Refresh tags for this complaint
-      await loadAssignmentsForComplaint(complaintId);
-
-      // Clear selection so user can quickly add more
-      setSelectedInspectorByComplaintId((prev) => ({ ...prev, [complaintId]: '' }));
-
-      const selected = inspectors.find((i) => i.id === inspectorId);
-      setToast(`Assigned ${selected?.full_name || 'inspector'} to mission order.`);
-    } catch (e) {
-      setError(e?.message || 'Failed to assign inspector.');
-    } finally {
-      setAssigningForComplaintId(null);
-    }
-  };
-
-  const unassignInspector = async (complaintId, inspectorId) => {
-    setError('');
-    setToast('');
-    setAssigningForComplaintId(complaintId);
-
-    try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      const userId = userData?.user?.id;
-      if (!userId) throw new Error('Not authenticated. Please login again.');
-
-      // Find mission order id without creating a new one if it doesn't exist.
-      const { data: existingMo, error: existingMoError } = await supabase
-        .from('mission_orders')
-        .select('id')
-        .eq('complaint_id', complaintId)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (existingMoError) throw existingMoError;
-      if (!existingMo || existingMo.length === 0) {
-        // Nothing to unassign from.
-        setAssignmentsByComplaintId((prev) => ({ ...prev, [complaintId]: [] }));
-        return;
-      }
-
-      const missionOrderId = existingMo[0].id;
-
-      const { data: deletedRows, error: delError } = await supabase
-        .from('mission_order_assignments')
-        .delete()
-        .eq('mission_order_id', missionOrderId)
-        .eq('inspector_id', inspectorId)
-        .select('id');
-
-      if (delError) throw delError;
-
-      // Update UI immediately even if the DELETE policy blocks returning rows.
-      setAssignmentsByComplaintId((prev) => {
-        const current = prev[complaintId] || [];
-        return { ...prev, [complaintId]: current.filter((id) => id !== inspectorId) };
-      });
-
-      // Re-fetch from DB to stay consistent.
-      try {
-        await loadAssignmentsForComplaint(complaintId);
-      } catch (_e) {
-        // ignore (will still show optimistic state)
-      }
-
-      // If nothing was deleted, surface it as an error (common with missing DELETE RLS).
-      if (deletedRows && Array.isArray(deletedRows) && deletedRows.length === 0) {
-        throw new Error(
-          'Remove failed: the database did not delete any rows. This is usually caused by a missing DELETE row-level security policy for mission_order_assignments.'
-        );
-      }
-
-      const selected = inspectors.find((i) => i.id === inspectorId);
-      setToast(`Removed ${selected?.full_name || 'inspector'} from mission order.`);
-    } catch (e) {
-      setError(e?.message || 'Failed to remove inspector.');
-    } finally {
-      setAssigningForComplaintId(null);
-    }
-  };
-
+  
   const filteredComplaints = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return complaints;
 
-    // Also allow filtering by UUID fragments
-    return complaints.filter((c) => String(c?.id ?? '').toLowerCase().includes(q));
+    // View rows use complaint_id
+    return complaints.filter((c) => String(c?.complaint_id ?? '').toLowerCase().includes(q));
   }, [complaints, search]);
 
   return (
@@ -413,7 +248,7 @@ export default function DashboardHeadInspector() {
                   <th style={{ width: 200 }}>Approved</th>
                   <th style={{ width: 200 }}>Submitted</th>
                   <th style={{ width: 220 }}>Mission Order</th>
-                  <th style={{ width: 260 }}>Assign Inspector</th>
+                  <th style={{ width: 260 }}>Inspectors Assigned</th>
                 </tr>
               </thead>
               <tbody>
@@ -425,8 +260,8 @@ export default function DashboardHeadInspector() {
                   </tr>
                 ) : (
                   filteredComplaints.map((c) => (
-                    <tr key={c.id}>
-                      <td title={c.id}>{String(c.id).slice(0, 8)}…</td>
+                    <tr key={c.complaint_id}>
+                      <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
                       <td>
                         <div className="dash-cell-title">{c.business_name || '—'}</div>
                         <div className="dash-cell-sub">{c.business_address || ''}</div>
@@ -441,95 +276,32 @@ export default function DashboardHeadInspector() {
                         <button
                           type="button"
                           className="dash-btn"
-                          onClick={() => createMissionOrder(c.id)}
-                          disabled={creatingForId === c.id}
+                          onClick={() => createMissionOrder(c.complaint_id)}
+                          disabled={creatingForId === c.complaint_id}
                         >
-                          {creatingForId === c.id ? 'Creating…' : 'Create MO'}
+                          {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
                         </button>
                       </td>
                       <td>
-                        <div className="dash-assign" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          <div
-                            style={{
-                              display: 'flex',
-                              gap: 8,
-                              flexWrap: 'wrap',
-                              alignItems: 'center',
-                              minHeight: 30,
-                            }}
-                          >
-                            {(assignmentsByComplaintId[c.id] || []).map((inspectorId) => {
-                              const ins = inspectors.find((x) => x.id === inspectorId);
-                              const label = ins?.full_name || inspectorId;
-                              return (
-                                <button
-                                  key={inspectorId}
-                                  type="button"
-                                  className="dash-btn"
-                                  title="Click to remove"
-                                  onClick={async () => {
-                                    // If we don't have assignments loaded yet, load first.
-                                    if (!assignmentsByComplaintId[c.id]) {
-                                      try {
-                                        await loadAssignmentsForComplaint(c.id);
-                                      } catch (_e) {
-                                        // ignore; error state will be shown
-                                      }
-                                    }
-                                    await unassignInspector(c.id, inspectorId);
-                                  }}
-                                  disabled={assigningForComplaintId === c.id}
-                                  style={{
-                                    padding: '6px 10px',
-                                    borderRadius: 999,
-                                    fontWeight: 700,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 8,
-                                  }}
-                                >
-                                  <span>{label}</span>
-                                  <span aria-hidden="true" style={{ fontWeight: 900 }}>×</span>
-                                </button>
-                              );
-                            })}
-
-                                                      </div>
-
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <select
-                              className="dash-select"
-                              value={selectedInspectorByComplaintId[c.id] || ''}
-                              onChange={(e) =>
-                                setSelectedInspectorByComplaintId((prev) => ({ ...prev, [c.id]: e.target.value }))
-                              }
-                            >
-                              <option value="">Select inspector…</option>
-                              {inspectors.map((ins) => (
-                                <option key={ins.id} value={ins.id}>
-                                  {ins.full_name || ins.id}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="button"
-                              className="dash-btn"
-                              onClick={async () => {
-                                // ensure chips are loaded before adding (so UI updates immediately)
-                                try {
-                                  if (!assignmentsByComplaintId[c.id]) {
-                                    await loadAssignmentsForComplaint(c.id);
-                                  }
-                                } catch (_e) {
-                                  // ignore
-                                }
-                                await assignInspector(c.id);
-                              }}
-                              disabled={assigningForComplaintId === c.id}
-                            >
-                              {assigningForComplaintId === c.id ? 'Assigning…' : 'Add'}
-                            </button>
-                          </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
+                          {(c.inspector_names || []).length === 0 ? (
+                            <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                          ) : (
+                            (c.inspector_names || []).map((name, idx) => (
+                              <span
+                                key={`${c.complaint_id}-${idx}`}
+                                style={{
+                                  padding: '6px 10px',
+                                  borderRadius: 999,
+                                  fontWeight: 800,
+                                  border: '1px solid #e2e8f0',
+                                  background: '#f8fafc',
+                                }}
+                              >
+                                {name}
+                              </span>
+                            ))
+                          )}
                         </div>
                       </td>
                     </tr>
