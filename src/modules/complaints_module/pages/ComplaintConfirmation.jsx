@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
 import './ComplaintConfirmation.css';
@@ -5,6 +6,16 @@ import './ComplaintConfirmation.css';
 export default function ComplaintConfirmation() {
   const params = new URLSearchParams(window.location.search);
   const id = params.get('id');
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyId = () => {
+    if (id) {
+      navigator.clipboard.writeText(id).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      });
+    }
+  };
 
   return (
     <div className="confirm-container">
@@ -19,7 +30,16 @@ export default function ComplaintConfirmation() {
 
           <div className="confirm-id">
             <div className="confirm-id-label">Complaint ID</div>
-            <div className="confirm-id-value">{id || '—'}</div>
+            <div className="confirm-id-wrapper">
+              <div className="confirm-id-value">{id || '—'}</div>
+              <button 
+                className="confirm-copy-btn" 
+                onClick={handleCopyId}
+                title="Copy Complaint ID"
+              >
+                {copied ? '✓ Copied' : 'Copy'}
+              </button>
+            </div>
           </div>
 
           <div className="confirm-actions">

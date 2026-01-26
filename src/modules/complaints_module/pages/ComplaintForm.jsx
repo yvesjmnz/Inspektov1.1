@@ -546,8 +546,15 @@ export default function ComplaintForm({ verifiedEmail }) {
               <div className="form-group">
                 <label>Device Location</label>
                 <div className="file-upload">
-                  <button type="button" className="btn btn-secondary" onClick={detectLocation} disabled={loading}>
-                    Use My Current Location
+                  <button type="button" className={`btn btn-secondary ${loading ? 'btn-loading' : ''}`} onClick={detectLocation} disabled={loading}>
+                    {loading ? (
+                      <>
+                        <span className="spinner" />
+                        Checking…
+                      </>
+                    ) : (
+                      'Check My Location'
+                    )}
                   </button>
                   {formData.reporter_lat != null && formData.reporter_lng != null ? (
                     <span className="small-pill">✓ Location captured</span>
@@ -556,7 +563,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                   )}
                 </div>
                 <div className="inline-note">
-                  You must confirm your device location. Map preview requires Leaflet to be installed.
+                  You must confirm your device location. If the pin on the map doesn't match where you are, click "Check My Location" again to update it.
                 </div>
               </div>
 
