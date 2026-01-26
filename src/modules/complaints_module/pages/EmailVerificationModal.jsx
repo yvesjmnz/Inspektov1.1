@@ -60,12 +60,6 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
     }
   };
 
-  const handleResendEmail = () => {
-    setSubmitted(false);
-    setSuccess(false);
-    setEmail('');
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -87,12 +81,6 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
             <p className="info-text">
               Please check your email and click the verification link to proceed with your complaint submission. The link expires in 30 minutes.
             </p>
-            <button
-              onClick={handleResendEmail}
-              className="btn btn-secondary btn-large"
-            >
-              Send Another Email
-            </button>
           </div>
         ) : (
           <div className="modal-body">
