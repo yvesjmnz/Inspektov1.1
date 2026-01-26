@@ -34,6 +34,7 @@ export default function DashboardHeadInspector() {
 
   const [inspectors, setInspectors] = useState([]);
   const [selectedInspectorByComplaintId, setSelectedInspectorByComplaintId] = useState({});
+  const [assignmentsByComplaintId, setAssignmentsByComplaintId] = useState({});
   const [assigningForComplaintId, setAssigningForComplaintId] = useState(null);
 
   const handleLogout = async () => {
@@ -88,6 +89,22 @@ export default function DashboardHeadInspector() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadAssignmentsForComplaint = async (complaintId) => {
+    const missionOrderId = await getOrCreateMissionOrderId(complaintId);
+
+    const { data, error } = await supabase
+      .from('mission_order_assignments')
+      .select('id, mission_order_id, inspector_id, assigned_at')
+      .eq('mission_order_id', missionOrderId)
+      .order('assigned_at', { ascending: true });
+
+    if (error) throw error;
+
+    const ids = (data || []).map((row) => row.inspector_id);
+    setAssignmentsByComplaintId((prev) => ({ ...prev, [complaintId]: ids }));
+    return { missionOrderId, inspectorIds: ids };
   };
 
   useEffect(() => {
@@ -263,10 +280,82 @@ export default function DashboardHeadInspector() {
 
       if (insertError) throw insertError;
 
+      // Refresh tags for this complaint
+      await loadAssignmentsForComplaint(complaintId);
+
+      // Clear selection so user can quickly add more
+      setSelectedInspectorByComplaintId((prev) => ({ ...prev, [complaintId]: '' }));
+
       const selected = inspectors.find((i) => i.id === inspectorId);
       setToast(`Assigned ${selected?.full_name || 'inspector'} to mission order.`);
     } catch (e) {
       setError(e?.message || 'Failed to assign inspector.');
+    } finally {
+      setAssigningForComplaintId(null);
+    }
+  };
+
+  const unassignInspector = async (complaintId, inspectorId) => {
+    setError('');
+    setToast('');
+    setAssigningForComplaintId(complaintId);
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error('Not authenticated. Please login again.');
+
+      // Find mission order id without creating a new one if it doesn't exist.
+      const { data: existingMo, error: existingMoError } = await supabase
+        .from('mission_orders')
+        .select('id')
+        .eq('complaint_id', complaintId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (existingMoError) throw existingMoError;
+      if (!existingMo || existingMo.length === 0) {
+        // Nothing to unassign from.
+        setAssignmentsByComplaintId((prev) => ({ ...prev, [complaintId]: [] }));
+        return;
+      }
+
+      const missionOrderId = existingMo[0].id;
+
+      const { data: deletedRows, error: delError } = await supabase
+        .from('mission_order_assignments')
+        .delete()
+        .eq('mission_order_id', missionOrderId)
+        .eq('inspector_id', inspectorId)
+        .select('id');
+
+      if (delError) throw delError;
+
+      // Update UI immediately even if the DELETE policy blocks returning rows.
+      setAssignmentsByComplaintId((prev) => {
+        const current = prev[complaintId] || [];
+        return { ...prev, [complaintId]: current.filter((id) => id !== inspectorId) };
+      });
+
+      // Re-fetch from DB to stay consistent.
+      try {
+        await loadAssignmentsForComplaint(complaintId);
+      } catch (_e) {
+        // ignore (will still show optimistic state)
+      }
+
+      // If nothing was deleted, surface it as an error (common with missing DELETE RLS).
+      if (deletedRows && Array.isArray(deletedRows) && deletedRows.length === 0) {
+        throw new Error(
+          'Remove failed: the database did not delete any rows. This is usually caused by a missing DELETE row-level security policy for mission_order_assignments.'
+        );
+      }
+
+      const selected = inspectors.find((i) => i.id === inspectorId);
+      setToast(`Removed ${selected?.full_name || 'inspector'} from mission order.`);
+    } catch (e) {
+      setError(e?.message || 'Failed to remove inspector.');
     } finally {
       setAssigningForComplaintId(null);
     }
@@ -359,29 +448,88 @@ export default function DashboardHeadInspector() {
                         </button>
                       </td>
                       <td>
-                        <div className="dash-assign">
-                          <select
-                            className="dash-select"
-                            value={selectedInspectorByComplaintId[c.id] || ''}
-                            onChange={(e) =>
-                              setSelectedInspectorByComplaintId((prev) => ({ ...prev, [c.id]: e.target.value }))
-                            }
+                        <div className="dash-assign" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div
+                            style={{
+                              display: 'flex',
+                              gap: 8,
+                              flexWrap: 'wrap',
+                              alignItems: 'center',
+                              minHeight: 30,
+                            }}
                           >
-                            <option value="">Select inspector…</option>
-                            {inspectors.map((ins) => (
-                              <option key={ins.id} value={ins.id}>
-                                {ins.full_name || ins.id}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            className="dash-btn"
-                            onClick={() => assignInspector(c.id)}
-                            disabled={assigningForComplaintId === c.id}
-                          >
-                            {assigningForComplaintId === c.id ? 'Assigning…' : 'Assign'}
-                          </button>
+                            {(assignmentsByComplaintId[c.id] || []).map((inspectorId) => {
+                              const ins = inspectors.find((x) => x.id === inspectorId);
+                              const label = ins?.full_name || inspectorId;
+                              return (
+                                <button
+                                  key={inspectorId}
+                                  type="button"
+                                  className="dash-btn"
+                                  title="Click to remove"
+                                  onClick={async () => {
+                                    // If we don't have assignments loaded yet, load first.
+                                    if (!assignmentsByComplaintId[c.id]) {
+                                      try {
+                                        await loadAssignmentsForComplaint(c.id);
+                                      } catch (_e) {
+                                        // ignore; error state will be shown
+                                      }
+                                    }
+                                    await unassignInspector(c.id, inspectorId);
+                                  }}
+                                  disabled={assigningForComplaintId === c.id}
+                                  style={{
+                                    padding: '6px 10px',
+                                    borderRadius: 999,
+                                    fontWeight: 700,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                  }}
+                                >
+                                  <span>{label}</span>
+                                  <span aria-hidden="true" style={{ fontWeight: 900 }}>×</span>
+                                </button>
+                              );
+                            })}
+
+                                                      </div>
+
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <select
+                              className="dash-select"
+                              value={selectedInspectorByComplaintId[c.id] || ''}
+                              onChange={(e) =>
+                                setSelectedInspectorByComplaintId((prev) => ({ ...prev, [c.id]: e.target.value }))
+                              }
+                            >
+                              <option value="">Select inspector…</option>
+                              {inspectors.map((ins) => (
+                                <option key={ins.id} value={ins.id}>
+                                  {ins.full_name || ins.id}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              className="dash-btn"
+                              onClick={async () => {
+                                // ensure chips are loaded before adding (so UI updates immediately)
+                                try {
+                                  if (!assignmentsByComplaintId[c.id]) {
+                                    await loadAssignmentsForComplaint(c.id);
+                                  }
+                                } catch (_e) {
+                                  // ignore
+                                }
+                                await assignInspector(c.id);
+                              }}
+                              disabled={assigningForComplaintId === c.id}
+                            >
+                              {assigningForComplaintId === c.id ? 'Assigning…' : 'Add'}
+                            </button>
+                          </div>
                         </div>
                       </td>
                     </tr>

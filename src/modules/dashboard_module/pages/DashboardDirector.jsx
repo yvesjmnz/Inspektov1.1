@@ -100,28 +100,72 @@ export default function DashboardDirector() {
 
   const updateComplaintStatus = async (complaintId, newStatus) => {
     setError('');
+    setLoading(true);
+
     try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+
+      const user = userData?.user;
+      if (!user) {
+        throw new Error('You must be logged in to perform this action.');
+      }
+
+      const status = String(newStatus).toLowerCase();
+      const nowIso = new Date().toISOString();
+
+      /**
+       * complaints table audit columns:
+       * - approved_by uuid
+       * - approved_at timestamptz
+       * - declined_by uuid
+       * - declined_at timestamptz
+       * - updated_at timestamptz (default now())
+       */
+      const patch = { status };
+
+      if (status === 'approved') {
+        patch.approved_by = user.id;
+        patch.approved_at = nowIso;
+        // clear decline columns if previously declined
+        patch.declined_by = null;
+        patch.declined_at = null;
+      } else if (status === 'declined') {
+        patch.declined_by = user.id;
+        patch.declined_at = nowIso;
+        // clear approve columns if previously approved
+        patch.approved_by = null;
+        patch.approved_at = null;
+      }
+
+      // Explicitly touch updated_at to guarantee it changes on update.
+      patch.updated_at = nowIso;
+
       const { error } = await supabase
         .from('complaints')
-        .update({ status: newStatus })
+        .update(patch)
         .eq('id', complaintId);
 
       if (error) throw error;
 
       // Optimistic update
       setComplaints((prev) =>
-        prev.map((c) => (c.id === complaintId ? { ...c, status: newStatus } : c))
+        prev.map((c) => (c.id === complaintId ? { ...c, ...patch } : c))
       );
 
       // If in queue, remove items that are no longer in review state
       if (tab === 'queue') {
-        setComplaints((prev) => prev.filter((c) => {
-          if (c.id !== complaintId) return true;
-          return ['Submitted', 'Pending', 'New'].includes(String(newStatus));
-        }));
+        setComplaints((prev) =>
+          prev.filter((c) => {
+            if (c.id !== complaintId) return true;
+            return ['submitted', 'pending', 'new'].includes(String(status));
+          })
+        );
       }
     } catch (e) {
       setError(e?.message || 'Failed to update status.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -215,6 +259,7 @@ export default function DashboardDirector() {
                               type="button"
                               className="dash-btn dash-btn-success dash-btn-icon"
                               onClick={() => updateComplaintStatus(c.id, 'approved')}
+                              disabled={loading}
                               aria-label="Approve"
                               title="Approve"
                             >
@@ -224,6 +269,7 @@ export default function DashboardDirector() {
                               type="button"
                               className="dash-btn dash-btn-danger dash-btn-icon"
                               onClick={() => updateComplaintStatus(c.id, 'declined')}
+                              disabled={loading}
                               aria-label="Decline"
                               title="Decline"
                             >
