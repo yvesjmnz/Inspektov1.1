@@ -30,6 +30,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [facingMode, setFacingMode] = useState('environment'); // 'user' | 'environment'
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const cameraStartSeqRef = useRef(0);
 
   // Step E: additional image evidence
   const [additionalImages, setAdditionalImages] = useState([]);
@@ -137,6 +138,11 @@ export default function ComplaintForm({ verifiedEmail }) {
       return;
     }
 
+    // Cancellation / race protection: if the video element unmounts (step changes, camera closes)
+    // while getUserMedia/play is in-flight, browsers can throw:
+    // "The play() request was interrupted because the media was removed from the document"
+    const seq = ++cameraStartSeqRef.current;
+
     setCameraBusy(true);
     try {
       stopCamera();
@@ -146,25 +152,93 @@ export default function ComplaintForm({ verifiedEmail }) {
         audio: false,
       });
 
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      // If a newer start attempt happened, abandon this one and release the stream.
+      if (seq !== cameraStartSeqRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
       }
 
-      setCameraOpen(true);
+      streamRef.current = stream;
+
+      const videoEl = videoRef.current;
+      if (!videoEl) return;
+
+      // Ensure attributes are set both declaratively and imperatively for best compatibility.
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.autoplay = true;
+
+      videoEl.srcObject = stream;
+
+      // Wait until we have actual frame data before attempting play.
+      if (videoEl.readyState < 2) {
+        await new Promise((resolve) => {
+          const onLoaded = () => {
+            videoEl.removeEventListener('loadeddata', onLoaded);
+            resolve();
+          };
+          videoEl.addEventListener('loadeddata', onLoaded);
+        });
+      }
+
+      // Abort if camera was closed/unmounted while waiting.
+      if (seq !== cameraStartSeqRef.current || !videoRef.current) return;
+
+      try {
+        await videoEl.play();
+      } catch (playErr) {
+        // If the element was removed, ignore; otherwise surface a helpful message.
+        const msg = String(playErr?.message || playErr || '');
+        if (!msg.includes('media was removed from the document')) {
+          setCameraError('Unable to start camera preview. Please tap Open Camera again.');
+          console.warn('video.play() failed:', playErr);
+        }
+      }
+
+      if (seq === cameraStartSeqRef.current) {
+        setCameraOpen(true);
+      }
     } catch (e) {
-      setCameraError(e?.message || 'Unable to access camera. Please allow camera permission.');
-      setCameraOpen(false);
+      if (seq === cameraStartSeqRef.current) {
+        setCameraError(e?.message || 'Unable to access camera. Please allow camera permission.');
+        setCameraOpen(false);
+      }
     } finally {
-      setCameraBusy(false);
+      if (seq === cameraStartSeqRef.current) {
+        setCameraBusy(false);
+      }
     }
   };
 
   const closeCamera = () => {
+    // Invalidate any in-flight startCamera() so it won't call play() after unmount/close.
+    cameraStartSeqRef.current += 1;
+
     stopCamera();
+
+    // Detach stream from the element (helps some browsers release the camera cleanly)
+    if (videoRef.current) {
+      try {
+        videoRef.current.srcObject = null;
+      } catch {
+        // ignore
+      }
+    }
+
     setCameraOpen(false);
+  };
+
+  // Start the camera reliably by ensuring the preview element is mounted first.
+  // Some browsers require the <video> to exist before setting srcObject/playing,
+  // otherwise the first attempt can produce a blank preview until retried.
+  const openCameraFlow = async () => {
+    setCameraError('');
+    setCameraOpen(true);
+
+    // Wait a tick so React mounts the <video> element.
+    await new Promise((r) => setTimeout(r, 0));
+
+    await startCamera(facingMode);
   };
 
   const switchCamera = async () => {
@@ -239,8 +313,36 @@ export default function ComplaintForm({ verifiedEmail }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
-  const verifyBusinessProximity = async () => {
-    if (!formData.reporter_lat || !formData.reporter_lng) {
+  useEffect(() => {
+    // Optional auto-start: once the user enters Step 3 and opens the camera,
+    // ensure the stream is attached after the video element mounts.
+    if (step !== 3) return;
+    if (!cameraOpen) return;
+
+    let cancelled = false;
+
+    (async () => {
+      // Wait a tick for mount/relayout.
+      await new Promise((r) => setTimeout(r, 0));
+      if (cancelled) return;
+
+      // If there is no active stream yet, start it.
+      if (!streamRef.current) {
+        await startCamera(facingMode);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, cameraOpen]);
+
+  const verifyBusinessProximity = async (coords) => {
+    const lat = coords?.lat ?? formData.reporter_lat;
+    const lng = coords?.lng ?? formData.reporter_lng;
+
+    if (lat == null || lng == null) {
       setError('Location not available.');
       return;
     }
@@ -257,15 +359,14 @@ export default function ComplaintForm({ verifiedEmail }) {
       const { data, error: invokeError } = await supabase.functions.invoke('verify-business-proximity', {
         body: {
           business_pk: formData.business_pk,
-          reporter_lat: formData.reporter_lat,
-          reporter_lng: formData.reporter_lng,
+          reporter_lat: lat,
+          reporter_lng: lng,
           threshold_meters: 200,
         },
       });
 
       // Fail-open: always allow continuation, but warn if far
       if (invokeError || !data?.ok) {
-        // Verification failed, but allow continuation
         setProximityTag('Verification Unavailable');
         setFormData((prev) => ({
           ...prev,
@@ -303,7 +404,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   const requestDeviceLocation = () => {
     if (!('geolocation' in navigator)) {
       setError('Geolocation is not supported by this browser/device.');
-      return Promise.resolve();
+      return Promise.resolve(null);
     }
 
     setError(null);
@@ -322,7 +423,7 @@ export default function ComplaintForm({ verifiedEmail }) {
           }));
 
           setLoading(false);
-          resolve();
+          resolve({ lat, lng });
         },
         (err) => {
           const message =
@@ -334,7 +435,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
           setError(message);
           setLoading(false);
-          resolve();
+          resolve(null);
         },
         { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
       );
@@ -343,16 +444,34 @@ export default function ComplaintForm({ verifiedEmail }) {
 
   const detectLocation = async () => {
     setLocationCheckAttempted(true);
-    await requestDeviceLocation();
-    if (formData.reporter_lat && formData.reporter_lng) {
-      await verifyBusinessProximity();
+    const coords = await requestDeviceLocation();
+    if (coords?.lat != null && coords?.lng != null) {
+      await verifyBusinessProximity(coords);
     }
   };
 
   useEffect(() => {
-    requestDeviceLocation();
+    // When Step 2 (Confirm Location) is shown, automatically re-check device location
+    // and (best-effort) re-run proximity verification.
+    if (step !== 2) return;
+
+    let cancelled = false;
+
+    (async () => {
+      setLocationCheckAttempted(true);
+      const coords = await requestDeviceLocation();
+      if (cancelled) return;
+
+      if (coords?.lat != null && coords?.lng != null) {
+        await verifyBusinessProximity(coords);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [step, formData.business_pk]);
 
   const goNext = () => {
     setError(null);
@@ -603,7 +722,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                 <div className="file-upload" style={{ flexWrap: 'wrap' }}>
                   <button
                     type="button"
-                    onClick={() => startCamera(facingMode)}
+                    onClick={openCameraFlow}
                     disabled={loading || cameraBusy}
                     className="btn btn-secondary"
                   >
@@ -640,7 +759,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                 {cameraOpen ? (
                   <div style={{ marginTop: 12 }}>
                     <div className="camera-box">
-                      <video ref={videoRef} playsInline muted className="camera-video" />
+                      <video ref={videoRef} playsInline muted autoPlay className="camera-video" />
                     </div>
 
                     <div className="form-nav" style={{ marginTop: 12 }}>
