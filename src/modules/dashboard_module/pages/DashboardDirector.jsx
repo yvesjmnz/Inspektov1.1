@@ -30,6 +30,7 @@ export default function DashboardDirector() {
   const [complaints, setComplaints] = useState([]);
   const [missionOrders, setMissionOrders] = useState([]);
   const [search, setSearch] = useState('');
+  const [auditComplaint, setAuditComplaint] = useState(null);
 
   const [previewImage, setPreviewImage] = useState(null);
   const closePreview = () => setPreviewImage(null);
@@ -46,7 +47,7 @@ export default function DashboardDirector() {
     try {
       let query = supabase
         .from('complaints')
-        .select('id, status, created_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls')
+        .select('id, status, created_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, approved_by, approved_at, declined_by, declined_at')
         .order('created_at', { ascending: false })
         .limit(200);
 
@@ -150,6 +151,109 @@ export default function DashboardDirector() {
       return idStr.includes(q) || titleStr.includes(q) || complaintStr.includes(q);
     });
   }, [missionOrders, search]);
+
+  // Utilities: export and print
+  const toCsvValue = (v) => {
+    if (v === null || v === undefined) return '""';
+    const s = String(v).replace(/"/g, '""');
+    return `"${s}"`;
+  };
+  const downloadCsv = (filename, rows) => {
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+  const exportComplaintsToCSV = (list) => {
+    const header = [
+      'id',
+      'business_name',
+      'business_address',
+      'reporter_email',
+      'status',
+      'authenticity_level',
+      'created_at',
+      'approved_at',
+      'approved_by',
+      'declined_at',
+      'declined_by',
+      'complaint_description',
+    ];
+    const rows = [header.map(toCsvValue).join(',')];
+    for (const c of list) {
+      const approverLabel = c.approved_by ? String(c.approved_by) : '';
+      const declinerLabel = c.declined_by ? String(c.declined_by) : '';
+      const row = [
+        c.id,
+        c.business_name || '',
+        c.business_address || '',
+        c.reporter_email || '',
+        c.status || '',
+        c.authenticity_level ?? '',
+        c.created_at || '',
+        c.approved_at || '',
+        approverLabel || '',
+        c.declined_at || '',
+        declinerLabel || '',
+        c.complaint_description || '',
+      ];
+      rows.push(row.map(toCsvValue).join(','));
+    }
+    const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    downloadCsv(`complaints-${tab}-${ts}.csv`, rows);
+  };
+  const exportMissionOrdersToCSV = (list) => {
+    const header = ['id', 'title', 'complaint_id', 'status', 'submitted_at'];
+    const rows = [header.map(toCsvValue).join(',')];
+    for (const m of list) {
+      const row = [m.id, m.title || '', m.complaint_id || '', m.status || '', m.submitted_at || ''];
+      rows.push(row.map(toCsvValue).join(','));
+    }
+    const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    downloadCsv(`mission-orders-${ts}.csv`, rows);
+  };
+  const handleExport = () => {
+    if (tab === 'mission-orders') {
+      exportMissionOrdersToCSV(filteredMissionOrders);
+    } else {
+      exportComplaintsToCSV(filteredComplaints);
+    }
+  };
+  
+  // Summary KPIs (client-side only)
+  const summary = useMemo(() => {
+    if (tab === 'mission-orders') {
+      const total = filteredMissionOrders.length;
+      const issued = filteredMissionOrders.filter((x) => String(x.status || '').toLowerCase() === 'issued').length;
+      const completed = filteredMissionOrders.filter((x) => String(x.status || '').toLowerCase() === 'completed').length;
+      const cancelled = filteredMissionOrders.filter((x) => String(x.status || '').toLowerCase() === 'cancelled').length;
+      return { total, issued, completed, cancelled };
+    }
+    const total = filteredComplaints.length;
+    const sLower = (s) => String(s || '').toLowerCase();
+    const approved = filteredComplaints.filter((c) => sLower(c.status) === 'approved').length;
+    const declined = filteredComplaints.filter((c) => sLower(c.status) === 'declined').length;
+    const pending = filteredComplaints.filter((c) => ['submitted', 'pending', 'new'].includes(sLower(c.status))).length;
+
+    // Average decision time in hours (from created_at to approved_at/declined_at if present)
+    const decisionDurations = filteredComplaints
+      .map((c) => {
+        const created = c.created_at ? new Date(c.created_at).getTime() : null;
+        const decidedAt = sLower(c.status) === 'approved' ? c.approved_at : sLower(c.status) === 'declined' ? c.declined_at : null;
+        const decided = decidedAt ? new Date(decidedAt).getTime() : null;
+        if (!created || !decided) return null;
+        return (decided - created) / 36e5; // hours
+      })
+      .filter((x) => typeof x === 'number');
+    const avgDecisionHours = decisionDurations.length > 0 ? Number((decisionDurations.reduce((a, b) => a + b, 0) / decisionDurations.length).toFixed(1)) : null;
+
+    return { total, approved, declined, pending, avgDecisionHours };
+  }, [tab, filteredComplaints, filteredMissionOrders]);
 
   const updateComplaintStatus = async (complaintId, newStatus) => {
     setError('');
@@ -275,9 +379,29 @@ export default function DashboardDirector() {
             <button className="dash-btn" type="button" onClick={loadComplaints} disabled={loading}>
               {loading ? 'Refreshing…' : 'Refresh'}
             </button>
-          </div>
+            <button
+              className="dash-btn"
+              type="button"
+              onClick={handleExport}
+              disabled={loading || (tab === 'mission-orders' ? filteredMissionOrders.length === 0 : filteredComplaints.length === 0)}
+            >
+              Export CSV
+            </button>
+                      </div>
 
           {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
+          <div style={{ margin: '10px 0', color: '#475569', fontSize: 12 }}>
+            {tab === 'mission-orders' ? (
+              <span>
+                Orders: {summary.total} • Issued: {summary.issued} • Completed: {summary.completed} • Cancelled: {summary.cancelled} • Avg Inspection Duration: —
+              </span>
+            ) : (
+              <span>
+                Complaints: {summary.total} • Approved: {summary.approved} • Declined: {summary.declined} • Pending: {summary.pending}
+                {summary.avgDecisionHours ? ` • Avg decision time: ${summary.avgDecisionHours}h` : ''}
+              </span>
+            )}
+          </div>
 
           {tab === 'mission-orders' ? (
             <div className="dash-table-wrap">
@@ -331,6 +455,7 @@ export default function DashboardDirector() {
                     <th style={{ width: 90 }}>ID</th>
                     <th>Business</th>
                     <th style={{ width: 240 }}>Status</th>
+                    {tab === 'history' ? <th style={{ width: 280 }}>Decision</th> : null}
                     <th style={{ width: 180 }}>Authenticity Level</th>
                     <th style={{ width: 200 }}>Submitted</th>
                     <th style={{ width: 280 }}>Evidence</th>
@@ -340,7 +465,7 @@ export default function DashboardDirector() {
                 <tbody>
                   {filteredComplaints.length === 0 ? (
                     <tr>
-                      <td colSpan={tab === 'queue' ? 7 : 6} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
                         {loading ? 'Loading…' : 'No records found.'}
                       </td>
                     </tr>
@@ -356,6 +481,27 @@ export default function DashboardDirector() {
                         <td>
                           <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
                         </td>
+                        {tab === 'history' ? (
+                          <td>
+                            <div className="dash-cell-sub">
+                              {(() => {
+                                const s = String(c.status || '').toLowerCase();
+                                if (s === 'approved') {
+                                  const label = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '—';
+                                  return `Approved by ${label} on ${c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}`;
+                                }
+                                if (s === 'declined') {
+                                  const label = c.declined_by ? String(c.declined_by).slice(0, 8) + '…' : '—';
+                                  return `Declined by ${label} on ${c.declined_at ? new Date(c.declined_at).toLocaleString() : '—'}`;
+                                }
+                                return '—';
+                              })()}
+                            </div>
+                            <div style={{ marginTop: 6 }}>
+                              <button className="dash-link" type="button" onClick={() => setAuditComplaint(c)}>View audit</button>
+                            </div>
+                          </td>
+                        ) : null}
                         <td>{c?.authenticity_level ?? '—'}</td>
                         <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
                         <td>
@@ -449,6 +595,57 @@ export default function DashboardDirector() {
           <div className="overlay-content" onClick={(e) => e.stopPropagation()}>
             <button className="overlay-close" onClick={closePreview} aria-label="Close">&times;</button>
             <img src={previewImage} alt="Evidence Preview" className="overlay-full-img" />
+          </div>
+        </div>
+      ) : null}
+
+      {/* Audit Overlay */}
+      {auditComplaint ? (
+        <div
+          className="image-overlay"
+          onClick={() => setAuditComplaint(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="overlay-content" onClick={(e) => e.stopPropagation()} style={{ padding: 0 }}>
+            <div style={{ background: '#ffffff', borderRadius: 12, padding: 16, boxShadow: '0 12px 28px rgba(0,0,0,0.25)', maxWidth: 560, width: '100%', position: 'relative' }}>
+              <button className="overlay-close" onClick={() => setAuditComplaint(null)} aria-label="Close">&times;</button>
+              <h3 style={{ marginTop: 0, marginBottom: 10 }}>Complaint Audit</h3>
+              {auditComplaint ? (
+                <div style={{ fontSize: 14, color: '#0f172a', display: 'grid', gap: 8 }}>
+                  <div><strong>ID:</strong> {auditComplaint.id}</div>
+                  <div><strong>Business:</strong> {auditComplaint.business_name || '—'}</div>
+                  <div><strong>Status:</strong> {formatStatus(auditComplaint.status)}</div>
+                  <div><strong>Submitted:</strong> {auditComplaint.created_at ? new Date(auditComplaint.created_at).toLocaleString() : '—'}</div>
+                  <div><strong>Inspection Duration:</strong> — (pending inspections module)</div>
+                  {(() => {
+                    const s = String(auditComplaint.status || '').toLowerCase();
+                    const created = auditComplaint.created_at ? new Date(auditComplaint.created_at) : null;
+                    if (s === 'approved') {
+                      const decided = auditComplaint.approved_at ? new Date(auditComplaint.approved_at) : null;
+                      const dur = created && decided ? ((decided.getTime() - created.getTime()) / 36e5).toFixed(1) : null;
+                      return (
+                        <div>
+                          <div><strong>Approved:</strong> {auditComplaint.approved_at ? decided.toLocaleString() : '—'} by {auditComplaint.approved_by ? String(auditComplaint.approved_by).slice(0, 8) + '…' : '—'}</div>
+                          {dur ? <div><strong>Decision time:</strong> {dur} hours</div> : null}
+                        </div>
+                      );
+                    }
+                    if (s === 'declined') {
+                      const decided = auditComplaint.declined_at ? new Date(auditComplaint.declined_at) : null;
+                      const dur = created && decided ? ((decided.getTime() - created.getTime()) / 36e5).toFixed(1) : null;
+                      return (
+                        <div>
+                          <div><strong>Declined:</strong> {auditComplaint.declined_at ? decided.toLocaleString() : '—'} by {auditComplaint.declined_by ? String(auditComplaint.declined_by).slice(0, 8) + '…' : '—'}</div>
+                          {dur ? <div><strong>Decision time:</strong> {dur} hours</div> : null}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}
