@@ -4,6 +4,98 @@ import Footer from '../../../components/Footer';
 import { supabase } from '../../../lib/supabase';
 import './MissionOrderEditor.css';
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function applyAutoFieldsToHtml(html, { inspectorNames, businessName, businessAddress }) {
+  // Goal: keep these fields in sync without requiring the original placeholders to still exist.
+  // Strategy:
+  // 1) Always update existing auto-markers.
+  // 2) If markers are missing, try to inject them into the canonical TO/SUBJECT lines.
+  // 3) If those lines can't be found, append a small auto section at the top of the document.
+  let next = String(html ?? '');
+
+  const inspectorSpan = `<span data-mo-auto="inspectors" contenteditable="false" data-mo-locked="true">${escapeHtml(
+    inspectorNames || ''
+  )}</span>`;
+  const businessNameSpan = `<span data-mo-auto="business_name" contenteditable="false" data-mo-locked="true">${escapeHtml(
+    businessName || ''
+  )}</span>`;
+  const businessAddressSpan = `<span data-mo-auto="business_address" contenteditable="false" data-mo-locked="true">${escapeHtml(
+    businessAddress || ''
+  )}</span>`;
+
+  const hasInspectorMarker = /data-mo-auto="inspectors"/.test(next);
+  const hasBusinessNameMarker = /data-mo-auto="business_name"/.test(next);
+  const hasBusinessAddressMarker = /data-mo-auto="business_address"/.test(next);
+
+  // 1) Update existing markers
+  next = next.replace(/<span\s+data-mo-auto="inspectors"[^>]*>[\s\S]*?<\/span>/g, inspectorSpan);
+  next = next.replace(/<span\s+data-mo-auto="business_name"[^>]*>[\s\S]*?<\/span>/g, businessNameSpan);
+  next = next.replace(/<span\s+data-mo-auto="business_address"[^>]*>[\s\S]*?<\/span>/g, businessAddressSpan);
+
+  // 2) Placeholder replacement (backward compatible)
+  if (inspectorNames) next = next.replaceAll('[INSPECTOR NAME]', inspectorSpan);
+  if (businessName) next = next.replaceAll('[BUSINESS NAME]', businessNameSpan);
+  if (businessAddress) next = next.replaceAll('[ADDRESS]', businessAddressSpan);
+
+  // 3) If still missing, inject into the TO line.
+  // Matches: <p><strong>TO:</strong> ...</p> (any content)
+  if (!hasInspectorMarker) {
+    const toLine = /(<p[^>]*>\s*<strong>\s*TO:\s*<\/strong>)([\s\S]*?)(<\/p>)/i;
+    if (toLine.test(next)) {
+      next = next.replace(toLine, `$1 FIELD INSPECTOR ${inspectorSpan}$3`);
+    }
+  }
+
+  // 4) If still missing, inject into SUBJECT line.
+  if (!hasBusinessNameMarker || !hasBusinessAddressMarker) {
+    const subjectLine = /(<p[^>]*>\s*<strong>\s*SUBJECT:\s*<\/strong>)([\s\S]*?)(<\/p>)/i;
+    if (subjectLine.test(next)) {
+      // Keep existing sentence but ensure it contains our auto-markers.
+      const subjectText = ` TO CONDUCT INSPECTION ON THE BUSINESS ESTABLISHMENT IDENTIFIED AS ${businessNameSpan} WITH ADDRESS AT ${businessAddressSpan}`;
+      next = next.replace(subjectLine, `$1${subjectText}$3`);
+    }
+  }
+
+  // 5) Final fallback: prepend a small auto section so add/remove always works.
+  const missingAny =
+    !/data-mo-auto="inspectors"/.test(next) ||
+    !/data-mo-auto="business_name"/.test(next) ||
+    !/data-mo-auto="business_address"/.test(next);
+
+  if (missingAny) {
+    const autoBlock = [
+      '<div data-mo-auto-block="true" contenteditable="false" data-mo-locked="true" style="border: 1px dashed #cbd5e1; padding: 10px; border-radius: 8px; margin-bottom: 12px;">',
+      '<p style="margin:0;"><strong>Assigned Inspectors:</strong> ',
+      inspectorSpan,
+      '</p>',
+      '<p style="margin:6px 0 0 0;"><strong>Business:</strong> ',
+      businessNameSpan,
+      ' — ',
+      businessAddressSpan,
+      '</p>',
+      '</div>',
+    ].join('');
+
+    // Insert right after the first opening <div ...> if present, otherwise prepend.
+    const firstDivOpen = /<div[^>]*>/i;
+    if (firstDivOpen.test(next)) {
+      next = next.replace(firstDivOpen, (m) => `${m}${autoBlock}`);
+    } else {
+      next = `${autoBlock}${next}`;
+    }
+  }
+
+  return next;
+}
+
 function getMissionOrderIdFromQuery() {
   const params = new URLSearchParams(window.location.search);
   return params.get('id');
@@ -30,7 +122,35 @@ export default function MissionOrderEditor() {
   const [selectedInspectorId, setSelectedInspectorId] = useState('');
   const [syncingAssignments, setSyncingAssignments] = useState(false);
 
+  const [businessName, setBusinessName] = useState('');
+  const [businessAddress, setBusinessAddress] = useState('');
+
   const editorRef = useRef(null);
+
+  const assignedInspectorNames = useMemo(() => {
+    return assignedInspectorIds
+      .map((id) => inspectors.find((x) => x.id === id)?.full_name)
+      .filter(Boolean)
+      .join(', ');
+  }, [assignedInspectorIds, inspectors]);
+
+  const syncAutoFieldsIntoEditor = ({ nextBusinessName, nextBusinessAddress, nextInspectorNames } = {}) => {
+    if (!editorRef.current) return;
+
+    const html = editorRef.current.innerHTML ?? '';
+    const updated = applyAutoFieldsToHtml(html, {
+      inspectorNames: nextInspectorNames ?? assignedInspectorNames,
+      businessName: nextBusinessName ?? businessName,
+      businessAddress: nextBusinessAddress ?? businessAddress,
+    });
+
+    if (updated === html) return;
+
+    // Update both DOM + state. This may move caret; acceptable since it occurs on assignment changes / initial load.
+    editorRef.current.innerHTML = updated;
+    setContent(updated);
+    markDirty(title, updated);
+  };
 
   useEffect(() => {
     if (!toast) return;
@@ -60,6 +180,28 @@ export default function MissionOrderEditor() {
         if (error) throw error;
         if (!mounted) return;
 
+        // Load business details from complaint (for auto-inserting into the document)
+        const complaintId = data?.complaint_id;
+        let loadedBusinessName = '';
+        let loadedBusinessAddress = '';
+
+        if (complaintId) {
+          const { data: complaint, error: complaintError } = await supabase
+            .from('complaints')
+            .select('id, business_name, business_address')
+            .eq('id', complaintId)
+            .single();
+
+          if (complaintError) throw complaintError;
+          if (!mounted) return;
+
+          loadedBusinessName = complaint?.business_name || '';
+          loadedBusinessAddress = complaint?.business_address || '';
+        }
+
+        setBusinessName(loadedBusinessName);
+        setBusinessAddress(loadedBusinessAddress);
+
         // Load inspectors list for displaying names
         const { data: inspectorsData, error: inspectorsError } = await supabase
           .from('profiles')
@@ -81,7 +223,13 @@ export default function MissionOrderEditor() {
         if (assignedError) throw assignedError;
         if (!mounted) return;
 
-        setAssignedInspectorIds((assignedRows || []).map((r) => r.inspector_id));
+        const loadedAssignedInspectorIds = (assignedRows || []).map((r) => r.inspector_id);
+        setAssignedInspectorIds(loadedAssignedInspectorIds);
+
+        const loadedInspectorNames = loadedAssignedInspectorIds
+          .map((id) => inspectorsData?.find((x) => x.id === id)?.full_name)
+          .filter(Boolean)
+          .join(', ');
 
         // While hydrating initial data, keep dirty tracking disabled.
         allowDirtyTrackingRef.current = false;
@@ -100,12 +248,12 @@ export default function MissionOrderEditor() {
             '<p><strong>DATE OF ISSUANCE: </strong>[INSERT DATE]</p>',
             '<br/>',
             '<p style="text-align:justify;">In the interest of public service, you are hereby ordered to conduct inspection of the aforementioned establishment, for the following purposes:</p>',
-            
+
             // Tabbed List using padding-left
             '<p style="text-align:justify; padding-left: 40px;">a) To verify the existence and authenticity of the Business Permits and other applicable permits, certificates, and other necessary documents, the completeness of the requirements therein.</p>',
             '<p style="text-align:justify; padding-left: 40px;">b) To check actual business operation of the subject establishment.</p>',
             '<p style="text-align:justify; padding-left: 40px;">c) To check compliance of said establishment with existing laws, ordinance, regulations relative to health & sanitation, fire safety, engineering & electrical installation standards.</p>',
-            
+
             '<br/>',
             '<p style="text-align:justify;">You are hereby directed to identify yourself by showing proper identification and act with due courtesy and politeness in the implementation of this Order. All inspectors shall wear their IDs in such manner as the public will be informed of their true identity.</p>',
             '<br/>',
@@ -116,28 +264,34 @@ export default function MissionOrderEditor() {
 
             // Signature Table for side-by-side names
             '<table style="width: 100%; border: none; border-collapse: collapse;">',
-              '<tr>',
-                '<td style="width: 50%; vertical-align: top;">',
-                  '<p style="margin: 0;">Recommending approval:</p>',
-                  '<br/><br/>',
-                  '<p style="margin: 0;"><strong>LEVI FACUNDO</strong></p>',
-                  '<p style="margin: 0;">Director</p>',
-                '</td>',
-                '<td style="width: 50%; vertical-align: top;">',
-                  '<p style="margin: 0;">Approved by:</p>',
-                  '<br/><br/>',
-                  '<p style="margin: 0;"><strong>MANUEL M. ZARCAL</strong></p>',
-                  '<p style="margin: 0;">Secretary to the Mayor</p>',
-                '</td>',
-              '</tr>',
+            '<tr>',
+            '<td style="width: 50%; vertical-align: top;">',
+            '<p style="margin: 0;">Recommending approval:</p>',
+            '<br/><br/>',
+            '<p style="margin: 0;"><strong>LEVI FACUNDO</strong></p>',
+            '<p style="margin: 0;">Director</p>',
+            '</td>',
+            '<td style="width: 50%; vertical-align: top;">',
+            '<p style="margin: 0;">Approved by:</p>',
+            '<br/><br/>',
+            '<p style="margin: 0;"><strong>MANUEL M. ZARCAL</strong></p>',
+            '<p style="margin: 0;">Secretary to the Mayor</p>',
+            '</td>',
+            '</tr>',
             '</table>',
-            '</div>'
+            '</div>',
           ].join('');
 
-        baselineRef.current = { title: loadedTitle, content: loadedContent };
+        const hydratedContent = applyAutoFieldsToHtml(loadedContent, {
+          inspectorNames: loadedInspectorNames,
+          businessName: loadedBusinessName,
+          businessAddress: loadedBusinessAddress,
+        });
+
+        baselineRef.current = { title: loadedTitle, content: hydratedContent };
 
         setTitle(loadedTitle);
-        setContent(loadedContent);
+        setContent(hydratedContent);
       } catch (e) {
         if (!mounted) return;
         setError(e?.message || 'Failed to load mission order.');
@@ -177,6 +331,21 @@ export default function MissionOrderEditor() {
     }
   }, [content]);
 
+  // Keep inspector names in sync in the document (add/remove should update immediately).
+  useEffect(() => {
+    if (!allowDirtyTrackingRef.current) return;
+    syncAutoFieldsIntoEditor({ nextInspectorNames: assignedInspectorNames });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignedInspectorNames]);
+
+  // If business details arrive after load, try to fill placeholders (if any remain).
+  useEffect(() => {
+    if (!allowDirtyTrackingRef.current) return;
+    if (!businessName && !businessAddress) return;
+    syncAutoFieldsIntoEditor({ nextBusinessName: businessName, nextBusinessAddress: businessAddress });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessName, businessAddress]);
+
   const loadAssignedInspectors = async () => {
     if (!missionOrderId) return;
 
@@ -187,7 +356,17 @@ export default function MissionOrderEditor() {
       .order('assigned_at', { ascending: true });
 
     if (assignedError) throw assignedError;
-    setAssignedInspectorIds((assignedRows || []).map((r) => r.inspector_id));
+
+    const loadedIds = (assignedRows || []).map((r) => r.inspector_id);
+    setAssignedInspectorIds(loadedIds);
+
+    // Best effort: if placeholders exist, fill immediately.
+    const nextNames = loadedIds
+      .map((id) => inspectors.find((x) => x.id === id)?.full_name)
+      .filter(Boolean)
+      .join(', ');
+
+    syncAutoFieldsIntoEditor({ nextInspectorNames: nextNames });
   };
 
   const addInspector = async () => {
@@ -219,15 +398,13 @@ export default function MissionOrderEditor() {
         return;
       }
 
-      const { error: insertError } = await supabase
-        .from('mission_order_assignments')
-        .insert([
-          {
-            mission_order_id: missionOrderId,
-            inspector_id: inspectorId,
-            assigned_by: userId,
-          },
-        ]);
+      const { error: insertError } = await supabase.from('mission_order_assignments').insert([
+        {
+          mission_order_id: missionOrderId,
+          inspector_id: inspectorId,
+          assigned_by: userId,
+        },
+      ]);
 
       if (insertError) throw insertError;
 
@@ -288,7 +465,12 @@ export default function MissionOrderEditor() {
       .channel(`mo-assignments-${missionOrderId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'mission_order_assignments', filter: `mission_order_id=eq.${missionOrderId}` },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mission_order_assignments',
+          filter: `mission_order_id=eq.${missionOrderId}`,
+        },
         () => {
           loadAssignedInspectors().catch(() => {});
         }
@@ -345,7 +527,9 @@ export default function MissionOrderEditor() {
         <section className="mo-card">
           <div className="mo-header">
             <div className="mo-title-wrap">
-              <label className="mo-label" htmlFor="moTitle">Title</label>
+              <label className="mo-label" htmlFor="moTitle">
+                Title
+              </label>
               <input
                 id="moTitle"
                 className="mo-title"
@@ -404,7 +588,9 @@ export default function MissionOrderEditor() {
                       disabled={syncingAssignments}
                     >
                       <span className="mo-chip-label">{label}</span>
-                      <span aria-hidden="true" className="mo-chip-x">×</span>
+                      <span aria-hidden="true" className="mo-chip-x">
+                        ×
+                      </span>
                     </button>
                   );
                 })
@@ -445,6 +631,72 @@ export default function MissionOrderEditor() {
               suppressContentEditableWarning
               // Don't use dangerouslySetInnerHTML here; we manually sync innerHTML only when loading initial content.
               // Re-rendering innerHTML on each keystroke resets the caret to the beginning.
+              onMouseDown={(e) => {
+                // Prevent placing caret inside locked spans.
+                const locked = e.target?.closest?.('[data-mo-locked="true"]');
+                if (!locked) return;
+                e.preventDefault();
+              }}
+              onKeyDown={(e) => {
+                // Extra guard: in some browsers the event target can be the editor root,
+                // so we detect whether the caret is currently inside a locked span.
+                const sel = window.getSelection?.();
+                const node = sel?.anchorNode;
+                const el = node?.nodeType === 1 ? node : node?.parentElement;
+                const locked = el?.closest?.('[data-mo-locked="true"]');
+                if (!locked) return;
+
+                // Block all text-modifying keys when inside locked area.
+                // Allow navigation keys so the caret can move out.
+                const allowed = new Set([
+                  'ArrowLeft',
+                  'ArrowRight',
+                  'ArrowUp',
+                  'ArrowDown',
+                  'Home',
+                  'End',
+                  'PageUp',
+                  'PageDown',
+                  'Tab',
+                  'Escape',
+                ]);
+
+                if (!allowed.has(e.key)) {
+                  e.preventDefault();
+                }
+              }}
+              onBeforeInput={(e) => {
+                // Prevent edits inside locked auto-fields.
+                // This avoids subtle DOM corruption when users attempt to type inside non-editable spans.
+                const targetLocked = e.target?.closest?.('[data-mo-locked="true"]');
+
+                const sel = window.getSelection?.();
+                const node = sel?.anchorNode;
+                const el = node?.nodeType === 1 ? node : node?.parentElement;
+                const caretLocked = el?.closest?.('[data-mo-locked="true"]');
+
+                if (targetLocked || caretLocked) {
+                  e.preventDefault();
+                }
+              }}
+              onPaste={(e) => {
+                const sel = window.getSelection?.();
+                const node = sel?.anchorNode;
+                const el = node?.nodeType === 1 ? node : node?.parentElement;
+                const locked = el?.closest?.('[data-mo-locked="true"]') || e.target?.closest?.('[data-mo-locked="true"]');
+                if (locked) {
+                  e.preventDefault();
+                }
+              }}
+              onDrop={(e) => {
+                const sel = window.getSelection?.();
+                const node = sel?.anchorNode;
+                const el = node?.nodeType === 1 ? node : node?.parentElement;
+                const locked = el?.closest?.('[data-mo-locked="true"]') || e.target?.closest?.('[data-mo-locked="true"]');
+                if (locked) {
+                  e.preventDefault();
+                }
+              }}
               onInput={() => {
                 const next = editorRef.current?.innerHTML ?? '';
                 setContent(next);
@@ -454,8 +706,8 @@ export default function MissionOrderEditor() {
           </div>
 
           <div className="mo-note">
-            This is a simple editable document stored in <code>mission_orders.content</code>.
-            Next we can add a richer editor (TipTap/Quill) and a print/PDF layout.
+            This is a simple editable document stored in <code>mission_orders.content</code>. Next we can add a richer
+            editor (TipTap/Quill) and a print/PDF layout.
           </div>
         </section>
       </main>
