@@ -125,6 +125,8 @@ export default function MissionOrderEditor() {
   const [businessName, setBusinessName] = useState('');
   const [businessAddress, setBusinessAddress] = useState('');
 
+  const [submitting, setSubmitting] = useState(false);
+
   const editorRef = useRef(null);
 
   const assignedInspectorNames = useMemo(() => {
@@ -483,6 +485,32 @@ export default function MissionOrderEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missionOrderId]);
 
+  const saveMissionOrder = async () => {
+    if (!missionOrderId) return;
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    const userId = userData?.user?.id;
+    if (!userId) throw new Error('Not authenticated. Please login again.');
+
+    const html = editorRef.current?.innerHTML ?? '';
+
+    const { error } = await supabase
+      .from('mission_orders')
+      .update({
+        title: title || null,
+        content: html,
+        last_edited_by: userId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', missionOrderId);
+
+    if (error) throw error;
+
+    baselineRef.current = { title: title || '', content: html };
+    setIsDirty(false);
+  };
+
   const handleSave = async () => {
     if (!missionOrderId) return;
 
@@ -491,32 +519,53 @@ export default function MissionOrderEditor() {
     setSaving(true);
 
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      const userId = userData?.user?.id;
-      if (!userId) throw new Error('Not authenticated. Please login again.');
-
-      const html = editorRef.current?.innerHTML ?? '';
-
-      const { error } = await supabase
-        .from('mission_orders')
-        .update({
-          title: title || null,
-          content: html,
-          last_edited_by: userId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', missionOrderId);
-
-      if (error) throw error;
-
-      baselineRef.current = { title: title || '', content: html };
-      setIsDirty(false);
+      await saveMissionOrder();
       setToast('Saved.');
     } catch (e) {
       setError(e?.message || 'Failed to save mission order.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSubmitToDirector = async () => {
+    if (!missionOrderId) return;
+
+    setError('');
+    setToast('');
+    setSubmitting(true);
+
+    try {
+      await saveMissionOrder();
+
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error('Not authenticated. Please login again.');
+
+      const nowIso = new Date().toISOString();
+
+      const { error: submitError } = await supabase
+        .from('mission_orders')
+        .update({
+          // DB constraint only allows: draft | issued | cancelled | completed
+          // "issued" is used as "forwarded to Director / awaiting review".
+          status: 'issued',
+          submitted_by: userId,
+          submitted_at: nowIso,
+          updated_at: nowIso,
+        })
+        .eq('id', missionOrderId);
+
+      if (submitError) throw submitError;
+
+      baselineRef.current = { title: title || '', content: editorRef.current?.innerHTML ?? '' };
+      setIsDirty(false);
+      setToast('Submitted to Director for review.');
+    } catch (e) {
+      setError(e?.message || 'Failed to submit to Director.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -562,6 +611,15 @@ export default function MissionOrderEditor() {
               </a>
               <button className="mo-btn" type="button" onClick={handleSave} disabled={saving || loading}>
                 {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                className="mo-btn mo-btn-primary"
+                type="button"
+                onClick={handleSubmitToDirector}
+                disabled={loading || saving || submitting || assignedInspectorIds.length === 0}
+                title={assignedInspectorIds.length === 0 ? 'Assign at least one inspector before submitting.' : 'Forward to Director for review.'}
+              >
+                {submitting ? 'Submitting…' : 'Submit to Director'}
               </button>
             </div>
           </div>
@@ -706,8 +764,8 @@ export default function MissionOrderEditor() {
           </div>
 
           <div className="mo-note">
-            This is a simple editable document stored in <code>mission_orders.content</code>. Next we can add a richer
-            editor (TipTap/Quill) and a print/PDF layout.
+            Save your edits, assign inspectors, then click <strong>Submit to Director</strong> to forward the mission
+            order for review.
           </div>
         </section>
       </main>

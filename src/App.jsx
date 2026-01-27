@@ -12,6 +12,7 @@ import DashboardDirector from './modules/dashboard_module/pages/DashboardDirecto
 import DashboardHeadInspector from './modules/dashboard_module/pages/DashboardHeadInspector';
 import DashboardInspector from './modules/dashboard_module/pages/DashboardInspector';
 import MissionOrderEditor from './modules/mission_order_module/pages/MissionOrderEditor';
+import MissionOrderReview from './modules/mission_order_module/pages/MissionOrderReview';
 import LandingPage from './LandingPage';
 import { supabase } from './lib/supabase';
 import './App.css';
@@ -60,8 +61,9 @@ function App() {
     if (path === '/dashboard/head-inspector') return normalizedRole === 'head_inspector';
     if (path === '/dashboard/inspector') return normalizedRole === 'inspector' || normalizedRole === 'head_inspector';
 
-    // Mission order editor is at least head inspector (adjust if needed)
+    // Mission order pages
     if (path === '/mission-order') return normalizedRole === 'head_inspector';
+    if (path === '/mission-order/review') return normalizedRole === 'director';
 
     // Public routes
     return true;
@@ -88,7 +90,8 @@ function App() {
         path === '/dashboard/director' ||
         path === '/dashboard/head-inspector' ||
         path === '/dashboard/inspector' ||
-        path === '/mission-order';
+        path === '/mission-order' ||
+        path === '/mission-order/review';
 
       let normalizedRole = null;
       if (isProtected) {
@@ -146,6 +149,8 @@ function App() {
         setCurrentPage('dashboard-inspector');
       } else if (path === '/mission-order') {
         setCurrentPage('mission-order');
+      } else if (path === '/mission-order/review') {
+        setCurrentPage('mission-order-review');
       } else {
         setCurrentPage('home');
       }
@@ -183,6 +188,8 @@ function App() {
         return <DashboardInspector />;
       case 'mission-order':
         return <MissionOrderEditor />;
+      case 'mission-order-review':
+        return <MissionOrderReview />;
       case 'no-permission':
         return <NoPermission />;
       default:

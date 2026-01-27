@@ -93,6 +93,10 @@
   cursor: pointer;
 }
 
+.mo-btn-primary {
+  background: #1d4ed8;
+}
+
 .mo-btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
