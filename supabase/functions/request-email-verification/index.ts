@@ -5,7 +5,7 @@ import { sendMail } from "../_shared/smtp.ts";
 type RequestBody = {
   email: string;
   complaintId?: string;
-  altchaPayload?: string;
+  turnstileToken?: string;
 };
 
 function json(status: number, body: unknown) {
@@ -23,46 +23,42 @@ function isValidEmail(email: string): boolean {
   return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email);
 }
 
-// Verify Altcha payload
-async function verifyAltchaPayload(payload: string): Promise<boolean> {
+// Verify Cloudflare Turnstile token
+async function verifyTurnstileToken(token: string): Promise<boolean> {
   try {
-    const data = JSON.parse(payload);
-    
-    // Altcha payload structure: { algorithm, challenge, number, salt, signature, took }
-    if (!data.algorithm || !data.challenge || !data.number === undefined || !data.salt || !data.signature) {
+    const secretKey = Deno.env.get("TURNSTILE_SECRET_KEY");
+    if (!secretKey) {
+      console.error("Missing TURNSTILE_SECRET_KEY environment variable");
       return false;
     }
 
-    // Altcha verification: verify the signature matches the challenge + number
-    // Using the Altcha verification algorithm
-    const encoder = new TextEncoder();
-    const message = `${data.challenge}${data.number}`;
-    const messageBuffer = encoder.encode(message);
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        secret: secretKey,
+        response: token,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Turnstile verification request failed:", response.status);
+      return false;
+    }
+
+    const data = await response.json();
     
-    // Decode the signature from hex
-    const signatureHex = data.signature;
-    const signatureBytes = new Uint8Array(signatureHex.match(/.{1,2}/g).map((byte: string) => parseInt(byte, 16)));
-    
-    // Verify using SubtleCrypto
-    const algorithm = { name: "HMAC", hash: "SHA-256" };
-    const key = await crypto.subtle.importKey(
-      "raw",
-      messageBuffer,
-      algorithm,
-      false,
-      ["verify"]
-    );
-    
-    const isValid = await crypto.subtle.verify(
-      algorithm,
-      key,
-      signatureBytes,
-      messageBuffer
-    );
-    
-    return isValid;
+    // Turnstile returns { success: boolean, challenge_ts: string, hostname: string, error_codes?: string[] }
+    if (!data.success) {
+      console.error("Turnstile verification failed:", data.error_codes);
+      return false;
+    }
+
+    return true;
   } catch (err) {
-    console.error("Altcha verification error:", err);
+    console.error("Turnstile verification error:", err);
     return false;
   }
 }
@@ -91,9 +87,9 @@ Deno.serve(async (req) => {
   const email = (body.email || "").trim().toLowerCase();
   if (!isValidEmail(email)) return json(400, { error: "Invalid email" });
 
-  // Verify Altcha payload if provided
-  if (body.altchaPayload) {
-    const isValidCaptcha = await verifyAltchaPayload(body.altchaPayload);
+  // Verify Turnstile token if provided
+  if (body.turnstileToken) {
+    const isValidCaptcha = await verifyTurnstileToken(body.turnstileToken);
     if (!isValidCaptcha) {
       return json(400, { error: "CAPTCHA verification failed. Please try again." });
     }

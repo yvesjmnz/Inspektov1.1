@@ -10,7 +10,7 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
   const [success, setSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
-  const altchaRef = useRef(null);
+  const turnstileRef = useRef(null);
 
   const checkForValidToken = async (emailToCheck) => {
     try {
@@ -81,22 +81,16 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
         return;
       }
 
-      // Get Altcha payload from the widget
-      if (!altchaRef.current) {
-        setError('CAPTCHA widget not initialized. Please try again.');
-        setLoading(false);
-        return;
-      }
-
-      const altchaPayload = altchaRef.current.getPayload();
-      if (!altchaPayload) {
+      // Get Turnstile token from the widget
+      const turnstileToken = window.turnstile?.getResponse();
+      if (!turnstileToken) {
         setError('Please complete the CAPTCHA verification.');
         setLoading(false);
         return;
       }
 
-      // Send verification email with Altcha payload
-      await requestEmailVerification(email, null, JSON.stringify(altchaPayload));
+      // Send verification email with Turnstile token
+      await requestEmailVerification(email, null, turnstileToken);
       setSuccess(true);
       setSubmitted(true);
     } catch (err) {
@@ -105,6 +99,36 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
       setLoading(false);
     }
   };
+  // Render Turnstile widget when modal opens
+  useEffect(() => {
+    if (!isOpen || !turnstileRef.current) return;
+
+    // Check if Turnstile script is loaded
+    if (!window.turnstile) {
+      console.error('Turnstile script not loaded');
+      return;
+    }
+
+    // Check if site key is available
+    const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+    if (!siteKey) {
+      console.error('VITE_TURNSTILE_SITE_KEY not set');
+      return;
+    }
+
+    // Render the widget
+    window.turnstile.render('#cf-turnstile-widget', {
+      sitekey: siteKey,
+      theme: 'light',
+    });
+
+    // Cleanup: remove widget when modal closes
+    return () => {
+      if (window.turnstile && turnstileRef.current) {
+        window.turnstile.remove();
+      }
+    };
+  }, [isOpen]);
 
   const handleClose = () => {
     // Reset state when closing
@@ -112,8 +136,9 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
     setError(null);
     setSuccess(false);
     setSubmitted(false);
-    if (altchaRef.current) {
-      altchaRef.current.reset();
+    // Reset Turnstile widget
+    if (window.turnstile) {
+      window.turnstile.reset();
     }
     onClose();
   };
@@ -158,6 +183,13 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
           </div>
         ) : (
           <div className="modal-body">
+            {/* Cloudflare Turnstile CAPTCHA Widget - Always Visible */}
+            <div
+              id="cf-turnstile-widget"
+              ref={turnstileRef}
+              className="cf-turnstile"
+            ></div>
+
             <form onSubmit={handleSubmit} className="verification-form">
               <div className="form-group">
                 <label htmlFor="modal-email">Email Address</label>
@@ -170,15 +202,6 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
                   required
                   disabled={loading}
                   className="form-input"
-                />
-              </div>
-
-              {/* Altcha CAPTCHA Widget */}
-              <div className="form-group">
-                <altcha-widget
-                  ref={altchaRef}
-                  challengeurl="https://api.altcha.org/api/v1/challenge"
-                  hidelogo="true"
                 />
               </div>
 
