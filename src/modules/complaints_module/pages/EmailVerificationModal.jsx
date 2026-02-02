@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { requestEmailVerification } from '../../../lib/api';
 import { supabase } from '../../../lib/supabase';
 import './EmailVerificationModal.css';
@@ -10,6 +10,7 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
   const [success, setSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+  const altchaRef = useRef(null);
 
   const checkForValidToken = async (emailToCheck) => {
     try {
@@ -80,8 +81,22 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
         return;
       }
 
-      // No valid token, send verification email
-      await requestEmailVerification(email);
+      // Get Altcha payload from the widget
+      if (!altchaRef.current) {
+        setError('CAPTCHA widget not initialized. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      const altchaPayload = altchaRef.current.getPayload();
+      if (!altchaPayload) {
+        setError('Please complete the CAPTCHA verification.');
+        setLoading(false);
+        return;
+      }
+
+      // Send verification email with Altcha payload
+      await requestEmailVerification(email, null, JSON.stringify(altchaPayload));
       setSuccess(true);
       setSubmitted(true);
     } catch (err) {
@@ -97,6 +112,9 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
     setError(null);
     setSuccess(false);
     setSubmitted(false);
+    if (altchaRef.current) {
+      altchaRef.current.reset();
+    }
     onClose();
   };
 
@@ -152,6 +170,15 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
                   required
                   disabled={loading}
                   className="form-input"
+                />
+              </div>
+
+              {/* Altcha CAPTCHA Widget */}
+              <div className="form-group">
+                <altcha-widget
+                  ref={altchaRef}
+                  challengeurl="https://api.altcha.org/api/v1/challenge"
+                  hidelogo="true"
                 />
               </div>
 

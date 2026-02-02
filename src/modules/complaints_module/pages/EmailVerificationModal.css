@@ -339,6 +339,42 @@ select:-webkit-autofill {
   animation: spin 0.8s linear infinite;
 }
 
+/* Altcha Widget Styling */
+altcha-widget {
+  display: block;
+  width: 100%;
+}
+
+altcha-widget::part(root) {
+  border: 1.5px solid #9ca3af;
+  border-radius: 6px;
+  padding: 12px;
+  background: white;
+}
+
+altcha-widget::part(input) {
+  border: none;
+  padding: 8px;
+  font-size: 14px;
+  border-radius: 4px;
+}
+
+altcha-widget::part(button) {
+  background: linear-gradient(to right, #1e3a8a, #1d4ed8);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+altcha-widget::part(button):hover {
+  background: linear-gradient(to right, #1e40af, #2563eb);
+  transform: translateY(-1px);
+}
+
 /* Responsive Design */
 @media (max-width: 640px) {
   .modal-content {

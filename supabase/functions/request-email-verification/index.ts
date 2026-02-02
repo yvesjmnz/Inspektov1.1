@@ -5,6 +5,7 @@ import { sendMail } from "../_shared/smtp.ts";
 type RequestBody = {
   email: string;
   complaintId?: string;
+  altchaPayload?: string;
 };
 
 function json(status: number, body: unknown) {
@@ -20,6 +21,50 @@ function json(status: number, body: unknown) {
 
 function isValidEmail(email: string): boolean {
   return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email);
+}
+
+// Verify Altcha payload
+async function verifyAltchaPayload(payload: string): Promise<boolean> {
+  try {
+    const data = JSON.parse(payload);
+    
+    // Altcha payload structure: { algorithm, challenge, number, salt, signature, took }
+    if (!data.algorithm || !data.challenge || !data.number === undefined || !data.salt || !data.signature) {
+      return false;
+    }
+
+    // Altcha verification: verify the signature matches the challenge + number
+    // Using the Altcha verification algorithm
+    const encoder = new TextEncoder();
+    const message = `${data.challenge}${data.number}`;
+    const messageBuffer = encoder.encode(message);
+    
+    // Decode the signature from hex
+    const signatureHex = data.signature;
+    const signatureBytes = new Uint8Array(signatureHex.match(/.{1,2}/g).map((byte: string) => parseInt(byte, 16)));
+    
+    // Verify using SubtleCrypto
+    const algorithm = { name: "HMAC", hash: "SHA-256" };
+    const key = await crypto.subtle.importKey(
+      "raw",
+      messageBuffer,
+      algorithm,
+      false,
+      ["verify"]
+    );
+    
+    const isValid = await crypto.subtle.verify(
+      algorithm,
+      key,
+      signatureBytes,
+      messageBuffer
+    );
+    
+    return isValid;
+  } catch (err) {
+    console.error("Altcha verification error:", err);
+    return false;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -45,6 +90,16 @@ Deno.serve(async (req) => {
 
   const email = (body.email || "").trim().toLowerCase();
   if (!isValidEmail(email)) return json(400, { error: "Invalid email" });
+
+  // Verify Altcha payload if provided
+  if (body.altchaPayload) {
+    const isValidCaptcha = await verifyAltchaPayload(body.altchaPayload);
+    if (!isValidCaptcha) {
+      return json(400, { error: "CAPTCHA verification failed. Please try again." });
+    }
+  } else {
+    return json(400, { error: "CAPTCHA verification required" });
+  }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SERVICE_ROLE_KEY");
