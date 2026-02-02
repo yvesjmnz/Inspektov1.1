@@ -8,6 +8,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [step, setStep] = useState(1);
 
   const [formData, setFormData] = useState({
+    business_pk: null,
     business_name: '',
     business_address: '',
     complaint_description: '',
@@ -17,11 +18,14 @@ export default function ComplaintForm({ verifiedEmail }) {
     reporter_lng: null,
   });
 
+  const [businessNotInDb, setBusinessNotInDb] = useState(false);
+
   const [businesses, setBusinesses] = useState([]);
   const [showBusinessList, setShowBusinessList] = useState(false);
 
   // Step C (mandatory): primary image capture
-  const [primaryImageUrl, setPrimaryImageUrl] = useState('');
+  // Step 3: evidence images (required: at least 1)
+  const [evidenceImages, setEvidenceImages] = useState([]);
 
   // In-browser camera capture
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -32,8 +36,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   const streamRef = useRef(null);
   const cameraStartSeqRef = useRef(0);
 
-  // Step E: additional image evidence
-  const [additionalImages, setAdditionalImages] = useState([]);
+  // (Step 5 was merged into Step 3)
 
   const [confirmTruth, setConfirmTruth] = useState(false);
 
@@ -42,12 +45,15 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [proximityVerified, setProximityVerified] = useState(false);
   const [proximityTag, setProximityTag] = useState(null);
+
+  const withinRange = proximityTag === 'Passed Location Verification';
+  const outOfRange = proximityTag === 'Failed Location Verification';
   const [locationCheckAttempted, setLocationCheckAttempted] = useState(false);
 
   const primaryImageInputRef = useRef(null);
   const additionalImageInputRef = useRef(null);
 
-  const TOTAL_STEPS = 6;
+  const TOTAL_STEPS = 5;
 
   const stepTitle = useMemo(() => {
     switch (step) {
@@ -56,12 +62,10 @@ export default function ComplaintForm({ verifiedEmail }) {
       case 2:
         return 'Confirm Location';
       case 3:
-        return 'Capture Image (Required)';
+        return 'Evidence (Photos)';
       case 4:
         return 'Complaint Description';
       case 5:
-        return 'Additional Image Evidence';
-      case 6:
         return 'Confirmation';
       default:
         return '';
@@ -91,6 +95,8 @@ export default function ComplaintForm({ verifiedEmail }) {
   };
 
   const selectBusiness = (business) => {
+    setBusinessNotInDb(false);
+
     setFormData((prev) => ({
       ...prev,
       business_pk: business.business_pk,
@@ -101,22 +107,47 @@ export default function ComplaintForm({ verifiedEmail }) {
     setSearchQuery('');
   };
 
-  const handlePrimaryImageCapture = async (e) => {
-    // legacy fallback (some browsers/devices may still use file input)
-    const file = (e.target.files || [])[0];
-    if (!file) return;
+  const clearSelectedBusiness = () => {
+    setError(null);
+    setBusinesses([]);
+    setShowBusinessList(false);
+    setSearchQuery('');
+    setProximityTag(null);
+
+    setFormData((prev) => {
+      const nextTags = (prev.tags || []).filter(
+        (t) => t !== 'Verification Unavailable' && t !== 'Failed Location Verification' && t !== 'Passed Location Verification'
+      );
+
+      return {
+        ...prev,
+        business_pk: null,
+        business_name: '',
+        business_address: '',
+        tags: nextTags,
+      };
+    });
+  };
+
+  const handleEvidenceFileUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
     setLoading(true);
     setError(null);
 
     try {
-      const url = await uploadImage(file);
-      setPrimaryImageUrl(url);
+      const uploaded = await Promise.all(files.map((file) => uploadImage(file)));
+      setEvidenceImages((prev) => [...prev, ...uploaded]);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const removeEvidenceImage = (index) => {
+    setEvidenceImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const stopCamera = () => {
@@ -272,9 +303,9 @@ export default function ComplaintForm({ verifiedEmail }) {
       setLoading(true);
       setError(null);
       const url = await uploadImage(file);
-      setPrimaryImageUrl(url);
+      setEvidenceImages((prev) => [...prev, url]);
 
-      closeCamera();
+      // Keep camera open to allow multiple captures.
     } catch (e) {
       setCameraError(e?.message || 'Failed to capture image.');
     } finally {
@@ -283,26 +314,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
   };
 
-  const handleAdditionalImagesUpload = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const uploaded = await Promise.all(files.map((file) => uploadImage(file)));
-      setAdditionalImages((prev) => [...prev, ...uploaded]);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const removeAdditionalImage = (index) => {
-    setAdditionalImages((prev) => prev.filter((_, i) => i !== index));
-  };
+  // (additional images handled in Step 3 evidence)
 
   useEffect(() => {
     // Safety: when leaving step 3, stop camera to avoid keeping it open
@@ -349,6 +361,17 @@ export default function ComplaintForm({ verifiedEmail }) {
 
     if (!formData.business_name) {
       setError('Select a business first.');
+      return;
+    }
+
+    // For "No-Permit" / business-not-in-db submissions, we don't have a business_pk.
+    // Skip proximity verification and allow continuation.
+    if (!formData.business_pk) {
+      setProximityTag('Verification Unavailable');
+      setFormData((prev) => ({
+        ...prev,
+        tags: [...new Set([...(prev.tags || []), 'Verification Unavailable'])],
+      }));
       return;
     }
 
@@ -479,7 +502,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     // Step validations
     if (step === 1) {
       if (!formData.business_name || !formData.business_address) {
-        setError('Please select a business (and ensure address is filled).');
+        setError('Please provide a business name and address.');
         return;
       }
     }
@@ -492,8 +515,8 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
 
     if (step === 3) {
-      if (!primaryImageUrl) {
-        setError('Please capture an image using your device camera.');
+      if (evidenceImages.length === 0) {
+        setError('Please add at least one photo.');
         return;
       }
     }
@@ -509,13 +532,25 @@ export default function ComplaintForm({ verifiedEmail }) {
       }
     }
 
-    if (step === 6) {
+    if (step === 5) {
       // last step
       return;
     }
 
     setStep((s) => Math.min(TOTAL_STEPS, s + 1));
   };
+
+  // When arriving on the final step, clear any prior validation errors.
+  // This avoids showing stale errors (e.g., confirm checkbox) before the user attempts submit.
+  useEffect(() => {
+    if (step !== 5) return;
+
+    // Clear any stale validation errors on entry to Step 5.
+    // Use rAF to ensure we run after paint/state flush, avoiding race conditions
+    // without using timers that may interact with form submit.
+    const raf = requestAnimationFrame(() => setError(null));
+    return () => cancelAnimationFrame(raf);
+  }, [step]);
 
   const goBack = () => {
     setError(null);
@@ -540,7 +575,7 @@ export default function ComplaintForm({ verifiedEmail }) {
         complaint_description: formData.complaint_description,
         reporter_email: formData.reporter_email,
         // store all images as URLs in image_urls; keep primary first
-        image_urls: [primaryImageUrl, ...additionalImages].filter(Boolean),
+        image_urls: evidenceImages.filter(Boolean),
         tags: formData.tags,
         status: 'Submitted',
         email_verified: !!verifiedEmail,
@@ -601,7 +636,42 @@ export default function ComplaintForm({ verifiedEmail }) {
                   placeholder="Search business name or address..."
                   className="form-input"
                   autoComplete="off"
+                  disabled={businessNotInDb}
                 />
+
+                <div className="check-row" style={{ marginTop: 10 }}>
+                  <input
+                    id="businessNotInDb"
+                    type="checkbox"
+                    checked={businessNotInDb}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+
+                      // Toggling into "Business not listed" should reset any previously selected business
+                      // so the user starts with a clean slate.
+                      if (checked) {
+                        clearSelectedBusiness();
+                      }
+
+                      setBusinessNotInDb(checked);
+                      setError(null);
+                      setShowBusinessList(false);
+                      setBusinesses([]);
+                      setSearchQuery('');
+
+                      // Ensure we don't submit a stale business_pk in "not in DB" mode.
+                      if (checked) {
+                        setFormData((prev) => ({
+                          ...prev,
+                          business_pk: null,
+                        }));
+                      }
+                    }}
+                  />
+                  <label htmlFor="businessNotInDb" style={{ margin: 0, fontWeight: 800, color: '#0f172a' }}>
+                    Business not listed (No-Permit violation)
+                  </label>
+                </div>
 
                 {showBusinessList && businesses.length > 0 ? (
                   <div className="business-list">
@@ -619,13 +689,44 @@ export default function ComplaintForm({ verifiedEmail }) {
                 ) : null}
 
                 {formData.business_name ? (
-                  <div className="inline-note">
-                    Selected: <strong>{formData.business_name}</strong>
+                  <div className="inline-note" style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                    <div>
+                      {businessNotInDb ? (
+                        <>Manual entry: <strong>{formData.business_name}</strong></>
+                      ) : (
+                        <>Selected: <strong>{formData.business_name}</strong></>
+                      )}
+                    </div>
+
+                    {!businessNotInDb ? (
+                      <button type="button" className="btn btn-secondary" onClick={clearSelectedBusiness}>
+                        Remove selection
+                      </button>
+                    ) : null}
                   </div>
                 ) : (
-                  <div className="inline-note">Select from the list to auto-fill the address.</div>
+                  <div className="inline-note">
+                    {businessNotInDb ? 'Enter the business name below.' : 'Select from the list to auto-fill the address.'}
+                  </div>
                 )}
               </div>
+
+              {businessNotInDb ? (
+                <div className="form-group">
+                  <label htmlFor="business_name_manual">Business Name</label>
+                  <input
+                    id="business_name_manual"
+                    type="text"
+                    value={formData.business_name}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, business_name: e.target.value }))
+                    }
+                    placeholder="Enter business name"
+                    className="form-input"
+                    required
+                  />
+                </div>
+              ) : null}
 
               <div className="form-group">
                 <label htmlFor="business_address">Business Address</label>
@@ -717,91 +818,121 @@ export default function ComplaintForm({ verifiedEmail }) {
           {step === 3 ? (
             <>
               <div className="form-group">
-                <label>Capture Image (Required)</label>
+                <label>Evidence Photos</label>
 
-                <div className="file-upload" style={{ flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={openCameraFlow}
-                    disabled={loading || cameraBusy}
-                    className="btn btn-secondary"
-                  >
-                    {cameraBusy ? 'Opening…' : 'Open Camera'}
-                  </button>
+                {withinRange ? (
+                  <div className="inline-note">
+                    You are within 200m. For integrity, photo evidence must be captured using the in-app camera.
+                  </div>
+                ) : outOfRange ? (
+                  <div className="inline-note">
+                    You are not within 200m. Please upload existing photos from your device.
+                  </div>
+                ) : (
+                  <div className="inline-note">
+                    Location verification is unavailable. You may use either method.
+                  </div>
+                )}
 
-                  <button
-                    type="button"
-                    onClick={switchCamera}
-                    disabled={loading || cameraBusy || !cameraOpen}
-                    className="btn btn-secondary"
-                  >
-                    Switch Camera
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={closeCamera}
-                    disabled={loading || cameraBusy || !cameraOpen}
-                    className="btn btn-secondary"
-                  >
-                    Close
-                  </button>
-
-                  {primaryImageUrl ? (
-                    <span className="small-pill">✓ Captured</span>
-                  ) : (
-                    <span className="small-pill">Required</span>
-                  )}
-                </div>
-
-                {cameraError ? <div className="error-message">{cameraError}</div> : null}
-
-                {cameraOpen ? (
-                  <div style={{ marginTop: 12 }}>
-                    <div className="camera-box">
-                      <video ref={videoRef} playsInline muted autoPlay className="camera-video" />
-                    </div>
-
-                    <div className="form-nav" style={{ marginTop: 12 }}>
+                {/* Camera controls (allowed when within range or verification unavailable) */}
+                {!outOfRange ? (
+                  <>
+                    <div className="file-upload" style={{ flexWrap: 'wrap', marginTop: 10 }}>
                       <button
                         type="button"
-                        className="btn btn-primary"
-                        onClick={captureFromCamera}
+                        onClick={openCameraFlow}
                         disabled={loading || cameraBusy}
+                        className="btn btn-secondary"
                       >
-                        {cameraBusy ? 'Capturing…' : 'Capture Photo'}
+                        {cameraBusy ? 'Opening…' : (cameraOpen ? 'Camera Open' : 'Open Camera')}
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={switchCamera}
+                        disabled={loading || cameraBusy || !cameraOpen}
+                        className="btn btn-secondary"
+                      >
+                        Switch Camera
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={closeCamera}
+                        disabled={loading || cameraBusy || !cameraOpen}
+                        className="btn btn-secondary"
+                      >
+                        Close
+                      </button>
+
+                      <span className="small-pill">{evidenceImages.length} added</span>
                     </div>
-                  </div>
+
+                    {cameraError ? <div className="error-message">{cameraError}</div> : null}
+
+                    {cameraOpen ? (
+                      <div style={{ marginTop: 12 }}>
+                        <div className="camera-box">
+                          <video ref={videoRef} playsInline muted autoPlay className="camera-video" />
+                        </div>
+
+                        <div className="form-nav" style={{ marginTop: 12 }}>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={captureFromCamera}
+                            disabled={loading || cameraBusy}
+                          >
+                            {cameraBusy ? 'Capturing…' : 'Capture Photo'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
                 ) : null}
 
-                {/* Fallback file input for devices that block getUserMedia */}
-                <div className="inline-note" style={{ marginTop: 10 }}>
-                  If your browser blocks in-app camera, you can use the fallback file picker below.
-                </div>
-                <div className="file-upload" style={{ marginTop: 8 }}>
-                  <input
-                    ref={primaryImageInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handlePrimaryImageCapture}
-                    disabled={loading}
-                    className="file-input"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => primaryImageInputRef.current?.click()}
-                    disabled={loading}
-                    className="btn btn-secondary"
-                  >
-                    Choose from Device
-                  </button>
-                </div>
+                {/* File upload (allowed when out of range or verification unavailable) */}
+                {!withinRange ? (
+                  <>
+                    <div className="inline-note" style={{ marginTop: 14 }}>
+                      Upload one or more photos.
+                    </div>
+                    <div className="file-upload" style={{ marginTop: 8 }}>
+                      <input
+                        ref={primaryImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleEvidenceFileUpload}
+                        disabled={loading}
+                        className="file-input"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => primaryImageInputRef.current?.click()}
+                        disabled={loading}
+                        className="btn btn-secondary"
+                      >
+                        Choose from Device
+                      </button>
+                    </div>
+                  </>
+                ) : null}
 
-                {primaryImageUrl ? (
-                  <div className="inline-note">
-                    Stored: <strong>{primaryImageUrl.split('/').pop()}</strong>
+                {evidenceImages.length > 0 ? (
+                  <div className="file-list" style={{ marginTop: 10 }}>
+                    {evidenceImages.map((url, index) => (
+                      <div key={`${url}-${index}`} className="file-item">
+                        <span>{url.split('/').pop()}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeEvidenceImage(index)}
+                          className="btn-remove"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 ) : null}
               </div>
@@ -835,52 +966,8 @@ export default function ComplaintForm({ verifiedEmail }) {
             </>
           ) : null}
 
+          
           {step === 5 ? (
-            <>
-              <div className="form-group">
-                <label>Additional Image Evidence (Optional)</label>
-                <div className="file-upload">
-                  <input
-                    ref={additionalImageInputRef}
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={handleAdditionalImagesUpload}
-                    disabled={loading}
-                    className="file-input"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => additionalImageInputRef.current?.click()}
-                    disabled={loading}
-                    className="btn btn-secondary"
-                  >
-                    Add Images
-                  </button>
-                  <span className="small-pill">{additionalImages.length} added</span>
-                </div>
-
-                {additionalImages.length > 0 ? (
-                  <div className="file-list">
-                    {additionalImages.map((url, index) => (
-                      <div key={url} className="file-item">
-                        <span>{url.split('/').pop()}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeAdditionalImage(index)}
-                          className="btn-remove"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </>
-          ) : null}
-
-          {step === 6 ? (
             <>
               <div className="form-group">
                 <label>Review Summary</label>
@@ -899,40 +986,17 @@ export default function ComplaintForm({ verifiedEmail }) {
                   </div>
 
                   <div className="review-row">
-                    <div className="review-label">Primary Photo</div>
-                    <div className="review-value">
-                      {primaryImageUrl ? (
-                        <a href={primaryImageUrl} target="_blank" rel="noreferrer">View image</a>
-                      ) : (
-                        '—'
-                      )}
-                    </div>
+                    <div className="review-label">Evidence Photos</div>
+                    <div className="review-value">{evidenceImages.length || 0}</div>
                   </div>
 
-                  {primaryImageUrl ? (
+                  {evidenceImages.length > 0 ? (
                     <div className="review-image-grid">
-                      <img src={primaryImageUrl} alt="Primary evidence" />
+                      {evidenceImages.map((url) => (
+                        <img key={url} src={url} alt="Evidence" />
+                      ))}
                     </div>
                   ) : null}
-
-                  {additionalImages.length > 0 ? (
-                    <>
-                      <div className="review-row">
-                        <div className="review-label">Additional Images</div>
-                        <div className="review-value">{additionalImages.length}</div>
-                      </div>
-                      <div className="review-image-grid">
-                        {additionalImages.map((url) => (
-                          <img key={url} src={url} alt="Additional evidence" />
-                        ))}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="review-row">
-                      <div className="review-label">Additional Images</div>
-                      <div className="review-value">0</div>
-                    </div>
-                  )}
 
                   <div className="review-row" style={{ alignItems: 'flex-start' }}>
                     <div className="review-label">Description</div>
@@ -950,7 +1014,15 @@ export default function ComplaintForm({ verifiedEmail }) {
                     id="confirmTruth"
                     type="checkbox"
                     checked={confirmTruth}
-                    onChange={(e) => setConfirmTruth(e.target.checked)}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setConfirmTruth(checked);
+
+                      // Clear any prior submit error once the user satisfies the requirement.
+                      if (checked && error === 'Please confirm the statement before submitting.') {
+                        setError(null);
+                      }
+                    }}
                   />
                   <label htmlFor="confirmTruth" style={{ margin: 0, fontWeight: 800, color: '#0f172a' }}>
                     I confirm that the details are true and inaccurate information may lead to the non-processing of the complaint.
