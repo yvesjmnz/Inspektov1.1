@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import Header from '../../../components/Header';
-import Footer from '../../../components/Footer';
 import { supabase } from '../../../lib/supabase';
 import './Dashboard.css';
 
@@ -328,9 +326,33 @@ export default function DashboardDirector() {
 
   return (
     <div className="dash-container">
-      <Header />
-      <main className="dash-main">
-        <section className="dash-card">
+            <main className="dash-main">
+        <section className="dash-shell">
+          <aside className="dash-side" title="Menu">
+            <div className="dash-side-brand" title="INSPEKTO">I</div>
+            <ul className="dash-nav">
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'queue' ? 'active' : ''}`} onClick={() => setTab('queue')}>
+                  <span className="dash-nav-ico">📝</span>
+                  <span className="dash-nav-label">Review Queue</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'mission-orders' ? 'active' : ''}`} onClick={() => setTab('mission-orders')}>
+                  <span className="dash-nav-ico">����</span>
+                  <span className="dash-nav-label">Review Mission Orders</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>
+                  <span className="dash-nav-ico">📚</span>
+                  <span className="dash-nav-label">Complaint History</span>
+                </button>
+              </li>
+            </ul>
+          </aside>
+          <div className="dash-maincol">
+            <div className="dash-card">
           <div className="dash-header">
             <div>
               <h2 className="dash-title">Director Dashboard</h2>
@@ -344,30 +366,7 @@ export default function DashboardDirector() {
             </div>
           </div>
 
-          <div className="dash-tabs">
-            <button
-              type="button"
-              className={`dash-tab ${tab === 'queue' ? 'dash-tab-active' : ''}`}
-              onClick={() => setTab('queue')}
-            >
-              Review Queue
-            </button>
-            <button
-              type="button"
-              className={`dash-tab ${tab === 'mission-orders' ? 'dash-tab-active' : ''}`}
-              onClick={() => setTab('mission-orders')}
-            >
-              Review Mission Orders
-            </button>
-            <button
-              type="button"
-              className={`dash-tab ${tab === 'history' ? 'dash-tab-active' : ''}`}
-              onClick={() => setTab('history')}
-            >
-              Complaint History
-            </button>
-          </div>
-
+          
           <div className="dash-toolbar">
             <input
               className="dash-input"
@@ -376,7 +375,7 @@ export default function DashboardDirector() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <button className="dash-btn" type="button" onClick={loadComplaints} disabled={loading}>
+            <button className="dash-btn" type="button" onClick={() => (tab === 'mission-orders' ? loadMissionOrders() : loadComplaints())} disabled={loading}>
               {loading ? 'Refreshing…' : 'Refresh'}
             </button>
             <button
@@ -582,6 +581,8 @@ export default function DashboardDirector() {
           <div className="dash-note">
             Note: Inspection monitoring, audit trails, reports, exports, and printing will be implemented next.
           </div>
+            </div>
+          </div>
         </section>
       </main>
       {/* Image Preview Overlay */}
@@ -650,7 +651,6 @@ export default function DashboardDirector() {
         </div>
       ) : null}
 
-      <Footer />
-    </div>
+      </div>
   );
 }
