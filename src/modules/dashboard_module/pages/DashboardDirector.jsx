@@ -32,6 +32,7 @@ export default function DashboardDirector() {
 
   const [previewImage, setPreviewImage] = useState(null);
   const closePreview = () => setPreviewImage(null);
+  const [navCollapsed, setNavCollapsed] = useState(false);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -327,29 +328,54 @@ export default function DashboardDirector() {
   return (
     <div className="dash-container">
             <main className="dash-main">
-        <section className="dash-shell">
-          <aside className="dash-side" title="Menu">
-            <div className="dash-side-brand" title="INSPEKTO">I</div>
-            <ul className="dash-nav">
+        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
+          <aside className="dash-side" title="Menu" style={{ width: navCollapsed ? 72 : 240, display: 'flex', flexDirection: 'column' }}>
+            <div className="dash-side-brand" title="Menu">
+              <div className="hamburger" aria-hidden="true">
+                <div className="hamburger-bar"></div>
+                <div className="hamburger-bar"></div>
+                <div className="hamburger-bar"></div>
+              </div>
+            </div>
+            <ul className="dash-nav" style={{ flex: 1 }}>
               <li>
                 <button type="button" className={`dash-nav-item ${tab === 'queue' ? 'active' : ''}`} onClick={() => setTab('queue')}>
-                  <span className="dash-nav-ico">📝</span>
-                  <span className="dash-nav-label">Review Queue</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Queue</span>
                 </button>
               </li>
               <li>
                 <button type="button" className={`dash-nav-item ${tab === 'mission-orders' ? 'active' : ''}`} onClick={() => setTab('mission-orders')}>
-                  <span className="dash-nav-ico">����</span>
-                  <span className="dash-nav-label">Review Mission Orders</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Mission Orders</span>
                 </button>
               </li>
               <li>
                 <button type="button" className={`dash-nav-item ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>
-                  <span className="dash-nav-ico">📚</span>
-                  <span className="dash-nav-label">Complaint History</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Complaint History</span>
                 </button>
               </li>
-            </ul>
+              <li>
+                <a className="dash-nav-item" href="/">
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Back to Home</span>
+                </a>
+              </li>
+                          </ul>
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                marginTop: 'auto',
+                border: 'none',
+                background: 'transparent',
+                color: '#ef4444',
+                fontWeight: 800,
+                textAlign: 'left',
+                padding: '10px 12px',
+                borderRadius: 10,
+                cursor: 'pointer',
+              }}
+            >
+              <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Logout</span>
+            </button>
           </aside>
           <div className="dash-maincol">
             <div className="dash-card">
@@ -358,15 +384,23 @@ export default function DashboardDirector() {
               <h2 className="dash-title">Director Dashboard</h2>
               <p className="dash-subtitle">Complaint oversight: review submissions and track decision history.</p>
             </div>
-            <div className="dash-actions">
-              <a className="dash-link" href="/">Back to Home</a>
-              <button className="dash-logout" type="button" onClick={handleLogout}>
-                Logout
-              </button>
-            </div>
+            <div className="dash-actions"></div>
           </div>
 
-          
+          {tab === 'queue' ? (
+            <div className="dash-topbar">
+              <button
+                type="button"
+                className="dash-menu-btn"
+                onClick={() => setNavCollapsed((v) => !v)}
+                aria-label="Toggle menu"
+                title="Toggle menu"
+              >
+                <span className="dash-menu-label">{navCollapsed ? 'Expand >' : '< Collapse'}</span>
+              </button>
+            </div>
+          ) : null}
+
           <div className="dash-toolbar">
             <input
               className="dash-input"
