@@ -43,25 +43,61 @@ export default function DashboardHeadInspector() {
     setLoading(true);
 
     try {
-      let query = supabase
-        .from('v_head_inspector_queue')
-        .select('*')
-        .order('approved_at', { ascending: false })
+      // Source of truth: mission orders created for complaints.
+      // We query mission_orders, then hydrate complaint details for display.
+      const { data: missionOrders, error: moError } = await supabase
+        .from('mission_orders')
+        .select('id, complaint_id, status, created_at')
+        .order('created_at', { ascending: false })
         .limit(200);
 
-      const searchVal = search.trim();
-      if (searchVal) {
-        query = query.or(
-          `business_name.ilike.%${searchVal}%,business_address.ilike.%${searchVal}%,complaint_id::text.ilike.%${searchVal}%`
-        );
-      }
+      if (moError) throw moError;
 
-      const { data, error } = await query;
-      if (error) throw error;
+      const complaintIds = Array.from(
+        new Set((missionOrders || []).map((m) => m.complaint_id).filter(Boolean))
+      );
 
-      setComplaints(data || []);
+      const { data: complaintRows, error: complaintError } = complaintIds.length
+        ? await supabase
+            .from('complaints')
+            .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
+            .in('id', complaintIds)
+        : { data: [], error: null };
+
+      if (complaintError) throw complaintError;
+
+      const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
+
+      // Merge into the shape the table expects.
+      const merged = (missionOrders || []).map((mo) => {
+        const c = complaintById.get(mo.complaint_id) || {};
+        return {
+          complaint_id: mo.complaint_id,
+          business_name: c.business_name,
+          business_address: c.business_address,
+          reporter_email: c.reporter_email,
+          status: c.status ?? mo.status,
+          approved_at: c.approved_at,
+          created_at: c.created_at,
+          mission_order_id: mo.id,
+          inspector_names: [],
+        };
+      });
+
+      const searchVal = search.trim().toLowerCase();
+      const filtered = !searchVal
+        ? merged
+        : merged.filter((r) => {
+            const hay = [r.business_name, r.business_address, r.reporter_email, r.complaint_id, r.mission_order_id]
+              .filter(Boolean)
+              .join(' ')
+              .toLowerCase();
+            return hay.includes(searchVal);
+          });
+
+      setComplaints(filtered);
     } catch (e) {
-      setError(e?.message || 'Failed to load approved complaints.');
+      setError(e?.message || 'Failed to load mission orders.');
       setComplaints([]);
     } finally {
       setLoading(false);
