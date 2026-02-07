@@ -35,6 +35,7 @@ export default function DashboardDirector() {
   const [fullViewError, setFullViewError] = useState('');
   const [fullComplaint, setFullComplaint] = useState(null);
   const [fullPreviewImage, setFullPreviewImage] = useState(null);
+  const [evidenceIndex, setEvidenceIndex] = useState(0);
 
   const [previewImage, setPreviewImage] = useState(null);
   const closePreview = () => setPreviewImage(null);
@@ -258,6 +259,7 @@ export default function DashboardDirector() {
         .single();
       if (error) throw error;
       setFullComplaint(data);
+      setEvidenceIndex(0);
     } catch (e) {
       setFullViewError(e?.message || 'Failed to load complaint');
     } finally {
@@ -269,6 +271,7 @@ export default function DashboardDirector() {
     setFullComplaint(null);
     setFullViewError('');
     setFullPreviewImage(null);
+    setEvidenceIndex(0);
   };
   
   // Summary KPIs (client-side only)
@@ -364,6 +367,10 @@ export default function DashboardDirector() {
             return ['submitted', 'pending', 'new'].includes(String(status));
           })
         );
+      }
+      // Keep the open full complaint view in sync
+      if (fullViewId === complaintId) {
+        setFullComplaint((prev) => (prev ? { ...prev, ...patch } : prev));
       }
     } catch (e) {
       setError(e?.message || 'Failed to update status.');
@@ -537,7 +544,6 @@ export default function DashboardDirector() {
                       <th>Business</th>
                       <th style={{ width: 160 }}>Urgency</th>
                       <th style={{ width: 200 }}>Submitted</th>
-                      <th style={{ width: 220 }}>Actions</th>
                     </tr>
                   ) : (
                     <tr>
@@ -566,7 +572,7 @@ export default function DashboardDirector() {
                           const label = complaintsByDay.groups[dayKey]?.label || dayKey;
                           rows.push(
                             <tr key={`day-${dayKey}`}>
-                              <td colSpan={5} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>{label}</td>
+                              <td colSpan={4} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>{label}</td>
                             </tr>
                           );
                           complaintsByDay.groups[dayKey].items.forEach((c) => {
@@ -581,31 +587,7 @@ export default function DashboardDirector() {
                                   <span className="status-badge status-warning">{c?.authenticity_level ?? '—'}</span>
                                 </td>
                                 <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
-                                <td>
-                                  <div className="dash-row-actions">
-                                    <button
-                                      type="button"
-                                      className="dash-btn dash-btn-success dash-btn-icon"
-                                      onClick={(e) => { e.stopPropagation(); updateComplaintStatus(c.id, 'approved'); }}
-                                      disabled={loading}
-                                      aria-label="Approve"
-                                      title="Approve"
-                                    >
-                                      ✓
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="dash-btn dash-btn-danger dash-btn-icon"
-                                      onClick={(e) => { e.stopPropagation(); updateComplaintStatus(c.id, 'declined'); }}
-                                      disabled={loading}
-                                      aria-label="Decline"
-                                      title="Decline"
-                                    >
-                                      ✕
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
+                                                              </tr>
                             );
                           });
                           return rows;
@@ -809,91 +791,209 @@ export default function DashboardDirector() {
           flexDirection: 'column',
           zIndex: 50
         }}>
-          <button className="overlay-close" onClick={closeFullComplaint} aria-label="Close">&times;</button>
+          <button
+            className="overlay-close"
+            onClick={closeFullComplaint}
+            aria-label="Close"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              color: '#ef4444',
+              background: 'transparent',
+              border: 'none',
+              padding: 0,
+              fontSize: 28,
+              lineHeight: 1,
+              cursor: 'pointer'
+            }}
+          >
+            &times;
+          </button>
           <div style={{ padding: 16, borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h3 style={{ margin: 0 }}>Complaint Review</h3>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="dash-btn" type="button" onClick={() => window.print()}>Print</button>
-            </div>
+            <div style={{ display: 'flex', gap: 8 }}></div>
           </div>
-          <div style={{ padding: 16, overflowY: 'auto' }}>
+          <div style={{ padding: 16, overflowY: 'auto', background: '#f8fafc' }}>
             {fullViewLoading ? <div className="dash-alert">Loading…</div> : null}
             {fullViewError ? <div className="dash-alert dash-alert-error">{fullViewError}</div> : null}
 
             {fullComplaint ? (
-              <div style={{ display: 'grid', gap: 12 }}>
-                {/* Summary */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                  <div style={{ minWidth: 280 }}>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>{fullComplaint.business_name || '—'}</div>
-                    <div style={{ color: '#475569', fontWeight: 700 }}>{fullComplaint.business_address || '—'}</div>
+              <div style={{ display: 'grid', gap: 16 }}>
+                {/* Top chip and header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ background: '#e0e7ff', color: '#1e3a8a', fontWeight: 800, border: '1px solid #c7d2fe', padding: '6px 10px', borderRadius: 999, fontSize: 12 }}>ID: {String(fullComplaint.id || '').slice(0, 8)}…</span>
+                </div>
+
+                {/* Primary Info Card */}
+                <div style={{ background: '#eef2ff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 18, fontWeight: 900, color: '#0f172a' }}>{fullComplaint.business_name || '—'}</div>
+                    <span className="status-badge" title="Status" style={{ background: '#e2e8f0' }}>{formatStatus(fullComplaint.status)}</span>
                   </div>
-                  <div style={{ display: 'grid', gap: 6, justifyItems: 'end' }}>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      <span className="status-badge status-warning" title="Urgency">{fullComplaint?.authenticity_level ?? '—'}</span>
-                      <span className="status-badge" title="Status">{formatStatus(fullComplaint.status)}</span>
+                  <div style={{ color: '#334155', marginTop: 8, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <span aria-hidden>📍</span>
+                    <span style={{ fontWeight: 700 }}>{fullComplaint.business_address || '—'}</span>
+                  </div>
+                  <div style={{ height: 1, background: '#dbeafe', margin: '12px 0' }} />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))', gap: 12 }}>
+                    <div>
+                      <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Submitted</div>
+                      <div style={{ color: '#0f172a', fontWeight: 800 }}>{fullComplaint.created_at ? new Date(fullComplaint.created_at).toLocaleString() : '—'}</div>
                     </div>
-                    <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>ID:</strong> {fullComplaint.id}</div>
-                    <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>Submitted:</strong> {fullComplaint.created_at ? new Date(fullComplaint.created_at).toLocaleString() : '—'}</div>
-                    <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>Updated:</strong> {fullComplaint.updated_at ? new Date(fullComplaint.updated_at).toLocaleString() : '—'}</div>
+                    <div>
+                      <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Updated</div>
+                      <div style={{ color: '#0f172a', fontWeight: 800 }}>{fullComplaint.updated_at ? new Date(fullComplaint.updated_at).toLocaleString() : '—'}</div>
+                    </div>
                   </div>
                 </div>
 
-                <div style={{ height: 1, background: '#f1f5f9' }} />
-
-                {/* Description */}
-                <div>
-                  <div style={{ fontWeight: 800, marginBottom: 6, color: '#0f172a' }}>Description</div>
-                  <div style={{ whiteSpace: 'pre-wrap', color: '#0f172a' }}>{fullComplaint.complaint_description || '—'}</div>
+                {/* Description Card */}
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <span aria-hidden>📝</span>
+                    <div style={{ fontWeight: 900, color: '#0f172a' }}>Description</div>
+                  </div>
+                  <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{fullComplaint.complaint_description || '—'}</div>
                 </div>
 
-                {/* Evidence */}
-                <div>
-                  <div style={{ fontWeight: 800, marginBottom: 6, color: '#0f172a' }}>Evidence</div>
+                {/* Evidence Card */}
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <span aria-hidden>🖼️</span>
+                    <div style={{ fontWeight: 900, color: '#0f172a' }}>Evidence</div>
+                  </div>
                   {Array.isArray(fullComplaint.image_urls) && fullComplaint.image_urls.length > 0 ? (
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {fullComplaint.image_urls.map((url) => (
+                    <div style={{ display: 'grid', gap: 12 }}>
+                      {/* Hero image */}
+                      <div style={{ position: 'relative' }}>
                         <img
-                          key={url}
-                          src={url}
-                          alt="Evidence"
-                          onClick={() => setFullPreviewImage(url)}
-                          style={{
-                            width: 160,
-                            height: 110,
-                            objectFit: 'cover',
-                            borderRadius: 10,
-                            border: '1px solid #e2e8f0',
-                            cursor: 'pointer',
-                          }}
+                          src={fullComplaint.image_urls[evidenceIndex]}
+                          alt="Evidence hero"
+                          onClick={() => setFullPreviewImage(fullComplaint.image_urls[evidenceIndex])}
+                          style={{ width: '100%', height: 340, objectFit: 'cover', borderRadius: 16, border: '1px solid #e2e8f0', cursor: 'pointer' }}
                           loading="lazy"
                         />
-                      ))}
+                        {fullComplaint.image_urls.length > 1 ? (
+                          <>
+                            <button
+                              type="button"
+                              aria-label="Previous image"
+                              onClick={(e) => { e.stopPropagation(); const n = fullComplaint.image_urls.length; setEvidenceIndex((i) => (i - 1 + n) % n); }}
+                              style={{ position: 'absolute', top: '50%', left: 14, transform: 'translateY(-50%)', background: 'rgba(15,23,42,0.85)', color: '#fff', border: 'none', borderRadius: 999, width: 44, height: 44, aspectRatio: '1 / 1', display: 'grid', placeItems: 'center', cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.25)', padding: 0, lineHeight: 0, boxSizing: 'border-box' }}
+                            >
+                              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ display: 'block' }}>
+                                <path d="M14 6L8 12L14 18" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="Next image"
+                              onClick={(e) => { e.stopPropagation(); const n = fullComplaint.image_urls.length; setEvidenceIndex((i) => (i + 1) % n); }}
+                              style={{ position: 'absolute', top: '50%', right: 14, transform: 'translateY(-50%)', background: 'rgba(15,23,42,0.85)', color: '#fff', border: 'none', borderRadius: 999, width: 44, height: 44, aspectRatio: '1 / 1', display: 'grid', placeItems: 'center', cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.25)', padding: 0, lineHeight: 0, boxSizing: 'border-box' }}
+                            >
+                              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ display: 'block' }}>
+                                <path d="M10 6L16 12L10 18" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+                          </>
+                        ) : null}
+                        <div style={{ position: 'absolute', right: 10, bottom: 10, background: 'rgba(15,23,42,0.7)', color: '#fff', fontWeight: 800, padding: '4px 8px', borderRadius: 999, fontSize: 12 }}>
+                          {evidenceIndex + 1} / {fullComplaint.image_urls.length}
+                        </div>
+                      </div>
+                      {/* Thumbnails */}
+                      {fullComplaint.image_urls.length > 1 ? (
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                          {fullComplaint.image_urls.map((url, idx) => (
+                            <img
+                              key={url}
+                              src={url}
+                              alt={`Evidence ${idx + 1}`}
+                              onClick={() => setEvidenceIndex(idx)}
+                              style={{
+                                width: 110,
+                                height: 78,
+                                objectFit: 'cover',
+                                borderRadius: 12,
+                                border: idx === evidenceIndex ? '2px solid #2563eb' : '1px solid #e2e8f0',
+                                boxShadow: idx === evidenceIndex ? '0 0 0 3px rgba(37,99,235,0.15)' : 'none',
+                                cursor: 'pointer'
+                              }}
+                              loading="lazy"
+                            />
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
                   )}
                 </div>
 
-                {/* Details */}
-                <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(240px, 1fr))' }}>
-                  <div style={{ color: '#64748b', fontWeight: 700 }}>Reporter Email</div>
-                  <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.reporter_email || '—'}</div>
+                {/* Reporter Card */}
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <span aria-hidden>👤</span>
+                    <div style={{ fontWeight: 900, color: '#0f172a' }}>Reporter</div>
+                  </div>
+                  <div style={{ background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 12, padding: 12, display: 'grid', gap: 6 }}>
+                    <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Email</div>
+                    <div style={{ fontWeight: 800, color: '#0f172a' }}>{fullComplaint.reporter_email || '—'}</div>
+                  </div>
                 </div>
 
-                {/* Audit */}
-                <div>
-                  <div style={{ fontWeight: 800, marginBottom: 6, color: '#0f172a' }}>Audit</div>
-                  <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(240px, 1fr))' }}>
-                    <div style={{ color: '#64748b', fontWeight: 700 }}>Approved By</div>
-                    <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.approved_by || '—'}</div>
-                    <div style={{ color: '#64748b', fontWeight: 700 }}>Approved At</div>
-                    <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.approved_at ? new Date(fullComplaint.approved_at).toLocaleString() : '—'}</div>
-                    <div style={{ color: '#64748b', fontWeight: 700 }}>Declined By</div>
-                    <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.declined_by || '—'}</div>
-                    <div style={{ color: '#64748b', fontWeight: 700 }}>Declined At</div>
-                    <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.declined_at ? new Date(fullComplaint.declined_at).toLocaleString() : '—'}</div>
+                {/* Audit Card */}
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <span aria-hidden>•</span>
+                    <div style={{ fontWeight: 900, color: '#0f172a' }}>Audit Trail</div>
                   </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))', gap: 16 }}>
+                    <div>
+                      <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Approved By</div>
+                      <div style={{ fontWeight: 800, color: '#0f172a' }}>{fullComplaint.approved_by || '—'}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Approved At</div>
+                      <div style={{ fontWeight: 800, color: '#0f172a' }}>{fullComplaint.approved_at ? new Date(fullComplaint.approved_at).toLocaleString() : '—'}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Declined By</div>
+                      <div style={{ fontWeight: 800, color: '#0f172a' }}>{fullComplaint.declined_by || '—'}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Declined At</div>
+                      <div style={{ fontWeight: 800, color: '#0f172a' }}>{fullComplaint.declined_at ? new Date(fullComplaint.declined_at).toLocaleString() : '—'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sticky Action Bar */}
+                <div style={{ position: 'sticky', bottom: 0, background: '#ffffff', borderTop: '1px solid #e2e8f0', padding: 12, display: 'flex', justifyContent: 'flex-end', gap: 8, boxShadow: '0 -2px 8px rgba(2,6,23,0.06)', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
+                  <button
+                    className="dash-btn dash-btn-success"
+                    type="button"
+                    onClick={() => updateComplaintStatus(fullComplaint.id, 'approved')}
+                    disabled={loading || !fullComplaint}
+                    aria-label="Approve"
+                    title="Approve"
+                    style={{ borderRadius: 999, padding: '0 16px' }}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    className="dash-btn dash-btn-danger"
+                    type="button"
+                    onClick={() => updateComplaintStatus(fullComplaint.id, 'declined')}
+                    disabled={loading || !fullComplaint}
+                    aria-label="Decline"
+                    title="Decline"
+                    style={{ borderRadius: 999, padding: '0 16px' }}
+                  >
+                    Decline
+                  </button>
+                  <button className="dash-btn" type="button" onClick={() => window.print()} style={{ borderRadius: 999, padding: '0 16px' }}>Print</button>
                 </div>
               </div>
             ) : null}
