@@ -36,10 +36,15 @@ export default function DashboardDirector() {
   const [fullComplaint, setFullComplaint] = useState(null);
   const [fullPreviewImage, setFullPreviewImage] = useState(null);
   const [evidenceIndex, setEvidenceIndex] = useState(0);
+  // Complaint History date filters
+  const [historyYear, setHistoryYear] = useState('all');
+  const [historyMonth, setHistoryMonth] = useState('all');
+  const [historyDay, setHistoryDay] = useState('all');
 
   const [previewImage, setPreviewImage] = useState(null);
   const closePreview = () => setPreviewImage(null);
   const [navCollapsed, setNavCollapsed] = useState(false);
+  const currentYear = new Date().getFullYear();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -70,6 +75,29 @@ export default function DashboardDirector() {
           'declined',
           'rejected',
         ]);
+        // Apply created_at date range for Complaint History if filters are set
+        try {
+          const y = historyYear !== 'all' ? Number(historyYear) : null;
+          const m = historyMonth !== 'all' ? Number(historyMonth) : null; // 1-12
+          const d = historyDay !== 'all' ? Number(historyDay) : null; // 1-31
+          let start = null;
+          let end = null;
+          if (y && !m && !d) {
+            start = new Date(y, 0, 1);
+            end = new Date(y + 1, 0, 1);
+          } else if (y && m && !d) {
+            start = new Date(y, m - 1, 1);
+            end = new Date(y, m, 1);
+          } else if (y && m && d) {
+            start = new Date(y, m - 1, d);
+            end = new Date(y, m - 1, d + 1);
+          }
+          if (start && end) {
+            query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString());
+          }
+        } catch (_) {
+          // ignore invalid date ranges
+        }
       }
 
       const searchVal = search.trim();
@@ -134,6 +162,14 @@ export default function DashboardDirector() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  // Reload history when any date filter changes
+  useEffect(() => {
+    if (tab === 'history') {
+      loadComplaints();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyYear, historyMonth, historyDay]);
 
   const filteredComplaints = useMemo(() => {
     // Additional client-side filtering by ID (since server-side OR is limited to text columns).
@@ -457,25 +493,56 @@ export default function DashboardDirector() {
           ) : null}
 
           <div className="dash-toolbar">
-            <input
-              className="dash-input"
-              type="text"
-              placeholder="Search by business name/address, reporter email, or ID..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <button className="dash-btn" type="button" onClick={() => (tab === 'mission-orders' ? loadMissionOrders() : loadComplaints())} disabled={loading}>
-              {loading ? 'Refreshing…' : 'Refresh'}
-            </button>
-            <button
-              className="dash-btn"
-              type="button"
-              onClick={handleExport}
-              disabled={loading || (tab === 'mission-orders' ? filteredMissionOrders.length === 0 : filteredComplaints.length === 0)}
-            >
-              Export CSV
-            </button>
-                      </div>
+          {tab === 'history' ? (
+          <>
+          <select className="dash-select" value={historyYear} onChange={(e) => setHistoryYear(e.target.value)}>
+          <option value="all">All Years</option>
+          {Array.from({ length: 6 }, (_, i) => currentYear - i).map((y) => (
+          <option key={y} value={String(y)}>{y}</option>
+          ))}
+          </select>
+          <select className="dash-select" value={historyMonth} onChange={(e) => setHistoryMonth(e.target.value)}>
+          <option value="all">All Months</option>
+          <option value="1">Jan</option>
+          <option value="2">Feb</option>
+          <option value="3">Mar</option>
+          <option value="4">Apr</option>
+          <option value="5">May</option>
+          <option value="6">Jun</option>
+          <option value="7">Jul</option>
+          <option value="8">Aug</option>
+          <option value="9">Sep</option>
+          <option value="10">Oct</option>
+          <option value="11">Nov</option>
+          <option value="12">Dec</option>
+          </select>
+          <select className="dash-select" value={historyDay} onChange={(e) => setHistoryDay(e.target.value)}>
+          <option value="all">All Days</option>
+          {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+          <option key={d} value={String(d)}>{d}</option>
+          ))}
+          </select>
+          </>
+          ) : null}
+          <input
+          className="dash-input"
+          type="text"
+          placeholder="Search by business name/address, reporter email, or ID..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          />
+          <button className="dash-btn" type="button" onClick={() => (tab === 'mission-orders' ? loadMissionOrders() : loadComplaints())} disabled={loading}>
+          {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <button
+          className="dash-btn"
+          type="button"
+          onClick={handleExport}
+          disabled={loading || (tab === 'mission-orders' ? filteredMissionOrders.length === 0 : filteredComplaints.length === 0)}
+          >
+          Export CSV
+          </button>
+          </div>
 
           {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
           <div style={{ margin: '10px 0', color: '#475569', fontSize: 12 }}>
