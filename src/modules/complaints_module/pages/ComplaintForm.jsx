@@ -864,11 +864,11 @@ export default function ComplaintForm({ verifiedEmail }) {
                   <div className="inline-note">
                     You are not within 200m. Please upload existing photos from your device.
                   </div>
-                ) : (
+                ) : proximityTag === 'Verification Unavailable' ? (
                   <div className="inline-note">
                     Location verification is unavailable. You may use either method.
                   </div>
-                )}
+                ) : null}
 
                 {/* Camera controls (allowed when within range or verification unavailable) */}
                 {!outOfRange ? (
