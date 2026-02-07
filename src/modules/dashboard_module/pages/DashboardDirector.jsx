@@ -177,6 +177,9 @@ export default function DashboardDirector() {
   // Resolve approver/decliner labels (email/name) for audit drawer
   useEffect(() => {
     const fallbackShort = (id) => (id ? String(id).slice(0, 8) + '…' : '—');
+    const displayNameFromProfile = (p, fallbackId) =>
+      p?.full_name || [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') || fallbackShort(fallbackId);
+
     const resolveLabels = async () => {
       try {
         const tasks = [];
@@ -184,13 +187,10 @@ export default function DashboardDirector() {
           tasks.push(
             supabase
               .from('profiles')
-              .select('email, full_name')
+              .select('id, full_name, first_name, middle_name, last_name')
               .eq('id', auditComplaint.approved_by)
               .single()
-              .then(({ data }) => {
-                const label = data?.full_name || data?.email || fallbackShort(auditComplaint.approved_by);
-                setAuditApproverLabel(label);
-              })
+              .then(({ data }) => setAuditApproverLabel(displayNameFromProfile(data, auditComplaint.approved_by)))
               .catch(() => setAuditApproverLabel(fallbackShort(auditComplaint.approved_by)))
           );
         } else {
@@ -200,13 +200,10 @@ export default function DashboardDirector() {
           tasks.push(
             supabase
               .from('profiles')
-              .select('email, full_name')
+              .select('id, full_name, first_name, middle_name, last_name')
               .eq('id', auditComplaint.declined_by)
               .single()
-              .then(({ data }) => {
-                const label = data?.full_name || data?.email || fallbackShort(auditComplaint.declined_by);
-                setAuditDeclinerLabel(label);
-              })
+              .then(({ data }) => setAuditDeclinerLabel(displayNameFromProfile(data, auditComplaint.declined_by)))
               .catch(() => setAuditDeclinerLabel(fallbackShort(auditComplaint.declined_by)))
           );
         } else {
@@ -215,7 +212,7 @@ export default function DashboardDirector() {
         await Promise.all(tasks);
       } catch (_) {
         setAuditApproverLabel(auditComplaint?.approved_by ? fallbackShort(auditComplaint.approved_by) : '—');
-        setAuditDeclinerLabel(auditComplaint?.declined_by ? fallbackShort(auditComplaint.declined_by) : '���');
+        setAuditDeclinerLabel(auditComplaint?.declined_by ? fallbackShort(auditComplaint.declined_by) : '—');
       }
     };
     if (auditComplaint) {
