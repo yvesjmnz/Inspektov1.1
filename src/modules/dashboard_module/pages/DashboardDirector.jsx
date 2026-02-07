@@ -40,6 +40,9 @@ export default function DashboardDirector() {
   const [historyYear, setHistoryYear] = useState('all');
   const [historyMonth, setHistoryMonth] = useState('all');
   const [historyDay, setHistoryDay] = useState('all');
+  // Resolved labels for audit drawer (emails or names)
+  const [auditApproverLabel, setAuditApproverLabel] = useState('');
+  const [auditDeclinerLabel, setAuditDeclinerLabel] = useState('');
 
   const [previewImage, setPreviewImage] = useState(null);
   const closePreview = () => setPreviewImage(null);
@@ -170,6 +173,61 @@ export default function DashboardDirector() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyYear, historyMonth, historyDay]);
+
+  // Resolve approver/decliner labels (email/name) for audit drawer
+  useEffect(() => {
+    const fallbackShort = (id) => (id ? String(id).slice(0, 8) + '…' : '—');
+    const resolveLabels = async () => {
+      try {
+        const tasks = [];
+        if (auditComplaint?.approved_by) {
+          tasks.push(
+            supabase
+              .from('profiles')
+              .select('email, full_name')
+              .eq('id', auditComplaint.approved_by)
+              .single()
+              .then(({ data }) => {
+                const label = data?.full_name || data?.email || fallbackShort(auditComplaint.approved_by);
+                setAuditApproverLabel(label);
+              })
+              .catch(() => setAuditApproverLabel(fallbackShort(auditComplaint.approved_by)))
+          );
+        } else {
+          setAuditApproverLabel('—');
+        }
+        if (auditComplaint?.declined_by) {
+          tasks.push(
+            supabase
+              .from('profiles')
+              .select('email, full_name')
+              .eq('id', auditComplaint.declined_by)
+              .single()
+              .then(({ data }) => {
+                const label = data?.full_name || data?.email || fallbackShort(auditComplaint.declined_by);
+                setAuditDeclinerLabel(label);
+              })
+              .catch(() => setAuditDeclinerLabel(fallbackShort(auditComplaint.declined_by)))
+          );
+        } else {
+          setAuditDeclinerLabel('—');
+        }
+        await Promise.all(tasks);
+      } catch (_) {
+        setAuditApproverLabel(auditComplaint?.approved_by ? fallbackShort(auditComplaint.approved_by) : '—');
+        setAuditDeclinerLabel(auditComplaint?.declined_by ? fallbackShort(auditComplaint.declined_by) : '���');
+      }
+    };
+    if (auditComplaint) {
+      setAuditApproverLabel('');
+      setAuditDeclinerLabel('');
+      resolveLabels();
+    } else {
+      setAuditApproverLabel('');
+      setAuditDeclinerLabel('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auditComplaint]);
 
   const filteredComplaints = useMemo(() => {
     // Additional client-side filtering by ID (since server-side OR is limited to text columns).
@@ -805,52 +863,122 @@ export default function DashboardDirector() {
         </div>
       ) : null}
 
-      {/* Audit Overlay */}
+      {/* Audit Drawer (right-side, same pattern as full complaint) */}
       {auditComplaint ? (
-        <div
-          className="image-overlay"
-          onClick={() => setAuditComplaint(null)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="overlay-content" onClick={(e) => e.stopPropagation()} style={{ padding: 0 }}>
-            <div style={{ background: '#ffffff', borderRadius: 12, padding: 16, boxShadow: '0 12px 28px rgba(0,0,0,0.25)', maxWidth: 560, width: '100%', position: 'relative' }}>
-              <button className="overlay-close" onClick={() => setAuditComplaint(null)} aria-label="Close">&times;</button>
-              <h3 style={{ marginTop: 0, marginBottom: 10 }}>Complaint Audit</h3>
-              {auditComplaint ? (
-                <div style={{ fontSize: 14, color: '#0f172a', display: 'grid', gap: 8 }}>
-                  <div><strong>ID:</strong> {auditComplaint.id}</div>
-                  <div><strong>Business:</strong> {auditComplaint.business_name || '—'}</div>
-                  <div><strong>Status:</strong> {formatStatus(auditComplaint.status)}</div>
-                  <div><strong>Submitted:</strong> {auditComplaint.created_at ? new Date(auditComplaint.created_at).toLocaleString() : '—'}</div>
-                  <div><strong>Inspection Duration:</strong> — (pending inspections module)</div>
-                  {(() => {
-                    const s = String(auditComplaint.status || '').toLowerCase();
-                    const created = auditComplaint.created_at ? new Date(auditComplaint.created_at) : null;
-                    if (s === 'approved') {
-                      const decided = auditComplaint.approved_at ? new Date(auditComplaint.approved_at) : null;
-                      const dur = created && decided ? ((decided.getTime() - created.getTime()) / 36e5).toFixed(1) : null;
-                      return (
-                        <div>
-                          <div><strong>Approved:</strong> {auditComplaint.approved_at ? decided.toLocaleString() : '—'} by {auditComplaint.approved_by ? String(auditComplaint.approved_by).slice(0, 8) + '…' : '—'}</div>
-                          {dur ? <div><strong>Decision time:</strong> {dur} hours</div> : null}
-                        </div>
-                      );
-                    }
-                    if (s === 'declined') {
-                      const decided = auditComplaint.declined_at ? new Date(auditComplaint.declined_at) : null;
-                      const dur = created && decided ? ((decided.getTime() - created.getTime()) / 36e5).toFixed(1) : null;
-                      return (
-                        <div>
-                          <div><strong>Declined:</strong> {auditComplaint.declined_at ? decided.toLocaleString() : '—'} by {auditComplaint.declined_by ? String(auditComplaint.declined_by).slice(0, 8) + '…' : '—'}</div>
-                          {dur ? <div><strong>Decision time:</strong> {dur} hours</div> : null}
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          height: '100vh',
+          width: 'min(680px, 92vw)',
+          background: '#ffffff',
+          borderLeft: '1px solid #e2e8f0',
+          boxShadow: '-12px 0 28px rgba(0,0,0,0.25)',
+          display: 'flex',
+          flexDirection: 'column',
+          zIndex: 60
+        }}>
+          <button
+            className="overlay-close"
+            onClick={() => setAuditComplaint(null)}
+            aria-label="Close"
+            style={{ position: 'absolute', top: 8, right: 8, color: '#ef4444', background: 'transparent', border: 'none', padding: 0, fontSize: 28, lineHeight: 1, cursor: 'pointer' }}
+          >
+            &times;
+          </button>
+          <div style={{ padding: 16, borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h3 style={{ margin: 0 }}>Complaint Audit</h3>
+          </div>
+          <div style={{ padding: 16, overflowY: 'auto', background: '#f8fafc', display: 'grid', gap: 16 }}>
+            {/* Summary Card */}
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 18, fontWeight: 900, color: '#0f172a' }}>{auditComplaint.business_name || '—'}</div>
+                <span className={statusBadgeClass(auditComplaint.status)}>{formatStatus(auditComplaint.status)}</span>
+              </div>
+              <div style={{ color: '#334155', marginTop: 8, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <span aria-hidden>📍</span>
+                <span style={{ fontWeight: 700 }}>{auditComplaint.business_address || '—'}</span>
+              </div>
+              <div style={{ height: 1, background: '#dbeafe', margin: '12px 0' }} />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))', gap: 12 }}>
+                <div>
+                  <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>ID</div>
+                  <div style={{ color: '#0f172a', fontWeight: 800 }}>{auditComplaint.id}</div>
                 </div>
-              ) : null}
+                <div>
+                  <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Submitted</div>
+                  <div style={{ color: '#0f172a', fontWeight: 800 }}>{auditComplaint.created_at ? new Date(auditComplaint.created_at).toLocaleString() : '—'}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Decision Card */}
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <div style={{ fontWeight: 900, color: '#0f172a' }}>Decision</div>
+              </div>
+              {(() => {
+                const s = String(auditComplaint.status || '').toLowerCase();
+                const created = auditComplaint.created_at ? new Date(auditComplaint.created_at) : null;
+                if (s === 'approved') {
+                  const decided = auditComplaint.approved_at ? new Date(auditComplaint.approved_at) : null;
+                  const dur = created && decided ? ((decided.getTime() - created.getTime()) / 36e5).toFixed(1) : null;
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))', gap: 12 }}>
+                      <div>
+                        <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Approved By</div>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{auditApproverLabel || (auditComplaint.approved_by ? String(auditComplaint.approved_by).slice(0,8) + '…' : '—')}</div>
+                      </div>
+                      <div>
+                        <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Approved At</div>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{auditComplaint.approved_at ? decided.toLocaleString() : '—'}</div>
+                      </div>
+                      {dur ? (
+                        <div>
+                          <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Decision Time</div>
+                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{dur} hours</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                }
+                if (s === 'declined') {
+                  const decided = auditComplaint.declined_at ? new Date(auditComplaint.declined_at) : null;
+                  const dur = created && decided ? ((decided.getTime() - created.getTime()) / 36e5).toFixed(1) : null;
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))', gap: 12 }}>
+                      <div>
+                        <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Declined By</div>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{auditDeclinerLabel || (auditComplaint.declined_by ? String(auditComplaint.declined_by).slice(0,8) + '…' : '—')}</div>
+                      </div>
+                      <div>
+                        <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Declined At</div>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{auditComplaint.declined_at ? decided.toLocaleString() : '—'}</div>
+                      </div>
+                      {dur ? (
+                        <div>
+                          <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Decision Time</div>
+                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{dur} hours</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                }
+                return <div style={{ color: '#64748b', fontWeight: 700 }}>No decision recorded</div>;
+              })()}
+            </div>
+
+            {/* Reporter Card */}
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <span aria-hidden>👤</span>
+                <div style={{ fontWeight: 900, color: '#0f172a' }}>Reporter</div>
+              </div>
+              <div style={{ background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 12, padding: 12, display: 'grid', gap: 6 }}>
+                <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Email</div>
+                <div style={{ fontWeight: 800, color: '#0f172a' }}>{auditComplaint.reporter_email || '—'}</div>
+              </div>
             </div>
           </div>
         </div>
