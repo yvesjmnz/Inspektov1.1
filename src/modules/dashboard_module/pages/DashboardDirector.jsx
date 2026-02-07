@@ -151,6 +151,20 @@ export default function DashboardDirector() {
     });
   }, [missionOrders, search]);
 
+  // Group complaints by day for Review Queue
+  const complaintsByDay = useMemo(() => {
+    if (tab !== 'queue') return { groups: {}, sortedKeys: [] };
+    const groups = {};
+    for (const c of filteredComplaints) {
+      const d = c.created_at ? new Date(c.created_at) : null;
+      const key = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10) : 'unknown';
+      if (!groups[key]) groups[key] = { label: d ? d.toLocaleDateString() : 'Unknown Date', items: [] };
+      groups[key].items.push(c);
+    }
+    const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1)); // desc by date key YYYY-MM-DD
+    return { groups, sortedKeys };
+  }, [filteredComplaints, tab]);
+
   // Utilities: export and print
   const toCsvValue = (v) => {
     if (v === null || v === undefined) return '""';
@@ -503,109 +517,228 @@ export default function DashboardDirector() {
                       </td>
                     </tr>
                   ) : (
-                    filteredComplaints.map((c) => (
-                      <tr key={c.id}>
-                        <td>{c.id}</td>
-                        <td>
-                          <div className="dash-cell-title">{c.business_name || '—'}</div>
-                          <div className="dash-cell-sub">{c.business_address || ''}</div>
-                          <div className="dash-cell-sub">{c.reporter_email || ''}</div>
-                        </td>
-                        <td>
-                          <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
-                        </td>
-                        {tab === 'history' ? (
-                          <td>
-                            <div className="dash-cell-sub">
-                              {(() => {
-                                const s = String(c.status || '').toLowerCase();
-                                if (s === 'approved') {
-                                  const label = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '—';
-                                  return `Approved by ${label} on ${c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}`;
-                                }
-                                if (s === 'declined') {
-                                  const label = c.declined_by ? String(c.declined_by).slice(0, 8) + '…' : '—';
-                                  return `Declined by ${label} on ${c.declined_at ? new Date(c.declined_at).toLocaleString() : '—'}`;
-                                }
-                                return '—';
-                              })()}
-                            </div>
-                            <div style={{ marginTop: 6 }}>
-                              <button className="dash-link" type="button" onClick={() => setAuditComplaint(c)}>View audit</button>
-                            </div>
-                          </td>
-                        ) : null}
-                        <td>{c?.authenticity_level ?? '—'}</td>
-                        <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
-                        <td>
-                          <div style={{ display: 'grid', gap: 8 }}>
-                            {c?.complaint_description ? (
-                              <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap' }}>
-                                {String(c.complaint_description).slice(0, 220)}
-                                {String(c.complaint_description).length > 220 ? '…' : ''}
-                              </div>
-                            ) : (
-                              <div style={{ color: '#64748b', fontWeight: 700 }}>No description</div>
-                            )}
-
-                            {Array.isArray(c?.image_urls) && c.image_urls.length > 0 ? (
-                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                {c.image_urls.slice(0, 3).map((url) => (
-                                  <img
-                                    key={url}
-                                    src={url}
-                                    alt="Evidence"
-                                    onClick={() => setPreviewImage(url)}
-                                    style={{
-                                      width: 68,
-                                      height: 46,
-                                      objectFit: 'cover',
-                                      borderRadius: 10,
-                                      border: '1px solid #e2e8f0',
-                                      cursor: 'pointer',
-                                    }}
-                                    loading="lazy"
-                                  />
-                                ))}
-                                {c.image_urls.length > 3 ? (
-                                  <span style={{ color: '#64748b', fontWeight: 800, alignSelf: 'center' }}>
-                                    +{c.image_urls.length - 3} more
-                                  </span>
+                    tab === 'queue'
+                      ? (
+                        complaintsByDay.sortedKeys.flatMap((dayKey) => {
+                          const rows = [];
+                          const label = complaintsByDay.groups[dayKey]?.label || dayKey;
+                          rows.push(
+                            <tr key={`day-${dayKey}`}>
+                              <td colSpan={tab === 'queue' ? 8 : 7} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>{label}</td>
+                            </tr>
+                          );
+                          complaintsByDay.groups[dayKey].items.forEach((c) => {
+                            rows.push(
+                              <tr key={c.id}>
+                                <td>{c.id}</td>
+                                <td>
+                                  <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                  <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                  <div className="dash-cell-sub">{c.reporter_email || ''}</div>
+                                </td>
+                                <td>
+                                  <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
+                                </td>
+                                {tab === 'history' ? (
+                                  <td>
+                                    <div className="dash-cell-sub">
+                                      {(() => {
+                                        const s = String(c.status || '').toLowerCase();
+                                        if (s === 'approved') {
+                                          const label = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '—';
+                                          return `Approved by ${label} on ${c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}`;
+                                        }
+                                        if (s === 'declined') {
+                                          const label = c.declined_by ? String(c.declined_by).slice(0, 8) + '…' : '—';
+                                          return `Declined by ${label} on ${c.declined_at ? new Date(c.declined_at).toLocaleString() : '—'}`;
+                                        }
+                                        return '—';
+                                      })()}
+                                    </div>
+                                    <div style={{ marginTop: 6 }}>
+                                      <button className="dash-link" type="button" onClick={() => setAuditComplaint(c)}>View audit</button>
+                                    </div>
+                                  </td>
                                 ) : null}
+                                <td>{c?.authenticity_level ?? '—'}</td>
+                                <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                                <td>
+                                  <div style={{ display: 'grid', gap: 8 }}>
+                                    {c?.complaint_description ? (
+                                      <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                                        {String(c.complaint_description).slice(0, 220)}
+                                        {String(c.complaint_description).length > 220 ? '…' : ''}
+                                      </div>
+                                    ) : (
+                                      <div style={{ color: '#64748b', fontWeight: 700 }}>No description</div>
+                                    )}
+
+                                    {Array.isArray(c?.image_urls) && c.image_urls.length > 0 ? (
+                                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                        {c.image_urls.slice(0, 3).map((url) => (
+                                          <img
+                                            key={url}
+                                            src={url}
+                                            alt="Evidence"
+                                            onClick={() => setPreviewImage(url)}
+                                            style={{
+                                              width: 68,
+                                              height: 46,
+                                              objectFit: 'cover',
+                                              borderRadius: 10,
+                                              border: '1px solid #e2e8f0',
+                                              cursor: 'pointer',
+                                            }}
+                                            loading="lazy"
+                                          />
+                                        ))}
+                                        {c.image_urls.length > 3 ? (
+                                          <span style={{ color: '#64748b', fontWeight: 800, alignSelf: 'center' }}>
+                                            +{c.image_urls.length - 3} more
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    ) : (
+                                      <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
+                                    )}
+                                  </div>
+                                </td>
+                                {tab === 'queue' ? (
+                                  <td>
+                                    <div className="dash-row-actions">
+                                      <button
+                                        type="button"
+                                        className="dash-btn dash-btn-success dash-btn-icon"
+                                        onClick={() => updateComplaintStatus(c.id, 'approved')}
+                                        disabled={loading}
+                                        aria-label="Approve"
+                                        title="Approve"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="dash-btn dash-btn-danger dash-btn-icon"
+                                        onClick={() => updateComplaintStatus(c.id, 'declined')}
+                                        disabled={loading}
+                                        aria-label="Decline"
+                                        title="Decline"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  </td>
+                                ) : null}
+                              </tr>
+                            );
+                          });
+                          return rows;
+                        })
+                      ) : (
+                        filteredComplaints.map((c) => (
+                          <tr key={c.id}>
+                            <td>{c.id}</td>
+                            <td>
+                              <div className="dash-cell-title">{c.business_name || '—'}</div>
+                              <div className="dash-cell-sub">{c.business_address || ''}</div>
+                              <div className="dash-cell-sub">{c.reporter_email || ''}</div>
+                            </td>
+                            <td>
+                              <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
+                            </td>
+                            {tab === 'history' ? (
+                              <td>
+                                <div className="dash-cell-sub">
+                                  {(() => {
+                                    const s = String(c.status || '').toLowerCase();
+                                    if (s === 'approved') {
+                                      const label = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '—';
+                                      return `Approved by ${label} on ${c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}`;
+                                    }
+                                    if (s === 'declined') {
+                                      const label = c.declined_by ? String(c.declined_by).slice(0, 8) + '…' : '—';
+                                      return `Declined by ${label} on ${c.declined_at ? new Date(c.declined_at).toLocaleString() : '—'}`;
+                                    }
+                                    return '—';
+                                  })()}
+                                </div>
+                                <div style={{ marginTop: 6 }}>
+                                  <button className="dash-link" type="button" onClick={() => setAuditComplaint(c)}>View audit</button>
+                                </div>
+                              </td>
+                            ) : null}
+                            <td>{c?.authenticity_level ?? '—'}</td>
+                            <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                            <td>
+                              <div style={{ display: 'grid', gap: 8 }}>
+                                {c?.complaint_description ? (
+                                  <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                                    {String(c.complaint_description).slice(0, 220)}
+                                    {String(c.complaint_description).length > 220 ? '…' : ''}
+                                  </div>
+                                ) : (
+                                  <div style={{ color: '#64748b', fontWeight: 700 }}>No description</div>
+                                )}
+
+                                {Array.isArray(c?.image_urls) && c.image_urls.length > 0 ? (
+                                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                    {c.image_urls.slice(0, 3).map((url) => (
+                                      <img
+                                        key={url}
+                                        src={url}
+                                        alt="Evidence"
+                                        onClick={() => setPreviewImage(url)}
+                                        style={{
+                                          width: 68,
+                                          height: 46,
+                                          objectFit: 'cover',
+                                          borderRadius: 10,
+                                          border: '1px solid #e2e8f0',
+                                          cursor: 'pointer',
+                                        }}
+                                        loading="lazy"
+                                      />
+                                    ))}
+                                    {c.image_urls.length > 3 ? (
+                                      <span style={{ color: '#64748b', fontWeight: 800, alignSelf: 'center' }}>
+                                        +{c.image_urls.length - 3} more
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                ) : (
+                                  <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
+                                )}
                               </div>
-                            ) : (
-                              <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
-                            )}
-                          </div>
-                        </td>
-                        {tab === 'queue' ? (
-                          <td>
-                            <div className="dash-row-actions">
-                              <button
-                                type="button"
-                                className="dash-btn dash-btn-success dash-btn-icon"
-                                onClick={() => updateComplaintStatus(c.id, 'approved')}
-                                disabled={loading}
-                                aria-label="Approve"
-                                title="Approve"
-                              >
-                                ✓
-                              </button>
-                              <button
-                                type="button"
-                                className="dash-btn dash-btn-danger dash-btn-icon"
-                                onClick={() => updateComplaintStatus(c.id, 'declined')}
-                                disabled={loading}
-                                aria-label="Decline"
-                                title="Decline"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          </td>
-                        ) : null}
-                      </tr>
-                    ))
+                            </td>
+                            {tab === 'queue' ? (
+                              <td>
+                                <div className="dash-row-actions">
+                                  <button
+                                    type="button"
+                                    className="dash-btn dash-btn-success dash-btn-icon"
+                                    onClick={() => updateComplaintStatus(c.id, 'approved')}
+                                    disabled={loading}
+                                    aria-label="Approve"
+                                    title="Approve"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="dash-btn dash-btn-danger dash-btn-icon"
+                                    onClick={() => updateComplaintStatus(c.id, 'declined')}
+                                    disabled={loading}
+                                    aria-label="Decline"
+                                    title="Decline"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              </td>
+                            ) : null}
+                          </tr>
+                        ))
+                      )
                   )}
                 </tbody>
               </table>
