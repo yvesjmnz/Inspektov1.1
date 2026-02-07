@@ -29,6 +29,12 @@ export default function DashboardDirector() {
   const [missionOrders, setMissionOrders] = useState([]);
   const [search, setSearch] = useState('');
   const [auditComplaint, setAuditComplaint] = useState(null);
+  // Full complaint popup state
+  const [fullViewId, setFullViewId] = useState(null);
+  const [fullViewLoading, setFullViewLoading] = useState(false);
+  const [fullViewError, setFullViewError] = useState('');
+  const [fullComplaint, setFullComplaint] = useState(null);
+  const [fullPreviewImage, setFullPreviewImage] = useState(null);
 
   const [previewImage, setPreviewImage] = useState(null);
   const closePreview = () => setPreviewImage(null);
@@ -236,6 +242,33 @@ export default function DashboardDirector() {
     } else {
       exportComplaintsToCSV(filteredComplaints);
     }
+  };
+
+  // Load full complaint for popup
+  const openFullComplaint = async (id) => {
+    setFullViewId(id);
+    setFullViewLoading(true);
+    setFullViewError('');
+    setFullComplaint(null);
+    try {
+      const { data, error } = await supabase
+        .from('complaints')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (error) throw error;
+      setFullComplaint(data);
+    } catch (e) {
+      setFullViewError(e?.message || 'Failed to load complaint');
+    } finally {
+      setFullViewLoading(false);
+    }
+  };
+  const closeFullComplaint = () => {
+    setFullViewId(null);
+    setFullComplaint(null);
+    setFullViewError('');
+    setFullPreviewImage(null);
   };
   
   // Summary KPIs (client-side only)
@@ -498,16 +531,25 @@ export default function DashboardDirector() {
             <div className="dash-table-wrap">
               <table className="dash-table">
                 <thead>
-                  <tr>
-                    <th style={{ width: 90 }}>ID</th>
-                    <th>Business</th>
-                    <th style={{ width: 240 }}>Status</th>
-                    {tab === 'history' ? <th style={{ width: 280 }}>Decision</th> : null}
-                    <th style={{ width: 180 }}>Authenticity Level</th>
-                    <th style={{ width: 200 }}>Submitted</th>
-                    <th style={{ width: 280 }}>Evidence</th>
-                    {tab === 'queue' ? <th style={{ width: 220 }}>Actions</th> : null}
-                  </tr>
+                  {tab === 'queue' ? (
+                    <tr>
+                      <th style={{ width: 90 }}>ID</th>
+                      <th>Business</th>
+                      <th style={{ width: 160 }}>Urgency</th>
+                      <th style={{ width: 200 }}>Submitted</th>
+                      <th style={{ width: 220 }}>Actions</th>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <th style={{ width: 90 }}>ID</th>
+                      <th>Business</th>
+                      <th style={{ width: 240 }}>Status</th>
+                      {tab === 'history' ? <th style={{ width: 280 }}>Decision</th> : null}
+                      <th style={{ width: 180 }}>Authenticity Level</th>
+                      <th style={{ width: 200 }}>Submitted</th>
+                      <th style={{ width: 280 }}>Evidence</th>
+                    </tr>
+                  )}
                 </thead>
                 <tbody>
                   {filteredComplaints.length === 0 ? (
@@ -524,111 +566,45 @@ export default function DashboardDirector() {
                           const label = complaintsByDay.groups[dayKey]?.label || dayKey;
                           rows.push(
                             <tr key={`day-${dayKey}`}>
-                              <td colSpan={tab === 'queue' ? 8 : 7} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>{label}</td>
+                              <td colSpan={5} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>{label}</td>
                             </tr>
                           );
                           complaintsByDay.groups[dayKey].items.forEach((c) => {
                             rows.push(
-                              <tr key={c.id}>
+                              <tr key={c.id} onClick={() => openFullComplaint(c.id)} style={{ cursor: 'pointer' }}>
                                 <td>{c.id}</td>
                                 <td>
                                   <div className="dash-cell-title">{c.business_name || '—'}</div>
                                   <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                  <div className="dash-cell-sub">{c.reporter_email || ''}</div>
                                 </td>
                                 <td>
-                                  <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
+                                  <span className="status-badge status-warning">{c?.authenticity_level ?? '—'}</span>
                                 </td>
-                                {tab === 'history' ? (
-                                  <td>
-                                    <div className="dash-cell-sub">
-                                      {(() => {
-                                        const s = String(c.status || '').toLowerCase();
-                                        if (s === 'approved') {
-                                          const label = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '—';
-                                          return `Approved by ${label} on ${c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}`;
-                                        }
-                                        if (s === 'declined') {
-                                          const label = c.declined_by ? String(c.declined_by).slice(0, 8) + '…' : '—';
-                                          return `Declined by ${label} on ${c.declined_at ? new Date(c.declined_at).toLocaleString() : '—'}`;
-                                        }
-                                        return '—';
-                                      })()}
-                                    </div>
-                                    <div style={{ marginTop: 6 }}>
-                                      <button className="dash-link" type="button" onClick={() => setAuditComplaint(c)}>View audit</button>
-                                    </div>
-                                  </td>
-                                ) : null}
-                                <td>{c?.authenticity_level ?? '—'}</td>
                                 <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
                                 <td>
-                                  <div style={{ display: 'grid', gap: 8 }}>
-                                    {c?.complaint_description ? (
-                                      <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap' }}>
-                                        {String(c.complaint_description).slice(0, 220)}
-                                        {String(c.complaint_description).length > 220 ? '…' : ''}
-                                      </div>
-                                    ) : (
-                                      <div style={{ color: '#64748b', fontWeight: 700 }}>No description</div>
-                                    )}
-
-                                    {Array.isArray(c?.image_urls) && c.image_urls.length > 0 ? (
-                                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                        {c.image_urls.slice(0, 3).map((url) => (
-                                          <img
-                                            key={url}
-                                            src={url}
-                                            alt="Evidence"
-                                            onClick={() => setPreviewImage(url)}
-                                            style={{
-                                              width: 68,
-                                              height: 46,
-                                              objectFit: 'cover',
-                                              borderRadius: 10,
-                                              border: '1px solid #e2e8f0',
-                                              cursor: 'pointer',
-                                            }}
-                                            loading="lazy"
-                                          />
-                                        ))}
-                                        {c.image_urls.length > 3 ? (
-                                          <span style={{ color: '#64748b', fontWeight: 800, alignSelf: 'center' }}>
-                                            +{c.image_urls.length - 3} more
-                                          </span>
-                                        ) : null}
-                                      </div>
-                                    ) : (
-                                      <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
-                                    )}
+                                  <div className="dash-row-actions">
+                                    <button
+                                      type="button"
+                                      className="dash-btn dash-btn-success dash-btn-icon"
+                                      onClick={(e) => { e.stopPropagation(); updateComplaintStatus(c.id, 'approved'); }}
+                                      disabled={loading}
+                                      aria-label="Approve"
+                                      title="Approve"
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="dash-btn dash-btn-danger dash-btn-icon"
+                                      onClick={(e) => { e.stopPropagation(); updateComplaintStatus(c.id, 'declined'); }}
+                                      disabled={loading}
+                                      aria-label="Decline"
+                                      title="Decline"
+                                    >
+                                      ✕
+                                    </button>
                                   </div>
                                 </td>
-                                {tab === 'queue' ? (
-                                  <td>
-                                    <div className="dash-row-actions">
-                                      <button
-                                        type="button"
-                                        className="dash-btn dash-btn-success dash-btn-icon"
-                                        onClick={() => updateComplaintStatus(c.id, 'approved')}
-                                        disabled={loading}
-                                        aria-label="Approve"
-                                        title="Approve"
-                                      >
-                                        ✓
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="dash-btn dash-btn-danger dash-btn-icon"
-                                        onClick={() => updateComplaintStatus(c.id, 'declined')}
-                                        disabled={loading}
-                                        aria-label="Decline"
-                                        title="Decline"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
-                                  </td>
-                                ) : null}
                               </tr>
                             );
                           });
@@ -814,6 +790,128 @@ export default function DashboardDirector() {
                 </div>
               ) : null}
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Full Complaint Sidebar (fixed, no popup) */}
+      {fullViewId ? (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          height: '100vh',
+          width: 'min(900px, 92vw)',
+          background: '#ffffff',
+          borderLeft: '1px solid #e2e8f0',
+          boxShadow: '-12px 0 28px rgba(0,0,0,0.25)',
+          display: 'flex',
+          flexDirection: 'column',
+          zIndex: 50
+        }}>
+          <button className="overlay-close" onClick={closeFullComplaint} aria-label="Close">&times;</button>
+          <div style={{ padding: 16, borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h3 style={{ margin: 0 }}>Complaint Review</h3>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="dash-btn" type="button" onClick={() => window.print()}>Print</button>
+            </div>
+          </div>
+          <div style={{ padding: 16, overflowY: 'auto' }}>
+            {fullViewLoading ? <div className="dash-alert">Loading…</div> : null}
+            {fullViewError ? <div className="dash-alert dash-alert-error">{fullViewError}</div> : null}
+
+            {fullComplaint ? (
+              <div style={{ display: 'grid', gap: 12 }}>
+                {/* Summary */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  <div style={{ minWidth: 280 }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>{fullComplaint.business_name || '—'}</div>
+                    <div style={{ color: '#475569', fontWeight: 700 }}>{fullComplaint.business_address || '—'}</div>
+                  </div>
+                  <div style={{ display: 'grid', gap: 6, justifyItems: 'end' }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <span className="status-badge status-warning" title="Urgency">{fullComplaint?.authenticity_level ?? '—'}</span>
+                      <span className="status-badge" title="Status">{formatStatus(fullComplaint.status)}</span>
+                    </div>
+                    <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>ID:</strong> {fullComplaint.id}</div>
+                    <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>Submitted:</strong> {fullComplaint.created_at ? new Date(fullComplaint.created_at).toLocaleString() : '—'}</div>
+                    <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>Updated:</strong> {fullComplaint.updated_at ? new Date(fullComplaint.updated_at).toLocaleString() : '—'}</div>
+                  </div>
+                </div>
+
+                <div style={{ height: 1, background: '#f1f5f9' }} />
+
+                {/* Description */}
+                <div>
+                  <div style={{ fontWeight: 800, marginBottom: 6, color: '#0f172a' }}>Description</div>
+                  <div style={{ whiteSpace: 'pre-wrap', color: '#0f172a' }}>{fullComplaint.complaint_description || '—'}</div>
+                </div>
+
+                {/* Evidence */}
+                <div>
+                  <div style={{ fontWeight: 800, marginBottom: 6, color: '#0f172a' }}>Evidence</div>
+                  {Array.isArray(fullComplaint.image_urls) && fullComplaint.image_urls.length > 0 ? (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {fullComplaint.image_urls.map((url) => (
+                        <img
+                          key={url}
+                          src={url}
+                          alt="Evidence"
+                          onClick={() => setFullPreviewImage(url)}
+                          style={{
+                            width: 160,
+                            height: 110,
+                            objectFit: 'cover',
+                            borderRadius: 10,
+                            border: '1px solid #e2e8f0',
+                            cursor: 'pointer',
+                          }}
+                          loading="lazy"
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
+                  )}
+                </div>
+
+                {/* Details */}
+                <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(240px, 1fr))' }}>
+                  <div style={{ color: '#64748b', fontWeight: 700 }}>Reporter Email</div>
+                  <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.reporter_email || '—'}</div>
+                </div>
+
+                {/* Audit */}
+                <div>
+                  <div style={{ fontWeight: 800, marginBottom: 6, color: '#0f172a' }}>Audit</div>
+                  <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(240px, 1fr))' }}>
+                    <div style={{ color: '#64748b', fontWeight: 700 }}>Approved By</div>
+                    <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.approved_by || '—'}</div>
+                    <div style={{ color: '#64748b', fontWeight: 700 }}>Approved At</div>
+                    <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.approved_at ? new Date(fullComplaint.approved_at).toLocaleString() : '—'}</div>
+                    <div style={{ color: '#64748b', fontWeight: 700 }}>Declined By</div>
+                    <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.declined_by || '—'}</div>
+                    <div style={{ color: '#64748b', fontWeight: 700 }}>Declined At</div>
+                    <div style={{ fontWeight: 700, color: '#0f172a' }}>{fullComplaint.declined_at ? new Date(fullComplaint.declined_at).toLocaleString() : '—'}</div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Full Complaint Image Preview */}
+      {fullPreviewImage ? (
+        <div
+          className="image-overlay"
+          onClick={() => setFullPreviewImage(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="overlay-content" onClick={(e) => e.stopPropagation()}>
+            <button className="overlay-close" onClick={() => setFullPreviewImage(null)} aria-label="Close">&times;</button>
+            <img src={fullPreviewImage} alt="Evidence Preview" className="overlay-full-img" />
           </div>
         </div>
       ) : null}
