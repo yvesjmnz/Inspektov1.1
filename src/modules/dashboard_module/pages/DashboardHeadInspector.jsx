@@ -33,8 +33,25 @@ export default function DashboardHeadInspector() {
   const [toast, setToast] = useState('');
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    window.location.href = '/login';
+    setError('');
+    try {
+      // Clear any persisted auth state and force a clean login.
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'global' });
+      if (signOutError) throw signOutError;
+    } catch (e) {
+      // Even if remote sign-out fails, still clear local state and navigate away.
+      setError(e?.message || 'Logout failed. Clearing local session…');
+    } finally {
+      try {
+        // Extra safety: remove any cached session artifacts.
+        // (Supabase stores these under project-specific keys; clearing all is simplest in this SPA.)
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {
+        // ignore
+      }
+      window.location.replace('/login');
+    }
   };
 
   
@@ -68,6 +85,49 @@ export default function DashboardHeadInspector() {
 
       const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
 
+      // Load inspector assignments (FK-only) and resolve inspector display names.
+      // Expected columns in mission_order_assignments: mission_order_id, inspector_id (or user_id)
+      const missionOrderIds = Array.from(new Set((missionOrders || []).map((m) => m.id).filter(Boolean)));
+
+      const { data: assignmentRows, error: assignmentError } = missionOrderIds.length
+        ? await supabase
+            .from('mission_order_assignments')
+            .select('mission_order_id, inspector_id')
+            .in('mission_order_id', missionOrderIds)
+        : { data: [], error: null };
+
+      if (assignmentError) throw assignmentError;
+
+      const inspectorIds = Array.from(
+        new Set((assignmentRows || []).map((a) => a?.inspector_id).filter(Boolean))
+      );
+
+      // Resolve inspector names from profiles.
+      // Schema shows profiles has full_name (computed) + first/middle/last (no email column).
+      const { data: profileRows, error: profileError } = inspectorIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name, first_name, middle_name, last_name')
+            .in('id', inspectorIds)
+        : { data: [], error: null };
+
+      if (profileError) throw profileError;
+
+      const profileById = new Map((profileRows || []).map((p) => [p.id, p]));
+
+      const inspectorNamesByMissionOrderId = new Map();
+      (assignmentRows || []).forEach((a) => {
+        if (!a?.mission_order_id || !a?.inspector_id) return;
+        const p = profileById.get(a.inspector_id);
+        const displayName =
+          p?.full_name ||
+          [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') ||
+          String(a.inspector_id).slice(0, 8);
+        const arr = inspectorNamesByMissionOrderId.get(a.mission_order_id) || [];
+        arr.push(displayName);
+        inspectorNamesByMissionOrderId.set(a.mission_order_id, arr);
+      });
+
       // Merge into the shape the table expects.
       const merged = (missionOrders || []).map((mo) => {
         const c = complaintById.get(mo.complaint_id) || {};
@@ -80,7 +140,7 @@ export default function DashboardHeadInspector() {
           approved_at: c.approved_at,
           created_at: c.created_at,
           mission_order_id: mo.id,
-          inspector_names: [],
+          inspector_names: inspectorNamesByMissionOrderId.get(mo.id) || [],
         };
       });
 
