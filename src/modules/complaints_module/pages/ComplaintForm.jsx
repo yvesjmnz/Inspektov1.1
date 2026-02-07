@@ -26,6 +26,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   // Step C (mandatory): primary image capture
   // Step 3: evidence images (required: at least 1)
   const [evidenceImages, setEvidenceImages] = useState([]);
+  const [cameraPhotoUrls, setCameraPhotoUrls] = useState([]); // Track camera photos separately
 
   // In-browser camera capture
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -129,12 +130,40 @@ export default function ComplaintForm({ verifiedEmail }) {
     });
   };
 
+  const MAX_PHOTOS = 5;
+  const ALLOWED_FORMATS = ['image/jpeg', 'image/png'];
+
+  const validatePhotoFile = (file) => {
+    // Check file format
+    if (!ALLOWED_FORMATS.includes(file.type)) {
+      return `Invalid file format: ${file.name}. Only JPG, JPEG, and PNG are allowed.`;
+    }
+    return null;
+  };
+
   const handleEvidenceFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    setLoading(true);
     setError(null);
+
+    // Check if adding these files would exceed the limit
+    const totalPhotos = evidenceImages.length + files.length;
+    if (totalPhotos > MAX_PHOTOS) {
+      setError('You can only add up to 5 photos. Please remove an existing photo before adding another.');
+      return;
+    }
+
+    // Validate file formats
+    for (const file of files) {
+      const validationError = validatePhotoFile(file);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+    }
+
+    setLoading(true);
 
     try {
       const uploaded = await Promise.all(files.map((file) => uploadImage(file)));
@@ -283,6 +312,12 @@ export default function ComplaintForm({ verifiedEmail }) {
     const video = videoRef.current;
     if (!video) return;
 
+    // Check if we've reached the maximum photo limit
+    if (evidenceImages.length >= MAX_PHOTOS) {
+      setCameraError('You can only add up to 5 photos. Please remove an existing photo before adding another.');
+      return;
+    }
+
     try {
       setCameraBusy(true);
 
@@ -304,6 +339,7 @@ export default function ComplaintForm({ verifiedEmail }) {
       setError(null);
       const url = await uploadImage(file);
       setEvidenceImages((prev) => [...prev, url]);
+      setCameraPhotoUrls((prev) => [...prev, url]); // Track camera photo separately
 
       // Keep camera open to allow multiple captures.
     } catch (e) {
@@ -891,8 +927,8 @@ export default function ComplaintForm({ verifiedEmail }) {
                   </>
                 ) : null}
 
-                {/* File upload (allowed when out of range or verification unavailable) */}
-                {!withinRange ? (
+                {/* File upload (allowed when out of range, verification unavailable, or within range after camera capture) */}
+                {outOfRange || cameraPhotoUrls.length > 0 ? (
                   <>
                     <div className="inline-note" style={{ marginTop: 14 }}>
                       Upload one or more photos.
@@ -917,6 +953,10 @@ export default function ComplaintForm({ verifiedEmail }) {
                       </button>
                     </div>
                   </>
+                ) : withinRange && cameraPhotoUrls.length === 0 ? (
+                  <div className="inline-note" style={{ marginTop: 14, color: '#666', fontStyle: 'italic' }}>
+                    Capture at least one photo using the camera first to unlock device upload.
+                  </div>
                 ) : null}
 
                 {evidenceImages.length > 0 ? (
