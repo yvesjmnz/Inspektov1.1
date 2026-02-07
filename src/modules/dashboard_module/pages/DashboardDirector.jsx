@@ -160,7 +160,8 @@ export default function DashboardDirector() {
 
   // Group complaints by day for Review Queue
   const complaintsByDay = useMemo(() => {
-    if (tab !== 'queue') return { groups: {}, sortedKeys: [] };
+    // Group by day for both queue and history tabs
+    if (tab === 'mission-orders') return { groups: {}, sortedKeys: [] };
     const groups = {};
     for (const c of filteredComplaints) {
       const d = c.created_at ? new Date(c.created_at) : null;
@@ -593,8 +594,17 @@ export default function DashboardDirector() {
                           return rows;
                         })
                       ) : (
-                        filteredComplaints.map((c) => (
-                          <tr key={c.id}>
+                        complaintsByDay.sortedKeys.flatMap((dayKey) => {
+                          const rows = [];
+                          const label = complaintsByDay.groups[dayKey]?.label || dayKey;
+                          rows.push(
+                            <tr key={`dayh-${dayKey}`}>
+                              <td colSpan={7} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>{label}</td>
+                            </tr>
+                          );
+                          complaintsByDay.groups[dayKey].items.forEach((c) => {
+                            rows.push(
+                              <tr key={c.id}>
                             <td>{c.id}</td>
                             <td>
                               <div className="dash-cell-title">{c.business_name || '—'}</div>
@@ -695,7 +705,10 @@ export default function DashboardDirector() {
                               </td>
                             ) : null}
                           </tr>
-                        ))
+                            );
+                          });
+                          return rows;
+                        })
                       )
                   )}
                 </tbody>
