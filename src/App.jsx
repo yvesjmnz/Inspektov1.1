@@ -11,6 +11,7 @@ import DashboardHome from './modules/dashboard_module/pages/DashboardHome';
 import DashboardDirector from './modules/dashboard_module/pages/DashboardDirector';
 import DashboardHeadInspector from './modules/dashboard_module/pages/DashboardHeadInspector';
 import DashboardInspector from './modules/dashboard_module/pages/DashboardInspector';
+import InspectorInspectionDetails from './modules/dashboard_module/pages/InspectorInspectionDetails';
 import MissionOrderEditor from './modules/mission_order_module/pages/MissionOrderEditor';
 import MissionOrderReview from './modules/mission_order_module/pages/MissionOrderReview';
 import LandingPage from './LandingPage';
@@ -61,6 +62,7 @@ function App() {
     if (path === '/dashboard/director') return normalizedRole === 'director';
     if (path === '/dashboard/head-inspector') return normalizedRole === 'head_inspector';
     if (path === '/dashboard/inspector') return normalizedRole === 'inspector' || normalizedRole === 'head_inspector';
+    if (path === '/dashboard/inspector/inspection') return normalizedRole === 'inspector' || normalizedRole === 'head_inspector';
 
     // Mission order pages
     if (path === '/mission-order') return normalizedRole === 'head_inspector';
@@ -94,6 +96,7 @@ function App() {
         path === '/dashboard/director' ||
         path === '/dashboard/head-inspector' ||
         path === '/dashboard/inspector' ||
+        path === '/dashboard/inspector/inspection' ||
         path === '/mission-order' ||
         path === '/mission-order/review' ||
         path === '/complaints/view';
@@ -152,6 +155,8 @@ function App() {
         setCurrentPage('dashboard-head-inspector');
       } else if (path === '/dashboard/inspector') {
         setCurrentPage('dashboard-inspector');
+      } else if (path === '/dashboard/inspector/inspection') {
+        setCurrentPage('inspector-inspection-details');
       } else if (path === '/mission-order') {
         setCurrentPage('mission-order');
       } else if (path === '/mission-order/review') {
@@ -193,6 +198,8 @@ function App() {
         return <DashboardHeadInspector />;
       case 'dashboard-inspector':
         return <DashboardInspector />;
+      case 'inspector-inspection-details':
+        return <InspectorInspectionDetails />;
       case 'mission-order':
         return <MissionOrderEditor />;
       case 'mission-order-review':
