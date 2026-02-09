@@ -1,12 +1,28 @@
+import { useState } from 'react';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import './LandingPage.css';
 
 function LandingPage({ onOpenVerificationModal }) {
+  const [contactCategory, setContactCategory] = useState('permit');
+
   const handleSubmitComplaint = (e) => {
     e.preventDefault();
     // Open email verification modal
     onOpenVerificationModal();
+  };
+
+  const categoryContent = {
+    permit: {
+      title: "Have permit-related concerns?",
+      description: "For business permit applications, renewals, Go Manila access, account status, or inspection scheduling — contact the Bureau of Permits directly.",
+      showLink: true
+    },
+    special: {
+      title: "Special Complaints & Requests",
+      description: "For government-issued complaints, official agency-related concerns, and other special requests that require manual handling, please contact the Bureau of Permits directly.",
+      showLink: false
+    }
   };
 
   return (
@@ -69,27 +85,48 @@ function LandingPage({ onOpenVerificationModal }) {
         </section>
 
         <section className="band-light">
-          <div className="band-wrap grid-2">
-            <div className="permit-left">
-                            <h2>Have permit-related concerns?</h2>
-              <p>For business permit applications, renewals, Go Manila access, account status, or inspection scheduling — contact the Bureau of Permits directly.</p>
-              <a className="text-link" href="https://www.facebook.com/bureauofpermitsmnl/" target="_blank" rel="noopener noreferrer">Visit Bureau of Permits →</a>
-            </div>
-            <div className="permit-right">
-              <div className="mini-cards">
-                <div className="mini-card">
-                  <div className="mini-title">Email us at</div>
-                  <div className="mini-val">permits@manila.gov.ph</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">Call us at</div>
-                  <div className="mini-val">(02) 8527-0871</div>
+          <div className="band-wrap">
+            <div className="contact-section">
+              <div className="contact-header">
+                <h2>Contact the Bureau of Permits</h2>
+                <div className="category-selector">
+                  <button
+                    className={`category-btn ${contactCategory === 'permit' ? 'active' : ''}`}
+                    onClick={() => setContactCategory('permit')}
+                  >
+                    Permit Concerns
+                  </button>
+                  <button
+                    className={`category-btn ${contactCategory === 'special' ? 'active' : ''}`}
+                    onClick={() => setContactCategory('special')}
+                  >
+                    Special Complaints & Requests
+                  </button>
                 </div>
               </div>
-              <div className="hours-card">
-                <div className="mini-title">Office Hours</div>
-                <div className="mini-val strong">Monday – Friday, 8:00 AM – 5:00 PM</div>
-                <div className="mini-sub">Except holidays</div>
+
+              <div className="contact-description">
+                <h3>{categoryContent[contactCategory].title}</h3>
+                <p>{categoryContent[contactCategory].description}</p>
+                {categoryContent[contactCategory].showLink && (
+                  <a className="text-link" href="https://www.facebook.com/bureauofpermitsmnl/" target="_blank" rel="noopener noreferrer">Visit Bureau of Permits →</a>
+                )}
+              </div>
+
+              <div className="contact-info-row">
+                <div className="contact-info-card">
+                  <div className="contact-info-label">Email us at</div>
+                  <div className="contact-info-value">permits@manila.gov.ph</div>
+                </div>
+                <div className="contact-info-card">
+                  <div className="contact-info-label">Call us at</div>
+                  <div className="contact-info-value">(02) 8527-0871</div>
+                </div>
+                <div className="contact-info-card">
+                  <div className="contact-info-label">Office Hours</div>
+                  <div className="contact-info-value">Monday – Friday, 8:00 AM – 5:00 PM</div>
+                  <div className="contact-info-sub">Except holidays</div>
+                </div>
               </div>
             </div>
           </div>
