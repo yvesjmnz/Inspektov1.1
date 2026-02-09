@@ -31,6 +31,11 @@ export default function MissionOrderReview() {
   const [assignedInspectorIds, setAssignedInspectorIds] = useState([]);
 
   const [directorComment, setDirectorComment] = useState('');
+  const [showComplaintSideBySide, setShowComplaintSideBySide] = useState(false);
+
+  const [complaint, setComplaint] = useState(null);
+  const [complaintLoading, setComplaintLoading] = useState(false);
+  const [complaintError, setComplaintError] = useState('');
 
   const previewRef = useRef(null);
 
@@ -79,6 +84,28 @@ export default function MissionOrderReview() {
       setMissionOrder(mo);
       setInspectors(inspectorsData || []);
       setAssignedInspectorIds((assignedRows || []).map((r) => r.inspector_id));
+
+      // Best-effort complaint side panel data (read-only)
+      if (mo?.complaint_id) {
+        try {
+          setComplaintError('');
+          setComplaintLoading(true);
+          const { data: complaintData, error: complaintLoadError } = await supabase
+            .from('complaints')
+            .select('*')
+            .eq('id', mo.complaint_id)
+            .single();
+          if (complaintLoadError) throw complaintLoadError;
+          setComplaint(complaintData);
+        } catch (ce) {
+          setComplaint(null);
+          setComplaintError(ce?.message || 'Failed to load complaint details.');
+        } finally {
+          setComplaintLoading(false);
+        }
+      } else {
+        setComplaint(null);
+      }
 
       // Load existing director comment if you already have a column for it.
       // If not present, keep UI-only.
@@ -249,6 +276,7 @@ export default function MissionOrderReview() {
                 onClick={handleReject}
                 disabled={loading || savingDecision || !missionOrder || !requireReviewableState()}
                 title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Reject this mission order.'}
+                style={{ background: '#dc2626' }}
               >
                 {savingDecision ? 'Saving…' : 'Reject'}
               </button>
@@ -259,43 +287,196 @@ export default function MissionOrderReview() {
           {error ? <div className="mo-alert mo-alert-error">{error}</div> : null}
 
           
-          <div style={{ marginTop: 14 }}>
-            <label className="mo-label" htmlFor="directorComment">
-              Director Comments / Instructions
-            </label>
-            <textarea
-              id="directorComment"
-              value={directorComment}
-              onChange={(e) => setDirectorComment(e.target.value)}
-              placeholder="Add comments or specific instructions for the Head Inspector / assigned inspectors..."
-              disabled={loading || savingDecision}
-              style={{
-                width: '100%',
-                minHeight: 110,
-                borderRadius: 12,
-                border: '1px solid #cbd5e1',
-                padding: 12,
-                outline: 'none',
-                fontSize: 14,
-              }}
-            />
-            <div className="mo-meta" style={{ marginTop: 6 }}>
-              Tip: Rejection requires a comment for auditability.
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: showComplaintSideBySide ? 'minmax(0, 3fr) minmax(0, 2fr)' : 'minmax(0, 1fr)',
+              gap: showComplaintSideBySide ? 14 : 0,
+              alignItems: 'start',
+              marginTop: 14,
+              transition: 'grid-template-columns 0.3s ease-in-out',
+            }}
+          >
+            <div>
+              <label className="mo-label" htmlFor="directorComment">
+                Director Comments / Instructions
+              </label>
+              <textarea
+                id="directorComment"
+                value={directorComment}
+                onChange={(e) => setDirectorComment(e.target.value)}
+                placeholder="Add comments or specific instructions for the Head Inspector / assigned inspectors..."
+                disabled={loading || savingDecision}
+                style={{
+                  width: '100%',
+                  minHeight: 110,
+                  borderRadius: 12,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  color: '#0f172a',
+                  padding: 12,
+                  outline: 'none',
+                  fontSize: 14,
+                }}
+              />
+              <div className="mo-meta" style={{ marginTop: 6 }}>
+                Tip: Rejection requires a comment for auditability.
+              </div>
+
+              {/* Fixed toggle location (muscle-memory): right above the preview area */}
+              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="mo-btn"
+                  onClick={() => setShowComplaintSideBySide((v) => !v)}
+                  disabled={loading || savingDecision}
+                  title="Toggle complaint details side panel"
+                  style={{
+                    background: 'transparent',
+                    color: '#2563eb',
+                    border: '1px solid #2563eb',
+                  }}
+                >
+                  {showComplaintSideBySide ? 'Hide Complaint' : 'Show Complaint'}
+                </button>
+              </div>
+
+              <div className="mo-editor-wrap" aria-label="Mission Order Preview">
+                <div
+                  ref={previewRef}
+                  className="mo-editor"
+                  contentEditable={false}
+                  suppressContentEditableWarning
+                  style={{ cursor: 'default' }}
+                />
+              </div>
+
+              <div className="mo-note">
+                Director review is read-only. Approve/reject changes the mission order status and stores your comments.
+              </div>
             </div>
-          </div>
 
-          <div className="mo-editor-wrap" aria-label="Mission Order Preview">
-            <div
-              ref={previewRef}
-              className="mo-editor"
-              contentEditable={false}
-              suppressContentEditableWarning
-              style={{ cursor: 'default' }}
-            />
-          </div>
+            {showComplaintSideBySide ? (
+              <aside
+                style={{
+                  background: '#fff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 12,
+                  padding: 12,
+                }}
+                aria-label="Complaint Details"
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+                  <div style={{ fontWeight: 900, color: '#0f172a' }}>Complaint Details</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {complaint?.authenticity_level ? (
+                      <span
+                        style={{
+                          padding: '4px 8px',
+                          borderRadius: 999,
+                          fontSize: 12,
+                          fontWeight: 900,
+                          border: '1px solid #e2e8f0',
+                          background:
+                            String(complaint.authenticity_level).toLowerCase() === 'urgent' ? '#fee2e2' : '#e0f2fe',
+                          color: String(complaint.authenticity_level).toLowerCase() === 'urgent' ? '#991b1b' : '#075985',
+                        }}
+                        title="Urgency"
+                      >
+                        {complaint.authenticity_level}
+                      </span>
+                    ) : null}
+                    <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>
+                      {missionOrder?.complaint_id ? `ID: ${missionOrder.complaint_id}` : 'No complaint linked'}
+                    </div>
+                  </div>
+                </div>
 
-          <div className="mo-note">
-            Director review is read-only. Approve/reject changes the mission order status and stores your comments.
+                <div style={{ height: 1, background: '#f1f5f9', margin: '10px 0' }} />
+
+                {complaintLoading ? <div className="mo-meta">Loading complaint…</div> : null}
+                {complaintError ? <div className="mo-alert mo-alert-error">{complaintError}</div> : null}
+
+                {!missionOrder?.complaint_id ? (
+                  <div className="mo-meta">This mission order does not reference a complaint.</div>
+                ) : !complaint && !complaintLoading ? (
+                  <div className="mo-meta">No complaint record found.</div>
+                ) : complaint ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <div>
+                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Business</div>
+                      <div style={{ fontWeight: 900, color: '#0f172a' }}>{complaint.business_name || '—'}</div>
+                      <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
+                        {complaint.business_address || '—'}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Description</div>
+                      <div style={{ whiteSpace: 'pre-wrap', color: '#0f172a', fontWeight: 700, fontSize: 13 }}>
+                        {complaint.complaint_description || '—'}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Evidence</div>
+                      {Array.isArray(complaint.image_urls) && complaint.image_urls.length > 0 ? (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {complaint.image_urls.slice(0, 6).map((url) => (
+                            <a
+                              key={url}
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                height: 30,
+                                padding: '0 10px',
+                                borderRadius: 10,
+                                border: '1px solid #bfdbfe',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                fontWeight: 900,
+                                textDecoration: 'none',
+                                fontSize: 12,
+                              }}
+                            >
+                              View
+                            </a>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mo-meta">No images</div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'grid', gap: 6, gridTemplateColumns: '1fr 1fr' }}>
+                      <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Reporter Email</div>
+                      <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 12 }}>
+                        {complaint.reporter_email || '—'}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Submitted</div>
+                      <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 12 }}>
+                        {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {missionOrder?.complaint_id ? (
+                  <div style={{ marginTop: 10 }}>
+                    <a className="mo-link" href={`/complaints/view?id=${missionOrder.complaint_id}`} target="_blank" rel="noreferrer">
+                      Open full complaint
+                    </a>
+                  </div>
+                ) : null}
+              </aside>
+            ) : null}
           </div>
         </section>
       </main>
