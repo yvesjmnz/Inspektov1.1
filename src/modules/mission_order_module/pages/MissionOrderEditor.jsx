@@ -125,6 +125,11 @@ export default function MissionOrderEditor() {
   const [businessName, setBusinessName] = useState('');
   const [businessAddress, setBusinessAddress] = useState('');
 
+  const [showComplaintSideBySide, setShowComplaintSideBySide] = useState(false);
+  const [complaint, setComplaint] = useState(null);
+  const [complaintLoading, setComplaintLoading] = useState(false);
+  const [complaintError, setComplaintError] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
 
   const editorRef = useRef(null);
@@ -188,17 +193,32 @@ export default function MissionOrderEditor() {
         let loadedBusinessAddress = '';
 
         if (complaintId) {
-          const { data: complaint, error: complaintError } = await supabase
-            .from('complaints')
-            .select('id, business_name, business_address')
-            .eq('id', complaintId)
-            .single();
+          try {
+            setComplaintError('');
+            setComplaintLoading(true);
 
-          if (complaintError) throw complaintError;
-          if (!mounted) return;
+            const { data: complaintData, error: complaintLoadError } = await supabase
+              .from('complaints')
+              .select('*')
+              .eq('id', complaintId)
+              .single();
 
-          loadedBusinessName = complaint?.business_name || '';
-          loadedBusinessAddress = complaint?.business_address || '';
+            if (complaintLoadError) throw complaintLoadError;
+            if (!mounted) return;
+
+            setComplaint(complaintData);
+
+            loadedBusinessName = complaintData?.business_name || '';
+            loadedBusinessAddress = complaintData?.business_address || '';
+          } catch (ce) {
+            if (!mounted) return;
+            setComplaint(null);
+            setComplaintError(ce?.message || 'Failed to load complaint details.');
+          } finally {
+            if (mounted) setComplaintLoading(false);
+          }
+        } else {
+          setComplaint(null);
         }
 
         setBusinessName(loadedBusinessName);
@@ -681,12 +701,40 @@ export default function MissionOrderEditor() {
             </div>
           </div>
 
-          <div className="mo-editor-wrap">
-            <div
-              ref={editorRef}
-              className="mo-editor"
-              contentEditable={!loading}
-              suppressContentEditableWarning
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: showComplaintSideBySide ? 'minmax(0, 3fr) minmax(0, 2fr)' : 'minmax(0, 1fr)',
+              gap: showComplaintSideBySide ? 14 : 0,
+              alignItems: 'start',
+              marginTop: 20,
+              transition: 'grid-template-columns 0.3s ease-in-out',
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+                <button
+                  type="button"
+                  className="mo-btn"
+                  onClick={() => setShowComplaintSideBySide((v) => !v)}
+                  disabled={loading}
+                  title="Toggle complaint details"
+                  style={{
+                    background: 'transparent',
+                    color: '#2563eb',
+                    border: '1px solid #2563eb',
+                  }}
+                >
+                  {showComplaintSideBySide ? 'Hide Complaint' : 'Show Complaint'}
+                </button>
+              </div>
+
+              <div className="mo-editor-wrap" style={{ marginTop: 0 }}>
+                <div
+                  ref={editorRef}
+                  className="mo-editor"
+                  contentEditable={!loading}
+                  suppressContentEditableWarning
               // Don't use dangerouslySetInnerHTML here; we manually sync innerHTML only when loading initial content.
               // Re-rendering innerHTML on each keystroke resets the caret to the beginning.
               onMouseDown={(e) => {
@@ -760,7 +808,114 @@ export default function MissionOrderEditor() {
                 setContent(next);
                 markDirty(title, next);
               }}
-            />
+                />
+              </div>
+            </div>
+
+            {showComplaintSideBySide ? (
+              <aside
+                style={{
+                  background: '#fff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 12,
+                  padding: 12,
+                }}
+                aria-label="Complaint Details"
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+                  <div style={{ fontWeight: 900, color: '#0f172a' }}>Complaint Details</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {complaint?.authenticity_level ? (
+                      <span
+                        style={{
+                          padding: '4px 8px',
+                          borderRadius: 999,
+                          fontSize: 12,
+                          fontWeight: 900,
+                          border: '1px solid #e2e8f0',
+                          background:
+                            String(complaint.authenticity_level).toLowerCase() === 'urgent' ? '#fee2e2' : '#e0f2fe',
+                          color: String(complaint.authenticity_level).toLowerCase() === 'urgent' ? '#991b1b' : '#075985',
+                        }}
+                        title="Urgency"
+                      >
+                        {complaint.authenticity_level}
+                      </span>
+                    ) : null}
+                    <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>
+                      {complaint?.id ? `ID: ${complaint.id}` : ''}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ height: 1, background: '#f1f5f9', margin: '10px 0' }} />
+
+                {complaintLoading ? <div className="mo-meta">Loading complaint…</div> : null}
+                {complaintError ? <div className="mo-alert mo-alert-error">{complaintError}</div> : null}
+
+                {!complaint && !complaintLoading ? (
+                  <div className="mo-meta">No complaint record found.</div>
+                ) : complaint ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <div>
+                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Business</div>
+                      <div style={{ fontWeight: 900, color: '#0f172a' }}>{complaint.business_name || '—'}</div>
+                      <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
+                        {complaint.business_address || '—'}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Description</div>
+                      <div style={{ whiteSpace: 'pre-wrap', color: '#0f172a', fontWeight: 700, fontSize: 13 }}>
+                        {complaint.complaint_description || '—'}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Evidence</div>
+                      {Array.isArray(complaint.image_urls) && complaint.image_urls.length > 0 ? (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {complaint.image_urls.slice(0, 6).map((url) => (
+                            <a
+                              key={url}
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                height: 30,
+                                padding: '0 10px',
+                                borderRadius: 10,
+                                border: '1px solid #bfdbfe',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                fontWeight: 900,
+                                textDecoration: 'none',
+                                fontSize: 12,
+                              }}
+                            >
+                              View
+                            </a>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mo-meta">No images</div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Submitted</div>
+                      <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 12 }}>
+                        {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </aside>
+            ) : null}
           </div>
 
           <div className="mo-note">
