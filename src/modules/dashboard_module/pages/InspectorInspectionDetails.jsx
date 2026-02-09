@@ -11,6 +11,10 @@ function getMissionOrderIdFromQuery() {
 
 function formatStatus(status) {
   if (!status) return 'Unknown';
+  const s = String(status || '').toLowerCase();
+  // MO status rename: completed -> for inspection
+  if (s === 'completed' || s === 'for_inspection' || s === 'for inspection') return 'For Inspection';
+
   return String(status)
     .replace(/_/g, ' ')
     .trim()

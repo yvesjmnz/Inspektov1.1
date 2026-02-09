@@ -6,6 +6,10 @@ import './Dashboard.css';
 
 function formatStatus(status) {
   if (!status) return 'Unknown';
+  const s = String(status || '').toLowerCase();
+  // MO status rename: completed -> for inspection
+  if (s === 'completed' || s === 'for_inspection' || s === 'for inspection') return 'For Inspection';
+
   return String(status)
     .replace(/_/g, ' ')
     .trim()
@@ -27,6 +31,7 @@ export default function DashboardInspector() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
 
+  const [userLabel, setUserLabel] = useState('');
   const [assigned, setAssigned] = useState([]);
 
   const handleLogout = async () => {
@@ -53,8 +58,31 @@ export default function DashboardInspector() {
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
-      const userId = userData?.user?.id;
+      const user = userData?.user || null;
+      const userId = user?.id;
       if (!userId) throw new Error('Not authenticated. Please login again.');
+
+      // Friendly "Welcome" label: prefer the inspector's name from profiles.
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('full_name, first_name, middle_name, last_name')
+        .eq('id', userId)
+        .single();
+
+      // If RLS blocks profiles, or the name fields are empty, fall back to auth metadata.
+      const meta = user?.user_metadata || {};
+      const appMeta = user?.app_metadata || {};
+
+      const profileName =
+        profile?.full_name ||
+        [profile?.first_name, profile?.middle_name, profile?.last_name].filter(Boolean).join(' ');
+
+      const fallbackName = meta.full_name || meta.name || meta.first_name || appMeta.full_name || String(userId).slice(0, 8);
+
+      // Ignore profileError here (dashboard should still load); just use fallbacks.
+      void profileError;
+
+      setUserLabel(String(profileName || fallbackName));
 
       // 1) Find mission orders assigned to me.
       const { data: assignmentRows, error: assignmentError } = await supabase
@@ -72,13 +100,24 @@ export default function DashboardInspector() {
         return;
       }
 
-      // 2) Load mission orders
+      // 2) Load mission orders (only those that are "for inspection")
+      // DB values can be inconsistent across environments; include common variants.
       const { data: moRows, error: moError } = await supabase
         .from('mission_orders')
         .select('id, title, status, complaint_id, created_at, submitted_at, updated_at')
-        .in('id', missionOrderIds);
+        .in('id', missionOrderIds)
+        .in('status', ['for inspection', 'for_inspection', 'For Inspection']);
 
       if (moError) throw moError;
+
+      // Keep the same order as assignments, but drop any mission orders not matching the status filter.
+      const filteredMissionOrderIds = new Set((moRows || []).map((m) => m?.id).filter(Boolean));
+      const visibleMissionOrderIds = missionOrderIds.filter((id) => filteredMissionOrderIds.has(id));
+
+      if (visibleMissionOrderIds.length === 0) {
+        setAssigned([]);
+        return;
+      }
 
       const moById = new Map((moRows || []).map((m) => [m.id, m]));
 
@@ -99,7 +138,7 @@ export default function DashboardInspector() {
       // 4) Merge into a friendly list
       const assignedAtByMissionOrderId = new Map((assignmentRows || []).map((a) => [a.mission_order_id, a.assigned_at]));
 
-      const merged = missionOrderIds
+      const merged = visibleMissionOrderIds
         .map((id) => {
           const mo = moById.get(id) || {};
           const c = complaintById.get(mo.complaint_id) || {};
@@ -188,7 +227,7 @@ export default function DashboardInspector() {
           <div className="dash-header">
             <div>
               <h2 className="dash-title">Inspector Dashboard</h2>
-              <p className="dash-subtitle">View your assigned inspections and open full inspection details.</p>
+              <p className="dash-subtitle">{userLabel ? `Welcome ${userLabel}!` : 'Welcome!'} View your assigned inspections and open full inspection details.</p>
             </div>
             <div className="dash-actions">
               <a className="dash-link" href="/">Back to Home</a>

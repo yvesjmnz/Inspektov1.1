@@ -227,10 +227,6 @@ export default function MissionOrderReview() {
               <div className="mo-label">Mission Order (Director Review)</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ fontWeight: 900, fontSize: 16, color: '#0f172a' }}>{missionOrder?.title || '—'}</div>
-                <div className="mo-meta">
-                  <span>MO ID: {missionOrderId ? `${missionOrderId.slice(0, 8)}…` : '—'}</span>
-                  <span style={{ marginLeft: 10 }}>Status: {formatStatus(missionOrder?.status)}</span>
-                </div>
               </div>
             </div>
 
@@ -262,17 +258,7 @@ export default function MissionOrderReview() {
           {toast ? <div className="mo-alert mo-alert-success">{toast}</div> : null}
           {error ? <div className="mo-alert mo-alert-error">{error}</div> : null}
 
-          <div className="mo-assignments" style={{ marginTop: 14 }}>
-            <div className="mo-meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontWeight: 800 }}>Assigned Inspectors:</span>
-              {assignedInspectorIds.length === 0 ? (
-                <span style={{ color: '#64748b' }}>None</span>
-              ) : (
-                <span style={{ color: '#0f172a', fontWeight: 900 }}>{assignedInspectorNames}</span>
-              )}
-            </div>
-          </div>
-
+          
           <div style={{ marginTop: 14 }}>
             <label className="mo-label" htmlFor="directorComment">
               Director Comments / Instructions
