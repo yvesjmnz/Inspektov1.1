@@ -117,10 +117,18 @@ export default function TrackComplaint() {
             <div className="track-result">
               <div className="track-result-header">
                 <h2 className="track-title">Complaint Status</h2>
-              </div>
-              <div className="track-result-id-section">
-                <span className="track-result-id-label">Complaint ID:</span>
-                <span className="track-result-id-value">{complaint.id}</span>
+                <div className="track-meta-container">
+                  <div className="track-meta-left">
+                    <div className="track-meta-item">
+                      <span className="track-meta-label">Complaint ID:</span>
+                      <span className="track-meta-value monospace">{complaint.id}</span>
+                    </div>
+                    <div className="track-meta-item">
+                      <span className="track-meta-label">Reported by:</span>
+                      <span className="track-meta-value">{complaint.reporter_email || '—'}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
               {/* Progress Indicator with Dates */}
               <div className="progress-indicator">
@@ -164,37 +172,46 @@ export default function TrackComplaint() {
                 </div>
               </div>
 
-              {/* Complaint Summary */}
+              {/* Complaint Summary - 2-Column Grid Layout */}
               <div className="complaint-summary">
-                <div className="summary-item">
-                  <span className="summary-label">Business</span>
-                  <span className="summary-value">{complaint.business_name || '—'}</span>
+                {/* Row 1: Business (Left) + Address (Right) */}
+                <div className="summary-row-2col">
+                  <div className="summary-card">
+                    <div className="summary-item-header">
+                      <img src="/ui_icons/Business.png" alt="Business" className="summary-item-icon" />
+                      <span className="summary-label">Business</span>
+                    </div>
+                    <span className="summary-value">{complaint.business_name || '—'}</span>
+                  </div>
+                  <div className="summary-card">
+                    <div className="summary-item-header">
+                      <img src="/ui_icons/Address.png" alt="Address" className="summary-item-icon" />
+                      <span className="summary-label">Address</span>
+                    </div>
+                    <span className="summary-value summary-address">{complaint.business_address || '—'}</span>
+                  </div>
                 </div>
-                <div className="summary-item">
-                  <span className="summary-label">Address</span>
-                  <span className="summary-value">{complaint.business_address || '—'}</span>
-                </div>
-                <div className="summary-item">
-                  <span className="summary-label">Description</span>
-                  <span className="summary-value summary-description">
-                    {complaint.complaint_description
-                      ? complaint.complaint_description.length > 100
-                        ? complaint.complaint_description.substring(0, 100) + '…'
-                        : complaint.complaint_description
-                      : '—'}
-                  </span>
-                </div>
-              </div>
 
-              <div className="track-result-row">
-                <span className="track-result-label">Complaint ID</span>
-                <span className="track-result-value">{complaint.id}</span>
-              </div>
-              <div className="track-result-row">
-                <span className="track-result-label">Status</span>
-                <span className={statusBadgeClass(complaint.status)}>
-                  {formatStatus(complaint.status)}
-                </span>
+                {/* Row 2: Complaint Description (Full Width) */}
+                <div className="summary-row-full">
+                  <div className="summary-card summary-card-with-footer">
+                    <div>
+                      <div className="summary-item-header">
+                        <img src="/ui_icons/Complaint Description.png" alt="Description" className="summary-item-icon" />
+                        <span className="summary-label">Complaint Description</span>
+                      </div>
+                      <span className="summary-value summary-description">
+                        {complaint.complaint_description || '—'}
+                      </span>
+                    </div>
+                    <div className="summary-card-footer">
+                      <span className="summary-footer-label">Submitted on:</span>
+                      <span className="summary-footer-value">
+                        {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="track-result-actions">
