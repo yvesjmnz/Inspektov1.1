@@ -21,7 +21,7 @@ function statusBadgeClass(status) {
 }
 
 export default function DashboardDirector() {
-  const [tab, setTab] = useState('queue'); // queue | mission-orders | history
+  const [tab, setTab] = useState('general'); // general | queue | mission-orders | history
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
