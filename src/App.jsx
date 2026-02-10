@@ -107,6 +107,14 @@ function App() {
         const { data } = await supabase.auth.getSession();
         const user = data?.session?.user || null;
 
+        // If there is no session, redirect to login for protected routes.
+        if (!user) {
+          if (path !== '/login') {
+            window.location.replace('/login');
+            return;
+          }
+        }
+
         normalizedRole = normalizeRole(getRoleFromUser(user));
         if (!normalizedRole && user?.id) {
           normalizedRole = await getRoleFromProfiles(user.id);
@@ -115,6 +123,12 @@ function App() {
         if (!mounted) return;
 
         if (!isAuthorizedForPath(path, normalizedRole)) {
+          // If user is not authorized for this route, send them to a safe page.
+          // If not logged in -> login, else -> no-permission.
+          if (!user) {
+            window.location.replace('/login');
+            return;
+          }
           setCurrentPage('no-permission');
           return;
         }
