@@ -6,6 +6,7 @@ type RequestBody = {
   email: string;
   complaintId?: string;
   turnstileToken?: string;
+  formType?: string; // 'complaint' or 'special-complaint'
 };
 
 function json(status: number, body: unknown) {
@@ -131,7 +132,8 @@ Deno.serve(async (req) => {
     return json(500, { error: "Failed to create token" });
   }
 
-  const verifyUrl = `${appBaseUrl.replace(/\/$/, "")}/verify-email?token=${encodeURIComponent(token)}`;
+  const formType = body.formType || 'complaint';
+  const verifyUrl = `${appBaseUrl.replace(/\/$/, "")}/verify-email?token=${encodeURIComponent(token)}&form=${encodeURIComponent(formType)}`;
 
   const subject = "Inspekto: Verify your email to submit a complaint";
 

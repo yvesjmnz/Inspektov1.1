@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/complaints';
+import { requestEmailVerification } from '../../../lib/api';
 import { supabase } from '../../../lib/supabase';
 import './ComplaintForm.css';
 
-export default function SpecialComplaintForm({ verifiedEmail }) {
+export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEmail }) {
+  const [verifiedEmail, setVerifiedEmail] = useState(initialVerifiedEmail || null);
+  const [showVerificationModal, setShowVerificationModal] = useState(!initialVerifiedEmail);
   const [step, setStep] = useState(1);
 
   const [formData, setFormData] = useState({
@@ -29,9 +32,155 @@ export default function SpecialComplaintForm({ verifiedEmail }) {
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Email verification modal state
+  const [modalEmail, setModalEmail] = useState('');
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalError, setModalError] = useState(null);
+  const [modalSuccess, setModalSuccess] = useState(false);
+  const [modalSubmitted, setModalSubmitted] = useState(false);
+  const [modalRedirecting, setModalRedirecting] = useState(false);
+  const turnstileRef = useRef(null);
+
   const additionalImageInputRef = useRef(null);
 
   const TOTAL_STEPS = 4;
+
+  // Update reporter_email when verifiedEmail changes
+  useEffect(() => {
+    setFormData((prev) => ({
+      ...prev,
+      reporter_email: verifiedEmail || '',
+    }));
+  }, [verifiedEmail]);
+
+  // Render Turnstile widget when modal is shown
+  useEffect(() => {
+    if (!showVerificationModal) return;
+
+    // Wait a tick for the DOM to update
+    const timer = setTimeout(() => {
+      if (window.turnstile && !modalSubmitted && !modalRedirecting) {
+        try {
+          window.turnstile.render('#cf-turnstile-widget-special', {
+            sitekey: import.meta.env.VITE_TURNSTILE_SITE_KEY,
+            theme: 'light',
+          });
+        } catch (err) {
+          console.error('Turnstile render error:', err);
+        }
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [showVerificationModal, modalSubmitted, modalRedirecting]);
+
+  const checkForValidToken = async (emailToCheck) => {
+    try {
+      // Query email_verification_tokens table for valid tokens
+      const { data, error: queryError } = await supabase
+        .from('email_verification_tokens')
+        .select('email, expires_at, used_at')
+        .eq('email', emailToCheck.toLowerCase())
+        .is('used_at', null)
+        .order('expires_at', { ascending: false })
+        .limit(1);
+
+      if (queryError) {
+        return false;
+      }
+
+      if (data && data.length > 0) {
+        const token = data[0];
+        const expiresAt = new Date(token.expires_at);
+
+        // Check if token is still valid (not expired)
+        if (expiresAt > new Date()) {
+          // Valid token found, show redirecting message then proceed
+          setModalRedirecting(true);
+          setTimeout(() => {
+            setVerifiedEmail(emailToCheck);
+            setShowVerificationModal(false);
+            setModalEmail('');
+            setModalError(null);
+            setModalSuccess(false);
+            setModalSubmitted(false);
+            setModalRedirecting(false);
+            // Reset Turnstile widget
+            if (window.turnstile) {
+              window.turnstile.reset();
+            }
+          }, 1500);
+          return true;
+        }
+      }
+      return false;
+    } catch (err) {
+      console.error('Token check error:', err);
+      return false;
+    }
+  };
+
+  const handleVerificationSubmit = async (e) => {
+    e.preventDefault();
+    setModalError(null);
+    setModalLoading(true);
+
+    try {
+      // Check for valid token first
+      const hasValidToken = await checkForValidToken(modalEmail);
+
+      // If valid token found, checkForValidToken will handle the redirect
+      if (hasValidToken) {
+        return;
+      }
+
+      // Get Turnstile token from the widget
+      const turnstileToken = window.turnstile?.getResponse();
+      if (!turnstileToken) {
+        setModalError('Please complete the CAPTCHA verification.');
+        setModalLoading(false);
+        return;
+      }
+
+      // Send verification email with Turnstile token
+      await requestEmailVerification(modalEmail, null, turnstileToken, 'special-complaint');
+      setModalSuccess(true);
+      setModalSubmitted(true);
+    } catch (err) {
+      setModalError(err.message);
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const handleCloseVerificationModal = () => {
+    // Redirect to home instead of just closing
+    window.location.href = '/';
+  };
+
+  const handleVerificationModalOverlayClick = (e) => {
+    // Don't allow closing by clicking overlay
+    // Do nothing
+  };
+
+  // Handle Escape key press for verification modal
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && showVerificationModal) {
+        handleCloseVerificationModal();
+      }
+    };
+
+    if (showVerificationModal) {
+      document.addEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'hidden';
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'unset';
+    };
+  }, [showVerificationModal]);
 
   const stepTitle = useMemo(() => {
     switch (step) {
@@ -222,7 +371,7 @@ export default function SpecialComplaintForm({ verifiedEmail }) {
         // store all images as URLs in image_urls
         image_urls: evidenceImages.filter(Boolean),
         tags: formData.tags,
-        status: 'Submitted',
+        status: 'Urgent',
         email_verified: !!verifiedEmail,
       };
 
@@ -248,6 +397,87 @@ export default function SpecialComplaintForm({ verifiedEmail }) {
       setLoading(false);
     }
   };
+
+  // If verification modal is open, show it instead of the form
+  if (showVerificationModal) {
+    return (
+      <div className="modal-overlay" onClick={handleVerificationModalOverlayClick} style={{ display: 'flex' }}>
+        <div className="modal-content" style={{ position: 'relative', zIndex: 1001 }}>
+          <div className="modal-header">
+            <h2 className="modal-title">Email Verification</h2>
+            <button className="modal-close-btn" onClick={handleCloseVerificationModal} aria-label="Close modal">
+              ✕
+            </button>
+          </div>
+          <div className="modal-divider"></div>
+
+          {modalRedirecting ? (
+            <div className="modal-body success">
+              <div className="success-icon">✓</div>
+              <h3>Great! We Found Your Verification</h3>
+              <p className="success-email">Taking you to the special complaint form...</p>
+              <p className="info-text">
+                We found a valid verification for <strong>{modalEmail}</strong>. You're all set to submit your complaint.
+              </p>
+            </div>
+          ) : modalSubmitted && modalSuccess ? (
+            <div className="modal-body success">
+              <div className="success-icon">✓</div>
+              <h3>Verification Email Sent</h3>
+              <p className="success-email">We've sent a verification link to <strong>{modalEmail}</strong></p>
+              <p className="info-text">
+                Please check your email and click the verification link to proceed with your complaint submission. The link expires in 30 minutes.
+              </p>
+            </div>
+          ) : (
+            <div className="modal-body">
+              {/* Cloudflare Turnstile CAPTCHA Widget - Always Visible */}
+              <div
+                id="cf-turnstile-widget-special"
+                ref={turnstileRef}
+                className="cf-turnstile"
+              ></div>
+
+              <form onSubmit={handleVerificationSubmit} className="verification-form">
+                <div className="form-group">
+                  <label htmlFor="modal-email-special">Email Address</label>
+                  <input
+                    id="modal-email-special"
+                    type="email"
+                    value={modalEmail}
+                    onChange={(e) => setModalEmail(e.target.value)}
+                    placeholder="your.email@example.com"
+                    required
+                    disabled={modalLoading}
+                    className="form-input"
+                  />
+                </div>
+
+                {modalError && <div className="error-message">{modalError}</div>}
+
+                <button
+                  type="submit"
+                  disabled={modalLoading || !modalEmail}
+                  className="btn btn-primary btn-large"
+                >
+                  {modalLoading ? (
+                    <>
+                      <span className="spinner-small"></span>
+                      Sending...
+                    </>
+                  ) : (
+                    'Send Verification Link'
+                  )}
+                </button>
+              </form>
+
+              <p className="modal-description">A secure verification link will be sent to your email. The link expires in 30 minutes.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="complaint-form-container">

@@ -155,6 +155,15 @@ function App() {
         setVerifiedEmail(decodeURIComponent(emailParam));
         setCurrentPage('complaint');
       } else if (path === '/special-complaint') {
+        // Check for email parameter (from token verification)
+        const emailParam = params.get('email');
+
+        if (!mounted) return;
+
+        if (emailParam) {
+          setVerifiedEmail(decodeURIComponent(emailParam));
+        }
+
         setCurrentPage('special-complaint');
       } else if (path === '/complaint-confirmation') {
         setCurrentPage('complaint-confirmation');
