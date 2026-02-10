@@ -10,6 +10,7 @@ export default function VerifyEmail() {
     const handleVerify = async () => {
       const params = new URLSearchParams(window.location.search);
       const token = params.get('token');
+      const formType = params.get('form') || 'complaint'; // 'complaint' or 'special-complaint'
 
       if (!token) {
         setError('No verification token provided');
@@ -19,8 +20,9 @@ export default function VerifyEmail() {
 
       try {
         const result = await verifyEmail(token);
-        // Redirect immediately on success
-        window.location.href = `/complaint?email=${encodeURIComponent(result.email)}`;
+        // Redirect immediately on success to the appropriate form
+        const redirectPath = formType === 'special-complaint' ? '/special-complaint' : '/complaint';
+        window.location.href = `${redirectPath}?email=${encodeURIComponent(result.email)}`;
       } catch (err) {
         setError(err.message);
         setLoading(false);
