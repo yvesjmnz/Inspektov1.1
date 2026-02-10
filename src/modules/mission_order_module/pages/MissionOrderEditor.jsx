@@ -123,6 +123,8 @@ export default function MissionOrderEditor() {
   const [content, setContent] = useState('');
 
   const [missionOrderStatus, setMissionOrderStatus] = useState('');
+  const [directorComment, setDirectorComment] = useState('');
+  const [reviewedAt, setReviewedAt] = useState(null);
   const isApproved = String(missionOrderStatus || '').toLowerCase() === 'for inspection';
   const isReadOnly = isApproved;
 
@@ -213,7 +215,7 @@ export default function MissionOrderEditor() {
       try {
         const { data, error } = await supabase
           .from('mission_orders')
-          .select('id, title, content, complaint_id, status, created_at, updated_at')
+          .select('id, title, content, complaint_id, status, director_comment, reviewed_at, reviewed_by, created_at, updated_at')
           .eq('id', missionOrderId)
           .single();
 
@@ -258,6 +260,8 @@ export default function MissionOrderEditor() {
         setBusinessAddress(loadedBusinessAddress);
 
         setMissionOrderStatus(data?.status || '');
+        setDirectorComment(data?.director_comment || '');
+        setReviewedAt(data?.reviewed_at ? new Date(data.reviewed_at) : null);
 
         // Load inspectors list for displaying names
         const { data: inspectorsData, error: inspectorsError } = await supabase
@@ -719,6 +723,25 @@ export default function MissionOrderEditor() {
 
           {toast ? <div className="mo-alert mo-alert-success">{toast}</div> : null}
           {error ? <div className="mo-alert mo-alert-error">{error}</div> : null}
+
+          {String(missionOrderStatus || '').toLowerCase() === 'cancelled' && directorComment ? (
+            <div
+              className="mo-alert"
+              style={{
+                border: '1px solid #fecaca',
+                background: '#fef2f2',
+                color: '#7f1d1d',
+              }}
+            >
+              <div style={{ fontWeight: 900, marginBottom: 6 }}>Director Revisions Required</div>
+              <div style={{ whiteSpace: 'pre-wrap', fontWeight: 700 }}>{directorComment}</div>
+              {reviewedAt ? (
+                <div style={{ marginTop: 8, color: '#991b1b', fontWeight: 800, fontSize: 12 }}>
+                  Reviewed at {reviewedAt.toLocaleString()}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {isApproved ? null : (
             <div className="mo-assignments" style={{ marginTop: 14 }}>
