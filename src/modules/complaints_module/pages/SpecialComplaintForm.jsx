@@ -370,8 +370,8 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
         reporter_email: formData.reporter_email,
         // store all images as URLs in image_urls
         image_urls: evidenceImages.filter(Boolean),
-        tags: formData.tags,
-        status: 'Urgent',
+        tags: [...new Set([...(formData.tags || []), 'Immediate Inspection'])],
+        status: 'Submitted',
         email_verified: !!verifiedEmail,
       };
 

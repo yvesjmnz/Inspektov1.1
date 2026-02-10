@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { requestEmailVerification } from '../../../lib/api';
 import './RequestVerification.css';
 
@@ -8,6 +8,27 @@ export default function RequestVerification() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const turnstileRef = useRef(null);
+
+  // Render Turnstile widget when component mounts
+  useEffect(() => {
+    if (!submitted && !success) {
+      const timer = setTimeout(() => {
+        if (window.turnstile) {
+          try {
+            window.turnstile.render('#cf-turnstile-widget-request', {
+              sitekey: import.meta.env.VITE_TURNSTILE_SITE_KEY,
+              theme: 'light',
+            });
+          } catch (err) {
+            console.error('Turnstile render error:', err);
+          }
+        }
+      }, 100);
+
+      return () => clearTimeout(timer);
+    }
+  }, [submitted, success]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -15,7 +36,15 @@ export default function RequestVerification() {
     setLoading(true);
 
     try {
-      await requestEmailVerification(email, null, null, 'complaint');
+      // Get Turnstile token from the widget
+      const turnstileToken = window.turnstile?.getResponse();
+      if (!turnstileToken) {
+        setError('Please complete the CAPTCHA verification.');
+        setLoading(false);
+        return;
+      }
+
+      await requestEmailVerification(email, null, turnstileToken, 'complaint');
       setSuccess(true);
       setSubmitted(true);
       setEmail('');
@@ -37,15 +66,20 @@ export default function RequestVerification() {
             Please check your email and click the verification link to proceed with your complaint submission.
             The link will expire in 30 minutes.
           </p>
-          <button
-            onClick={() => {
-              setSubmitted(false);
-              setSuccess(false);
-            }}
-            className="btn btn-secondary"
-          >
-            Send Another Email
-          </button>
+          <div className="button-group">
+            <button
+              onClick={() => {
+                setSubmitted(false);
+                setSuccess(false);
+              }}
+              className="btn btn-secondary"
+            >
+              Send Another Email
+            </button>
+            <a href="/" className="btn btn-primary">
+              Go Back to Home
+            </a>
+          </div>
         </div>
       </div>
     );
@@ -58,6 +92,13 @@ export default function RequestVerification() {
         <p>Enter your email address to receive a verification link for complaint submission.</p>
 
         <form onSubmit={handleSubmit} className="verification-form">
+          {/* Cloudflare Turnstile CAPTCHA Widget */}
+          <div
+            id="cf-turnstile-widget-request"
+            ref={turnstileRef}
+            className="cf-turnstile"
+          ></div>
+
           <div className="form-group">
             <label htmlFor="email">Email Address</label>
             <input
@@ -79,7 +120,14 @@ export default function RequestVerification() {
             disabled={loading || !email}
             className="btn btn-primary btn-large"
           >
-            {loading ? 'Sending...' : 'Send Verification Link'}
+            {loading ? (
+              <>
+                <span className="spinner-small"></span>
+                Sending...
+              </>
+            ) : (
+              'Send Verification Link'
+            )}
           </button>
         </form>
 
