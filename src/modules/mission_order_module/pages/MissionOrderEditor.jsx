@@ -112,6 +112,10 @@ export default function MissionOrderEditor() {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
 
+  const [missionOrderStatus, setMissionOrderStatus] = useState('');
+  const isApproved = String(missionOrderStatus || '').toLowerCase() === 'for inspection';
+  const isReadOnly = isApproved;
+
   // Track unsaved changes by comparing against the last saved/loaded snapshot.
   const [isDirty, setIsDirty] = useState(false);
   const allowDirtyTrackingRef = useRef(false);
@@ -180,7 +184,7 @@ export default function MissionOrderEditor() {
       try {
         const { data, error } = await supabase
           .from('mission_orders')
-          .select('id, title, content, complaint_id, created_at, updated_at')
+          .select('id, title, content, complaint_id, status, created_at, updated_at')
           .eq('id', missionOrderId)
           .single();
 
@@ -223,6 +227,8 @@ export default function MissionOrderEditor() {
 
         setBusinessName(loadedBusinessName);
         setBusinessAddress(loadedBusinessAddress);
+
+        setMissionOrderStatus(data?.status || '');
 
         // Load inspectors list for displaying names
         const { data: inspectorsData, error: inspectorsError } = await supabase
@@ -610,7 +616,7 @@ export default function MissionOrderEditor() {
                   markDirty(next, editorRef.current?.innerHTML ?? content);
                 }}
                 placeholder="Mission Order Title"
-                disabled={loading}
+                disabled={loading || isReadOnly}
               />
               <div className="mo-meta">
                 <span>MO ID: {missionOrderId ? `${missionOrderId.slice(0, 8)}…` : '—'}</span>
@@ -629,77 +635,105 @@ export default function MissionOrderEditor() {
               >
                 Back
               </a>
-              <button className="mo-btn" type="button" onClick={handleSave} disabled={saving || loading}>
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button
-                className="mo-btn mo-btn-primary"
-                type="button"
-                onClick={handleSubmitToDirector}
-                disabled={loading || saving || submitting || assignedInspectorIds.length === 0}
-                title={assignedInspectorIds.length === 0 ? 'Assign at least one inspector before submitting.' : 'Forward to Director for review.'}
-              >
-                {submitting ? 'Submitting…' : 'Submit to Director'}
-              </button>
+
+              {isApproved ? (
+                <button
+                  className="mo-btn"
+                  type="button"
+                  onClick={() => window.print()}
+                  disabled={loading}
+                  title="Print this approved mission order."
+                  style={{ background: 'transparent', border: '1px solid #0f172a', color: '#0f172a' }}
+                >
+                  Print
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="mo-btn"
+                    type="button"
+                    onClick={handleSave}
+                    disabled={saving || loading}
+                    title="Save changes"
+                  >
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    className="mo-btn mo-btn-primary"
+                    type="button"
+                    onClick={handleSubmitToDirector}
+                    disabled={loading || saving || submitting || assignedInspectorIds.length === 0}
+                    title={
+                      assignedInspectorIds.length === 0
+                        ? 'Assign at least one inspector before submitting.'
+                        : 'Forward to Director for review.'
+                    }
+                  >
+                    {submitting ? 'Submitting…' : 'Submit to Director'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
           {toast ? <div className="mo-alert mo-alert-success">{toast}</div> : null}
           {error ? <div className="mo-alert mo-alert-error">{error}</div> : null}
 
-          <div className="mo-assignments" style={{ marginTop: 14 }}>
-            <div className="mo-meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontWeight: 800 }}>Assigned Inspectors:</span>
-              {assignedInspectorIds.length === 0 ? (
-                <span style={{ color: '#64748b' }}>None</span>
-              ) : (
-                assignedInspectorIds.map((id) => {
-                  const ins = inspectors.find((x) => x.id === id);
-                  const label = ins?.full_name || id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className="mo-chip"
-                      title="Click to remove"
-                      onClick={() => removeInspector(id)}
-                      disabled={syncingAssignments}
-                    >
-                      <span className="mo-chip-label">{label}</span>
-                      <span aria-hidden="true" className="mo-chip-x">
-                        ×
-                      </span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
+          {isApproved ? null : (
+            <div className="mo-assignments" style={{ marginTop: 14 }}>
+              <div className="mo-meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontWeight: 800 }}>Assigned Inspectors:</span>
+                {assignedInspectorIds.length === 0 ? (
+                  <span style={{ color: '#64748b' }}>None</span>
+                ) : (
+                  assignedInspectorIds.map((id) => {
+                    const ins = inspectors.find((x) => x.id === id);
+                    const label = ins?.full_name || id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className="mo-chip"
+                        title="Click to remove"
+                        onClick={() => removeInspector(id)}
+                        disabled={syncingAssignments}
+                      >
+                        <span className="mo-chip-label">{label}</span>
+                        <span aria-hidden="true" className="mo-chip-x">
+                          ×
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
 
-            <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-              <select
-                className="mo-select"
-                value={selectedInspectorId}
-                onChange={(e) => setSelectedInspectorId(e.target.value)}
-                disabled={loading || syncingAssignments}
-                style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #e2e8f0' }}
-              >
-                <option value="">Select inspector…</option>
-                {inspectors.map((ins) => (
-                  <option key={ins.id} value={ins.id}>
-                    {ins.full_name || ins.id}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="mo-btn"
-                onClick={addInspector}
-                disabled={loading || syncingAssignments || !selectedInspectorId}
-              >
-                {syncingAssignments ? 'Updating…' : 'Add Inspector'}
-              </button>
+              <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  className="mo-select"
+                  value={selectedInspectorId}
+                  onChange={(e) => setSelectedInspectorId(e.target.value)}
+                  disabled={loading || syncingAssignments}
+                  style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #e2e8f0' }}
+                >
+                  <option value="">Select inspector…</option>
+                  {inspectors.map((ins) => (
+                    <option key={ins.id} value={ins.id}>
+                      {ins.full_name || ins.id}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="mo-btn"
+                  onClick={addInspector}
+                  disabled={loading || syncingAssignments || !selectedInspectorId}
+                >
+                  {syncingAssignments ? 'Updating…' : 'Add Inspector'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div
             style={{
@@ -733,7 +767,7 @@ export default function MissionOrderEditor() {
                 <div
                   ref={editorRef}
                   className="mo-editor"
-                  contentEditable={!loading}
+                  contentEditable={!loading && !isApproved}
                   suppressContentEditableWarning
               // Don't use dangerouslySetInnerHTML here; we manually sync innerHTML only when loading initial content.
               // Re-rendering innerHTML on each keystroke resets the caret to the beginning.
@@ -919,8 +953,14 @@ export default function MissionOrderEditor() {
           </div>
 
           <div className="mo-note">
-            Save your edits, assign inspectors, then click <strong>Submit to Director</strong> to forward the mission
-            order for review.
+            {isApproved ? (
+              <>This mission order is <strong>approved</strong> and locked (read-only). You can print it.</>
+            ) : (
+              <>
+                Save your edits, assign inspectors, then click <strong>Submit to Director</strong> to forward the mission
+                order for review.
+              </>
+            )}
           </div>
         </section>
       </main>

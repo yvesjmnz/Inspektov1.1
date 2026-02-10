@@ -15,10 +15,20 @@ function formatStatus(status) {
 
 function statusBadgeClass(status) {
   const s = String(status || '').toLowerCase();
-  if (['approved'].includes(s)) return 'status-badge status-success';
-  if (['declined', 'rejected', 'invalid'].includes(s)) return 'status-badge status-danger';
-  if (['submitted', 'pending', 'new'].includes(s)) return 'status-badge status-warning';
-  if (['on hold', 'on_hold', 'hold'].includes(s)) return 'status-badge status-info';
+
+  // Mission order status color coding (source of truth: DB check constraint)
+  // draft -> neutral/info
+  // issued -> warning (queued for Director)
+  // for inspection -> success (approved and actionable)
+  // cancelled -> danger
+  if (s === 'for inspection' || s === 'for_inspection') return 'status-badge status-success';
+  if (s === 'issued') return 'status-badge status-warning';
+  if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
+  if (s === 'draft') return 'status-badge status-info';
+
+  // No mission order yet
+  if (!s) return 'status-badge status-info';
+
   return 'status-badge';
 }
 
@@ -60,34 +70,43 @@ export default function DashboardHeadInspector() {
     setLoading(true);
 
     try {
-      // Source of truth: mission orders created for complaints.
-      // We query mission_orders, then hydrate complaint details for display.
-      const { data: missionOrders, error: moError } = await supabase
-        .from('mission_orders')
-        .select('id, complaint_id, status, created_at')
-        .order('created_at', { ascending: false })
-        .limit(200);
+      // Industry standard: drive this dashboard from Director-approved complaints,
+      // regardless of whether a mission order already exists yet.
+      // Then attach the latest mission order per complaint (if any).
+      const { data: complaintRows, error: complaintError } = await supabase
+        .from('complaints')
+        .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
+        .in('status', ['approved', 'Approved']);
+
+      if (complaintError) throw complaintError;
+
+      const complaintIds = Array.from(new Set((complaintRows || []).map((c) => c.id).filter(Boolean)));
+
+      const { data: missionOrders, error: moError } = complaintIds.length
+        ? await supabase
+            .from('mission_orders')
+            .select('id, complaint_id, status, created_at')
+            .in('complaint_id', complaintIds)
+            .order('created_at', { ascending: false })
+            .limit(500)
+        : { data: [], error: null };
 
       if (moError) throw moError;
 
-      const complaintIds = Array.from(
-        new Set((missionOrders || []).map((m) => m.complaint_id).filter(Boolean))
-      );
-
-      const { data: complaintRows, error: complaintError } = complaintIds.length
-        ? await supabase
-            .from('complaints')
-            .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
-            .in('id', complaintIds)
-        : { data: [], error: null };
-
-      if (complaintError) throw complaintError;
+      // Keep the latest MO per complaint.
+      const latestMoByComplaintId = new Map();
+      (missionOrders || []).forEach((mo) => {
+        if (!mo?.complaint_id) return;
+        if (!latestMoByComplaintId.has(mo.complaint_id)) {
+          latestMoByComplaintId.set(mo.complaint_id, mo);
+        }
+      });
 
       const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
 
       // Load inspector assignments (FK-only) and resolve inspector display names.
       // Expected columns in mission_order_assignments: mission_order_id, inspector_id (or user_id)
-      const missionOrderIds = Array.from(new Set((missionOrders || []).map((m) => m.id).filter(Boolean)));
+      const missionOrderIds = Array.from(new Set((Array.from(latestMoByComplaintId.values()) || []).map((m) => m.id).filter(Boolean)));
 
       const { data: assignmentRows, error: assignmentError } = missionOrderIds.length
         ? await supabase
@@ -129,18 +148,18 @@ export default function DashboardHeadInspector() {
       });
 
       // Merge into the shape the table expects.
-      const merged = (missionOrders || []).map((mo) => {
-        const c = complaintById.get(mo.complaint_id) || {};
+      const merged = (complaintRows || []).map((c) => {
+        const mo = latestMoByComplaintId.get(c.id) || null;
         return {
-          complaint_id: mo.complaint_id,
+          complaint_id: c.id,
           business_name: c.business_name,
           business_address: c.business_address,
           reporter_email: c.reporter_email,
-          status: c.status ?? mo.status,
           approved_at: c.approved_at,
           created_at: c.created_at,
-          mission_order_id: mo.id,
-          inspector_names: inspectorNamesByMissionOrderId.get(mo.id) || [],
+          mission_order_id: mo?.id || null,
+          mission_order_status: mo?.status || null,
+          inspector_names: mo?.id ? inspectorNamesByMissionOrderId.get(mo.id) || [] : [],
         };
       });
 
@@ -296,9 +315,36 @@ export default function DashboardHeadInspector() {
     const q = search.trim().toLowerCase();
     if (!q) return complaints;
 
-    // View rows use complaint_id
-    return complaints.filter((c) => String(c?.complaint_id ?? '').toLowerCase().includes(q));
+    return complaints.filter((c) => {
+      const hay = [c.business_name, c.business_address, c.reporter_email, c.complaint_id, c.mission_order_id]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
   }, [complaints, search]);
+
+  // Group approved complaints by day for easier review.
+  const complaintsByDay = useMemo(() => {
+    const groups = {};
+
+    for (const c of filteredComplaints) {
+      // Prefer the approval timestamp for bucketing; fall back to created_at.
+      const dt = c.approved_at ? new Date(c.approved_at) : c.created_at ? new Date(c.created_at) : null;
+      const key = dt ? new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).toISOString().slice(0, 10) : 'unknown';
+      if (!groups[key]) {
+        groups[key] = {
+          label: dt ? dt.toLocaleDateString() : 'Unknown Date',
+          items: [],
+        };
+      }
+      groups[key].items.push(c);
+    }
+
+    // Newest day first.
+    const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
+    return { groups, sortedKeys };
+  }, [filteredComplaints]);
 
   return (
     <div className="dash-container">
@@ -340,7 +386,7 @@ export default function DashboardHeadInspector() {
                 <tr>
                   <th style={{ width: 90 }}>ID</th>
                   <th>Business</th>
-                  <th style={{ width: 160 }}>Status</th>
+                  <th style={{ width: 160 }}>Mission Order</th>
                   <th style={{ width: 200 }}>Approved</th>
                   <th style={{ width: 200 }}>Submitted</th>
                   <th style={{ width: 220 }}>Mission Order</th>
@@ -355,53 +401,73 @@ export default function DashboardHeadInspector() {
                     </td>
                   </tr>
                 ) : (
-                  filteredComplaints.map((c) => (
-                    <tr key={c.complaint_id}>
-                      <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
-                      <td>
-                        <div className="dash-cell-title">{c.business_name || '—'}</div>
-                        <div className="dash-cell-sub">{c.business_address || ''}</div>
-                        <div className="dash-cell-sub">{c.reporter_email || ''}</div>
-                      </td>
-                      <td>
-                        <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
-                      </td>
-                      <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
-                      <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="dash-btn"
-                          onClick={() => createMissionOrder(c.complaint_id)}
-                          disabled={creatingForId === c.complaint_id}
-                        >
-                          {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
-                        </button>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
-                          {(c.inspector_names || []).length === 0 ? (
-                            <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
-                          ) : (
-                            (c.inspector_names || []).map((name, idx) => (
-                              <span
-                                key={`${c.complaint_id}-${idx}`}
-                                style={{
-                                  padding: '6px 10px',
-                                  borderRadius: 999,
-                                  fontWeight: 800,
-                                  border: '1px solid #e2e8f0',
-                                  background: '#f8fafc',
-                                }}
-                              >
-                                {name}
-                              </span>
-                            ))
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                  complaintsByDay.sortedKeys.flatMap((dayKey) => {
+                    const rows = [];
+                    const label = complaintsByDay.groups[dayKey]?.label || dayKey;
+
+                    // Day header row
+                    rows.push(
+                      <tr key={`day-${dayKey}`}>
+                        <td colSpan={7} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>
+                          {label}
+                        </td>
+                      </tr>
+                    );
+
+                    complaintsByDay.groups[dayKey].items.forEach((c) => {
+                      rows.push(
+                        <tr key={c.complaint_id}>
+                          <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
+                          <td>
+                            <div className="dash-cell-title">{c.business_name || '—'}</div>
+                            <div className="dash-cell-sub">{c.business_address || ''}</div>
+                            <div className="dash-cell-sub">{c.reporter_email || ''}</div>
+                          </td>
+                          <td>
+                            <span className={statusBadgeClass(c.mission_order_status)}>
+                              {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                            </span>
+                          </td>
+                          <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
+                          <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="dash-btn"
+                              onClick={() => createMissionOrder(c.complaint_id)}
+                              disabled={creatingForId === c.complaint_id}
+                            >
+                              {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
+                            </button>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
+                              {(c.inspector_names || []).length === 0 ? (
+                                <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                              ) : (
+                                (c.inspector_names || []).map((name, idx) => (
+                                  <span
+                                    key={`${c.complaint_id}-${idx}`}
+                                    style={{
+                                      padding: '6px 10px',
+                                      borderRadius: 999,
+                                      fontWeight: 800,
+                                      border: '1px solid #e2e8f0',
+                                      background: '#f8fafc',
+                                    }}
+                                  >
+                                    {name}
+                                  </span>
+                                ))
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    });
+
+                    return rows;
+                  })
                 )}
               </tbody>
             </table>

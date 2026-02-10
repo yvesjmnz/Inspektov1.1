@@ -73,17 +73,62 @@ export default function MissionOrderReview() {
 
       if (inspectorsError) throw inspectorsError;
 
+      // Load assignments.
+      // In many Supabase setups, RLS can allow INSERT/DELETE but accidentally block SELECT,
+      // which makes the UI think there are no assignments.
+      // We therefore:
+      // 1) Try to fetch assignments from mission_order_assignments.
+      // 2) Fallback to mission_orders.assigned_inspector_ids if present.
+      // 3) Finally, as a last-resort, infer from the MO HTML auto-field markers.
       const { data: assignedRows, error: assignedError } = await supabase
         .from('mission_order_assignments')
-        .select('id, inspector_id, assigned_at')
+        .select('inspector_id, assigned_at')
         .eq('mission_order_id', missionOrderId)
         .order('assigned_at', { ascending: true });
 
-      if (assignedError) throw assignedError;
+      let assignedIds = [];
+
+      if (!assignedError) {
+        assignedIds = (assignedRows || []).map((r) => r.inspector_id).filter(Boolean);
+      }
+
+      // Fallback #1: if the schema has a denormalized column.
+      if (assignedIds.length === 0) {
+        const maybe = mo?.assigned_inspector_ids;
+        if (Array.isArray(maybe)) assignedIds = maybe.filter(Boolean);
+      }
+
+      // Fallback #2: parse from stored HTML if it contains the inspector names list.
+      // This is best-effort only and prevents a false-negative block on approval.
+      if (assignedIds.length === 0 && mo?.content) {
+        const m = String(mo.content).match(/data-mo-auto="inspectors"[^>]*>([\s\S]*?)<\/span>/i);
+        if (m?.[1]) {
+          const text = m[1].replace(/<[^>]+>/g, '').trim();
+          if (text) {
+            const nameSet = new Set(
+              text
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean)
+            );
+            assignedIds = (inspectorsData || [])
+              .filter((p) => nameSet.has(String(p.full_name || '').trim()))
+              .map((p) => p.id);
+          }
+        }
+      }
+
+      // If SELECT is blocked by RLS, surface a warning but still allow approval when we have an alternate source.
+      if (assignedError && assignedIds.length === 0) {
+        // Don't hard-fail page load; allow director to see the mission order.
+        // The approve handler will still block if we truly can't determine any assignments.
+        // eslint-disable-next-line no-console
+        console.warn('Failed to load mission_order_assignments (possible RLS):', assignedError);
+      }
 
       setMissionOrder(mo);
       setInspectors(inspectorsData || []);
-      setAssignedInspectorIds((assignedRows || []).map((r) => r.inspector_id));
+      setAssignedInspectorIds(assignedIds);
 
       // Best-effort complaint side panel data (read-only)
       if (mo?.complaint_id) {
@@ -203,7 +248,7 @@ export default function MissionOrderReview() {
       const { error: updateError } = await supabase.from('mission_orders').update(patch).eq('id', missionOrderId);
       if (updateError) throw updateError;
 
-      setToast(nextStatus === 'completed' ? 'Mission order approved.' : 'Mission order rejected.');
+      setToast(nextStatus === 'for inspection' ? 'Mission order approved.' : 'Mission order rejected.');
       await load();
     } catch (e) {
       setError(e?.message || 'Failed to save decision.');
@@ -223,9 +268,9 @@ export default function MissionOrderReview() {
       return;
     }
 
-    // There is no "approved" status in the current DB constraint.
-    // "completed" is treated as "Director-approved/finalized" in this workflow.
-    await updateMissionOrderDecision('completed');
+    // DB constraint allows: draft | issued | cancelled | for inspection
+    // "for inspection" is treated as "Director-approved / ready for inspectors".
+    await updateMissionOrderDecision('for inspection');
   };
 
   const handleReject = async () => {

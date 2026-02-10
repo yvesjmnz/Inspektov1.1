@@ -50,8 +50,23 @@ export default function DashboardDirector() {
   const currentYear = new Date().getFullYear();
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    window.location.href = '/login';
+    setError('');
+    try {
+      // Use global sign-out to revoke refresh tokens across tabs/devices.
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'global' });
+      if (signOutError) throw signOutError;
+    } catch (e) {
+      // Even if remote sign-out fails, clear local state and navigate away.
+      setError(e?.message || 'Logout failed. Clearing local session…');
+    } finally {
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {
+        // ignore
+      }
+      window.location.replace('/login');
+    }
   };
 
   const loadComplaints = async () => {
@@ -371,9 +386,9 @@ export default function DashboardDirector() {
     if (tab === 'mission-orders') {
       const total = filteredMissionOrders.length;
       const issued = filteredMissionOrders.filter((x) => String(x.status || '').toLowerCase() === 'issued').length;
-      const completed = filteredMissionOrders.filter((x) => String(x.status || '').toLowerCase() === 'completed').length;
+      const forInspection = filteredMissionOrders.filter((x) => String(x.status || '').toLowerCase() === 'for inspection').length;
       const cancelled = filteredMissionOrders.filter((x) => String(x.status || '').toLowerCase() === 'cancelled').length;
-      return { total, issued, completed, cancelled };
+      return { total, issued, forInspection, cancelled };
     }
     const total = filteredComplaints.length;
     const sLower = (s) => String(s || '').toLowerCase();
@@ -603,7 +618,7 @@ export default function DashboardDirector() {
           <div style={{ margin: '10px 0', color: '#475569', fontSize: 12 }}>
             {tab === 'mission-orders' ? (
               <span>
-                Orders: {summary.total} • Issued: {summary.issued} • Completed: {summary.completed} • Cancelled: {summary.cancelled} • Avg Inspection Duration: —
+                Orders: {summary.total} • Issued: {summary.issued} • For Inspection: {summary.forInspection} • Cancelled: {summary.cancelled} • Avg Inspection Duration: —
               </span>
             ) : (
               <span>
