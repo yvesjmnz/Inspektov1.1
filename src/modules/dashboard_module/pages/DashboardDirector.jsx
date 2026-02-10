@@ -574,7 +574,7 @@ export default function DashboardDirector() {
               <li>
                 <button type="button" className={`dash-nav-item ${tab === 'general' ? 'active' : ''}`} onClick={() => setTab('general')}>
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/menu.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) invert(1)' }} />
+                    <img src="/ui_icons/menu.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Dashboard</span>
                 </button>
@@ -585,7 +585,7 @@ export default function DashboardDirector() {
               <li>
                 <button type="button" className={`dash-nav-item ${tab === 'queue' ? 'active' : ''}`} onClick={() => setTab('queue')}>
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/queue.png" alt="" style={{ width: 26, height: 26, objectFit: 'contain', display: 'block', filter: 'brightness(0) invert(1)' }} />
+                    <img src="/ui_icons/queue.png" alt="" style={{ width: 26, height: 26, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Queue</span>
                 </button>
@@ -593,7 +593,7 @@ export default function DashboardDirector() {
               <li>
                 <button type="button" className={`dash-nav-item ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) invert(1)' }} />
+                    <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Complaint History</span>
                 </button>
@@ -604,7 +604,7 @@ export default function DashboardDirector() {
               <li>
                 <button type="button" className={`dash-nav-item ${tab === 'mission-orders' ? 'active' : ''}`} onClick={() => setTab('mission-orders')}>
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/mo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) invert(1)' }} />
+                    <img src="/ui_icons/mo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Mission Orders</span>
                 </button>
@@ -617,6 +617,7 @@ export default function DashboardDirector() {
                           </ul>
             <button
               type="button"
+              className="dash-nav-item"
               onClick={handleLogout}
               style={{
                 marginTop: 'auto',
@@ -628,8 +629,15 @@ export default function DashboardDirector() {
                 padding: '10px 12px',
                 borderRadius: 10,
                 cursor: 'pointer',
+                display: 'grid',
+                gridTemplateColumns: '24px 1fr',
+                alignItems: 'center',
+                gap: 10,
               }}
             >
+              <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <img src="/ui_icons/logout.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(21%) sepia(97%) saturate(4396%) hue-rotate(346deg) brightness(95%) contrast(101%)' }} />
+              </span>
               <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Logout</span>
             </button>
           </aside>
