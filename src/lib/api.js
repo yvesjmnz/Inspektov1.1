@@ -1,11 +1,12 @@
 import { supabase } from './supabase';
 
-export async function requestEmailVerification(email, complaintId = null, turnstileToken = null) {
+export async function requestEmailVerification(email, complaintId = null, turnstileToken = null, formType = 'complaint') {
   const { data, error } = await supabase.functions.invoke('request-email-verification', {
     body: {
       email,
       complaintId,
       turnstileToken,
+      formType,
     },
   });
 

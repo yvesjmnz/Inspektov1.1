@@ -119,6 +119,7 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
   // Store token hash
+  const formType = body.formType || 'complaint';
   const { error: insertErr } = await supabase
     .from("email_verification_tokens")
     .insert({
@@ -126,13 +127,13 @@ Deno.serve(async (req) => {
       complaint_id: body.complaintId ?? null,
       token_hash: tokenHash,
       expires_at: expiresAt.toISOString(),
+      form_type: formType,
     });
 
   if (insertErr) {
     return json(500, { error: "Failed to create token" });
   }
 
-  const formType = body.formType || 'complaint';
   const verifyUrl = `${appBaseUrl.replace(/\/$/, "")}/verify-email?token=${encodeURIComponent(token)}&form=${encodeURIComponent(formType)}`;
 
   const subject = "Inspekto: Verify your email to submit a complaint";
