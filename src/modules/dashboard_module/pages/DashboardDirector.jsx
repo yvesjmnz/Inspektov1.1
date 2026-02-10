@@ -83,7 +83,7 @@ export default function DashboardDirector() {
       if (tab === 'queue') {
         // Director queue: items that need review
         query = query.in('status', ['Submitted', 'Pending', 'New', 'submitted', 'pending', 'new']);
-      } else {
+      } else if (tab === 'history') {
         // History: approved/declined/rejected
         query = query.in('status', [
           'Approved',
@@ -116,6 +116,8 @@ export default function DashboardDirector() {
         } catch (_) {
           // ignore invalid date ranges
         }
+      } else {
+        // General or other: no status filter (fetch recent mix for KPIs)
       }
 
       const searchVal = search.trim();
@@ -174,6 +176,10 @@ export default function DashboardDirector() {
 
   useEffect(() => {
     if (tab === 'mission-orders') {
+      loadMissionOrders();
+    } else if (tab === 'general') {
+      // Load both datasets for the overview
+      loadComplaints();
       loadMissionOrders();
     } else {
       loadComplaints();
@@ -352,6 +358,17 @@ export default function DashboardDirector() {
     }
   };
 
+  const handleRefresh = () => {
+    if (tab === 'mission-orders') {
+      loadMissionOrders();
+    } else if (tab === 'general') {
+      loadComplaints();
+      loadMissionOrders();
+    } else {
+      loadComplaints();
+    }
+  };
+
   // Load full complaint for popup
   const openFullComplaint = async (id) => {
     setFullViewId(id);
@@ -410,6 +427,41 @@ export default function DashboardDirector() {
 
     return { total, approved, declined, pending, avgDecisionHours };
   }, [tab, filteredComplaints, filteredMissionOrders]);
+
+  const generalSummary = useMemo(() => {
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    const sLower = (s) => String(s || '').toLowerCase();
+    const inReview = ['submitted', 'pending', 'new'];
+
+    const isToday = (iso) => {
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      return t >= startOfDay.getTime() && t < endOfDay.getTime();
+    };
+
+    const newToday = (complaints || []).filter(c => inReview.includes(sLower(c.status)) && isToday(c.created_at)).length;
+    const pendingReview = (complaints || []).filter(c => inReview.includes(sLower(c.status))).length;
+    const approvedToday = (complaints || []).filter(c => sLower(c.status) === 'approved' && isToday(c.approved_at)).length;
+    const declinedToday = (complaints || []).filter(c => sLower(c.status) === 'declined' && isToday(c.declined_at)).length;
+
+    const moIssued = (missionOrders || []).filter(m => sLower(m.status) === 'issued').length;
+
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+      const next = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i + 1);
+      const cnt = (complaints || []).filter(c => {
+        const t = c.created_at ? new Date(c.created_at).getTime() : null;
+        return t && t >= d.getTime() && t < next.getTime();
+      }).length;
+      days.push({ label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), count: cnt });
+    }
+    const max = days.reduce((m, x) => Math.max(m, x.count), 0) || 1;
+
+    return { newToday, pendingReview, approvedToday, declinedToday, moIssued, days, max };
+  }, [complaints, missionOrders]);
 
   const updateComplaintStatus = async (complaintId, newStatus) => {
     setError('');
@@ -490,8 +542,28 @@ export default function DashboardDirector() {
     <div className="dash-container">
             <main className="dash-main">
         <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
-          <aside className="dash-side" title="Menu" style={{ width: navCollapsed ? 72 : 240, display: 'flex', flexDirection: 'column' }}>
+          <aside
+            className="dash-side"
+            title="Menu"
+            style={{ width: navCollapsed ? 72 : 240, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+            onClick={(e) => {
+              const t = e.target;
+              if (t && typeof t.closest === 'function' && t.closest('.dash-nav-item')) return;
+              setNavCollapsed((v) => !v);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                const t = e.target;
+                if (t && typeof t.closest === 'function' && t.closest('.dash-nav-item')) return;
+                e.preventDefault();
+                setNavCollapsed((v) => !v);
+              }
+            }}
+          >
             <div className="dash-side-brand" title="Menu">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                <img src="/logo.png" alt="City Hall Logo" style={{ width: 44, height: 44, objectFit: 'contain', borderRadius: '50%' }} />
+              </div>
               <div className="hamburger" aria-hidden="true">
                 <div className="hamburger-bar"></div>
                 <div className="hamburger-bar"></div>
@@ -500,21 +572,44 @@ export default function DashboardDirector() {
             </div>
             <ul className="dash-nav" style={{ flex: 1 }}>
               <li>
+                <button type="button" className={`dash-nav-item ${tab === 'general' ? 'active' : ''}`} onClick={() => setTab('general')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/menu.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) invert(1)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Dashboard</span>
+                </button>
+              </li>
+              <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Complaints</span>
+              </li>
+              <li>
                 <button type="button" className={`dash-nav-item ${tab === 'queue' ? 'active' : ''}`} onClick={() => setTab('queue')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/queue.png" alt="" style={{ width: 26, height: 26, objectFit: 'contain', display: 'block', filter: 'brightness(0) invert(1)' }} />
+                  </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Queue</span>
                 </button>
               </li>
               <li>
-                <button type="button" className={`dash-nav-item ${tab === 'mission-orders' ? 'active' : ''}`} onClick={() => setTab('mission-orders')}>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Mission Orders</span>
-                </button>
-              </li>
-              <li>
                 <button type="button" className={`dash-nav-item ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) invert(1)' }} />
+                  </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Complaint History</span>
                 </button>
               </li>
+              <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Mission Orders</span>
+              </li>
               <li>
+                <button type="button" className={`dash-nav-item ${tab === 'mission-orders' ? 'active' : ''}`} onClick={() => setTab('mission-orders')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/mo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) invert(1)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Mission Orders</span>
+                </button>
+              </li>
+                            <li>
                 <a className="dash-nav-item" href="/">
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Back to Home</span>
                 </a>
@@ -548,19 +643,7 @@ export default function DashboardDirector() {
             <div className="dash-actions"></div>
           </div>
 
-          {tab === 'queue' ? (
-            <div className="dash-topbar">
-              <button
-                type="button"
-                className="dash-menu-btn"
-                onClick={() => setNavCollapsed((v) => !v)}
-                aria-label="Toggle menu"
-                title="Toggle menu"
-              >
-                <span className="dash-menu-label">{navCollapsed ? 'Expand >' : '< Collapse'}</span>
-              </button>
-            </div>
-          ) : null}
+          {null}
 
           <div className="dash-toolbar">
           {tab === 'history' ? (
@@ -601,7 +684,7 @@ export default function DashboardDirector() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           />
-          <button className="dash-btn" type="button" onClick={() => (tab === 'mission-orders' ? loadMissionOrders() : loadComplaints())} disabled={loading}>
+          <button className="dash-btn" type="button" onClick={handleRefresh} disabled={loading}>
           {loading ? 'Refreshing…' : 'Refresh'}
           </button>
           <button
@@ -628,7 +711,57 @@ export default function DashboardDirector() {
             )}
           </div>
 
-          {tab === 'mission-orders' ? (
+          {tab === 'general' ? (
+            <div className="dash-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+              <div className="dash-tile">
+                <h3>Today's New Complaints</h3>
+                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.newToday}</div>
+                <div className="dash-cell-sub">Submitted/Pending/New created today</div>
+              </div>
+              <div className="dash-tile">
+                <h3>Pending Review</h3>
+                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.pendingReview}</div>
+                <div className="dash-cell-sub">In Review Queue</div>
+              </div>
+              <div className="dash-tile">
+                <h3>Approved Today</h3>
+                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.approvedToday}</div>
+                <div className="dash-cell-sub">Decisions made today</div>
+              </div>
+              <div className="dash-tile">
+                <h3>Declined Today</h3>
+                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.declinedToday}</div>
+                <div className="dash-cell-sub">Decisions made today</div>
+              </div>
+              <div className="dash-tile">
+                <h3>Issued Mission Orders</h3>
+                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.moIssued}</div>
+                <div className="dash-cell-sub">Awaiting Director review</div>
+              </div>
+              <div className="dash-tile" style={{ gridColumn: 'span 3' }}>
+                <h3 style={{ marginBottom: 10 }}>Complaints Submitted – Last 7 Days</h3>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {generalSummary.days.map((d) => (
+                    <div key={d.label} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 40px', alignItems: 'center', gap: 10 }}>
+                      <div className="dash-cell-sub" style={{ fontWeight: 800 }}>{d.label}</div>
+                      <div style={{ background: '#e2e8f0', borderRadius: 999, height: 12, position: 'relative' }}>
+                        <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${Math.round((d.count / (generalSummary.max || 1)) * 100)}%`, background: '#2563eb', borderRadius: 999 }}></div>
+                      </div>
+                      <div style={{ fontWeight: 900, color: '#0f172a', textAlign: 'right' }}>{d.count}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="dash-tile" style={{ gridColumn: 'span 3' }}>
+                <h3>Quick Actions</h3>
+                <div className="dash-row-actions" style={{ marginTop: 8 }}>
+                  <button className="dash-btn" type="button" onClick={() => setTab('queue')}>Go to Review Queue</button>
+                  <button className="dash-btn" type="button" onClick={() => setTab('mission-orders')}>Go to Review Mission Orders</button>
+                  <button className="dash-btn" type="button" onClick={() => setTab('history')}>Go to Complaint History</button>
+                </div>
+              </div>
+            </div>
+          ) : tab === 'mission-orders' ? (
             <div className="dash-table-wrap">
               <table className="dash-table">
                 <thead>
@@ -757,7 +890,7 @@ export default function DashboardDirector() {
                                   {(() => {
                                     const s = String(c.status || '').toLowerCase();
                                     if (s === 'approved') {
-                                      const label = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '—';
+                                      const label = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '��';
                                       return `Approved by ${label} on ${c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}`;
                                     }
                                     if (s === 'declined') {
