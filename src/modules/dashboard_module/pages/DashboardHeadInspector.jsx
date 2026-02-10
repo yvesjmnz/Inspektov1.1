@@ -33,6 +33,7 @@ function statusBadgeClass(status) {
 }
 
 export default function DashboardHeadInspector() {
+  const [tab, setTab] = useState('todo'); // todo | issued | for-inspection | revisions
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -159,6 +160,7 @@ export default function DashboardHeadInspector() {
           created_at: c.created_at,
           mission_order_id: mo?.id || null,
           mission_order_status: mo?.status || null,
+          mission_order_created_at: mo?.created_at || null,
           inspector_names: mo?.id ? inspectorNamesByMissionOrderId.get(mo.id) || [] : [],
         };
       });
@@ -271,19 +273,51 @@ export default function DashboardHeadInspector() {
       const complaintDesc = escapeHtml(complaint?.complaint_description || '');
 
       const title = `Mission Order - ${businessName}`;
-      const content = `<h2 style="text-align:center;">MISSION ORDER</h2>
-<p><strong>TO:</strong> FIELD INSPECTOR</p>
-<p><strong>SUBJECT:</strong> To conduct inspection on the business establishment identified as <strong>${escapeHtml(
-        businessName
-      )}</strong>, with address at <strong>${escapeHtml(businessAddress)}</strong>.</p>
-<hr />
-<p><strong>COMPLAINT DETAILS</strong></p>
-<p>${complaintDesc}</p>
-<p><br/></p>
-<p><strong>DATE OF INSPECTION:</strong> ____________________</p>
-<p><strong>DATE OF ISSUANCE:</strong> ____________________</p>
-<p><br/></p>
-<p>In the interest of public service, you are hereby ordered to conduct inspection of the aforementioned establishment.</p>`;
+
+      // Keep the creation template aligned with the editor's default template.
+      // Use placeholders so MissionOrderEditor can auto-inject locked spans for inspectors/business fields.
+      const content = [
+        '<div style="font-family: \"Times New Roman\", Times, serif; line-height: 1.25; font-size: 12px; color: #000;">',
+        '<p style="text-align:center; font-weight: 800; letter-spacing: 0.5px; margin: 0 0 10px 0;">MISSION ORDER</p>',
+        '<p style="margin: 0 0 14px 0;"><strong>TO:</strong>&nbsp; FIELD INSPECTOR [INSPECTOR NAME]</p>',
+        '<p style="margin: 0 0 12px 0;"><strong>SUBJECT:</strong>&nbsp; TO CONDUCT INSPECTION ON THE BUSINESS ESTABLISHMENT IDENTIFIED AS [BUSINESS NAME], WITH ADDRESS AT [ADDRESS].</p>',
+        '<p style="margin: 0 0 12px 0; text-align: justify;">',
+        'THE CONDUCT OF THIS INSPECTION IS DEEMED NECESSARY IN VIEW OF THE LETTER-COMPLAINT RECEIVED VIA E-MAIL DATED [INSERT DATE] FROM A CONCERNED CITIZEN REGARDING THE OPERATION OF THE ABOVE-MENTIONED BUSINESS ESTABLISHMENT. COMPLAINT DETAILS: ',
+        complaintDesc || '',
+        '</p>',
+        '<table style="width: 100%; border-collapse: collapse; margin: 8px 0 14px 0;">',
+        '<tr>',
+        '<td style="width: 50%; vertical-align: top; padding: 4px 0;"><strong>DATE OF INSPECTION:</strong></td>',
+        '<td style="width: 50%; vertical-align: top; padding: 4px 0; text-align: left;">[INSERT DATE]</td>',
+        '</tr>',
+        '<tr>',
+        '<td style="width: 50%; vertical-align: top; padding: 4px 0;"><strong>DATE OF ISSUANCE:</strong></td>',
+        '<td style="width: 50%; vertical-align: top; padding: 4px 0; text-align: left;">[INSERT DATE]</td>',
+        '</tr>',
+        '</table>',
+        '<p style="margin: 0 0 10px 0; text-align: justify;">In the interest of public service, you are hereby ordered to conduct inspection of the aforementioned establishment, for the following purposes:</p>',
+        '<p style="margin: 0 0 8px 0; padding-left: 34px; text-indent: -22px;"><strong>a)</strong>&nbsp; To verify the existence and authenticity of the Business Permits and other applicable permits, certificates, and other necessary documents, the completeness of the requirements therein.</p>',
+        '<p style="margin: 0 0 8px 0; padding-left: 34px; text-indent: -22px;"><strong>b)</strong>&nbsp; To check actual business operation of the subject establishment.</p>',
+        '<p style="margin: 0 0 12px 0; padding-left: 34px; text-indent: -22px;"><strong>c)</strong>&nbsp; To check compliance of said establishment with existing laws, ordinances, regulations relative to health &amp; sanitation, fire safety, engineering &amp; electrical installation standards.</p>',
+        '<p style="margin: 0 0 12px 0; text-align: justify;">You are hereby directed to identify yourself by showing proper identification and act with due courtesy and politeness in the implementation of this Order. All inspectors shall wear their ID\'s in such manner as the public will be informed of their true identity.</p>',
+        '<p style="margin: 0 0 12px 0; text-align: justify;"><strong>You should also inform the owner or representative of the establishment being inspected that they may verify the authenticity of this Mission Order, or ask questions, or lodge complaints, thru our telephone number (02) 8527-0871 or email at permits@manila.gov.ph</strong></p>',
+        '<p style="margin: 0 0 18px 0; text-align: justify;">This Order is in effect until [INSERT DATE] and any Order inconsistent herewith is hereby revoked and/or amended accordingly.</p>',
+        '<table style="width: 100%; border: none; border-collapse: collapse;">',
+        '<tr>',
+        '<td style="width: 50%; vertical-align: top;">',
+        '<p style="margin: 0 0 26px 0;">Recommending approval:</p>',
+        '<p style="margin: 0; font-weight: 800;">LEVI C. FACUNDO</p>',
+        '<p style="margin: 0;">Director</p>',
+        '</td>',
+        '<td style="width: 50%; vertical-align: top;">',
+        '<p style="margin: 0 0 26px 0;">Approved by:</p>',
+        '<p style="margin: 0; font-weight: 800;">MANUEL M. ZARCAL</p>',
+        '<p style="margin: 0;">Secretary to the Mayor</p>',
+        '</td>',
+        '</tr>',
+        '</table>',
+        '</div>',
+      ].join('');
 
       const { data, error } = await supabase
         .from('mission_orders')
@@ -312,25 +346,45 @@ export default function DashboardHeadInspector() {
 
   
   const filteredComplaints = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return complaints;
+    // 1) Apply tab filter (workflow states)
+    const normalize = (s) => String(s || '').toLowerCase();
 
-    return complaints.filter((c) => {
+    const byTab = (complaints || []).filter((c) => {
+      const s = normalize(c.mission_order_status);
+      if (tab === 'todo') return !s || s === 'draft';
+      if (tab === 'issued') return s === 'issued';
+      if (tab === 'for-inspection') return s === 'for inspection' || s === 'for_inspection';
+      if (tab === 'revisions') return s === 'cancelled' || s === 'canceled';
+      return true;
+    });
+
+    // 2) Apply search filter
+    const q = search.trim().toLowerCase();
+    if (!q) return byTab;
+
+    return byTab.filter((c) => {
       const hay = [c.business_name, c.business_address, c.reporter_email, c.complaint_id, c.mission_order_id]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [complaints, search]);
+  }, [complaints, search, tab]);
 
   // Group approved complaints by day for easier review.
   const complaintsByDay = useMemo(() => {
     const groups = {};
 
     for (const c of filteredComplaints) {
-      // Prefer the approval timestamp for bucketing; fall back to created_at.
-      const dt = c.approved_at ? new Date(c.approved_at) : c.created_at ? new Date(c.created_at) : null;
+      // Bucket rows by the most relevant timestamp for the current view.
+      // - for inspection: group by approval timestamp (inspection-ready)
+      // - issued/revisions/todo: group by MO created_at when present, else complaint approval/created
+      const dtRaw =
+        tab === 'for-inspection'
+          ? (c.approved_at || c.created_at)
+          : (c.mission_order_created_at || c.approved_at || c.created_at);
+
+      const dt = dtRaw ? new Date(dtRaw) : null;
       const key = dt ? new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).toISOString().slice(0, 10) : 'unknown';
       if (!groups[key]) {
         groups[key] = {
@@ -364,13 +418,69 @@ export default function DashboardHeadInspector() {
             </div>
           </div>
 
-          <div className="dash-toolbar">
+          <div className="dash-toolbar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="dash-btn"
+                onClick={() => setTab('todo')}
+                disabled={loading}
+                style={{
+                  background: tab === 'todo' ? '#0f172a' : '#fff',
+                  color: tab === 'todo' ? '#fff' : '#0f172a',
+                  border: '1px solid #0f172a',
+                }}
+              >
+                To Do
+              </button>
+              <button
+                type="button"
+                className="dash-btn"
+                onClick={() => setTab('issued')}
+                disabled={loading}
+                style={{
+                  background: tab === 'issued' ? '#0f172a' : '#fff',
+                  color: tab === 'issued' ? '#fff' : '#0f172a',
+                  border: '1px solid #0f172a',
+                }}
+              >
+                Issued
+              </button>
+              <button
+                type="button"
+                className="dash-btn"
+                onClick={() => setTab('for-inspection')}
+                disabled={loading}
+                style={{
+                  background: tab === 'for-inspection' ? '#0f172a' : '#fff',
+                  color: tab === 'for-inspection' ? '#fff' : '#0f172a',
+                  border: '1px solid #0f172a',
+                }}
+              >
+                For Inspection
+              </button>
+              <button
+                type="button"
+                className="dash-btn"
+                onClick={() => setTab('revisions')}
+                disabled={loading}
+                style={{
+                  background: tab === 'revisions' ? '#0f172a' : '#fff',
+                  color: tab === 'revisions' ? '#fff' : '#0f172a',
+                  border: '1px solid #0f172a',
+                }}
+              >
+                For Revisions
+              </button>
+            </div>
+
             <input
               className="dash-input"
               type="text"
-              placeholder="Search by business name/address, reporter email, or complaint ID..."
+              placeholder="Search by business name/address, reporter email, complaint ID, or MO ID..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              style={{ flex: 1, minWidth: 260 }}
             />
             <button className="dash-btn" type="button" onClick={loadApprovedComplaints} disabled={loading}>
               {loading ? 'Refreshing…' : 'Refresh'}
@@ -397,7 +507,7 @@ export default function DashboardHeadInspector() {
                 {filteredComplaints.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
-                      {loading ? 'Loading…' : 'No approved complaints found.'}
+                      {loading ? 'Loading…' : 'No records found for this tab.'}
                     </td>
                   </tr>
                 ) : (

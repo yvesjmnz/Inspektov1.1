@@ -40,6 +40,16 @@ function applyAutoFieldsToHtml(html, { inspectorNames, businessName, businessAdd
   next = next.replace(/<span\s+data-mo-auto="business_name"[^>]*>[\s\S]*?<\/span>/g, businessNameSpan);
   next = next.replace(/<span\s+data-mo-auto="business_address"[^>]*>[\s\S]*?<\/span>/g, businessAddressSpan);
 
+  // If the TO line already contains the inspector auto-marker, remove any separate standalone
+  // inspector-name paragraph to avoid duplicates (common when templates evolve).
+  // Matches a centered paragraph whose only meaningful content is the inspectors auto span.
+  if (/\<strong\>\s*TO:\s*\<\/strong\>[\s\S]*data-mo-auto="inspectors"/i.test(next)) {
+    next = next.replace(
+      /<p[^>]*>\s*(?:<br\s*\/?>\s*)*<span\s+data-mo-auto="inspectors"[^>]*>[\s\S]*?<\/span>\s*<\/p>\s*/gi,
+      ''
+    );
+  }
+
   // 2) Placeholder replacement (backward compatible)
   if (inspectorNames) next = next.replaceAll('[INSPECTOR NAME]', inspectorSpan);
   if (businessName) next = next.replaceAll('[BUSINESS NAME]', businessNameSpan);
@@ -138,8 +148,27 @@ export default function MissionOrderEditor() {
 
   const editorRef = useRef(null);
 
+  const applyCommand = (command, value = null) => {
+    if (loading || isApproved) return;
+    try {
+      // Ensure editor has focus so the command applies to the current selection.
+      editorRef.current?.focus();
+      // execCommand is deprecated but still the most compatible way to format contentEditable
+      // without introducing a full rich-text editor dependency.
+      document.execCommand(command, false, value);
+
+      const next = editorRef.current?.innerHTML ?? '';
+      setContent(next);
+      markDirty(title, next);
+    } catch {
+      // ignore
+    }
+  };
+
   const assignedInspectorNames = useMemo(() => {
-    return assignedInspectorIds
+    // Defensive de-duplication (can happen with realtime events + optimistic updates)
+    const uniqueIds = Array.from(new Set(assignedInspectorIds.filter(Boolean)));
+    return uniqueIds
       .map((id) => inspectors.find((x) => x.id === id)?.full_name)
       .filter(Boolean)
       .join(', ');
@@ -251,7 +280,9 @@ export default function MissionOrderEditor() {
         if (assignedError) throw assignedError;
         if (!mounted) return;
 
-        const loadedAssignedInspectorIds = (assignedRows || []).map((r) => r.inspector_id);
+        const loadedAssignedInspectorIds = Array.from(
+          new Set((assignedRows || []).map((r) => r.inspector_id).filter(Boolean))
+        );
         setAssignedInspectorIds(loadedAssignedInspectorIds);
 
         const loadedInspectorNames = loadedAssignedInspectorIds
@@ -267,7 +298,7 @@ export default function MissionOrderEditor() {
         const loadedContent =
           data?.content ||
           [
-            '<div style="font-family: serif; line-height: 1.5;">',
+            '<div style="font-family: \"Times New Roman\", Times, serif; line-height: 1.25; font-size: 12px; color: #000;">',
             '<p style="text-align:center; font-size: 18px;"><strong>MISSION ORDER</strong></p>',
             '<br/>',
             '<p><strong>TO:</strong> FIELD INSPECTOR [INSPECTOR NAME]</p>',
@@ -320,6 +351,11 @@ export default function MissionOrderEditor() {
 
         setTitle(loadedTitle);
         setContent(hydratedContent);
+
+        // Immediately hydrate the editor DOM so it renders even before the next effect tick.
+        if (editorRef.current) {
+          editorRef.current.innerHTML = hydratedContent;
+        }
       } catch (e) {
         if (!mounted) return;
         setError(e?.message || 'Failed to load mission order.');
@@ -351,13 +387,18 @@ export default function MissionOrderEditor() {
     setIsDirty(computeDirty(nextTitle, nextContent));
   };
 
-  // Keep the editable DOM in sync when content changes (initial load)
+  // Keep the editable DOM in sync when content changes (initial load / remote updates).
+  // Avoid overwriting while the user is actively editing to prevent content "disappearing".
   useEffect(() => {
     if (!editorRef.current) return;
-    if (editorRef.current.innerHTML !== content) {
-      editorRef.current.innerHTML = content;
+    if (loading) return;
+
+    // Only hydrate when we have some content and the DOM differs.
+    const next = String(content ?? '');
+    if (next && editorRef.current.innerHTML !== next) {
+      editorRef.current.innerHTML = next;
     }
-  }, [content]);
+  }, [content, loading]);
 
   // Keep inspector names in sync in the document (add/remove should update immediately).
   useEffect(() => {
@@ -762,6 +803,79 @@ export default function MissionOrderEditor() {
                   {showComplaintSideBySide ? 'Hide Complaint' : 'Show Complaint'}
                 </button>
               </div>
+
+              {!isApproved ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    marginBottom: 10,
+                    padding: '10px 12px',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 12,
+                    background: '#fff',
+                  }}
+                  aria-label="Formatting toolbar"
+                >
+                  <button type="button" className="mo-btn" onClick={() => applyCommand('bold')} disabled={loading} title="Bold">
+                    <strong>B</strong>
+                  </button>
+                  <button type="button" className="mo-btn" onClick={() => applyCommand('italic')} disabled={loading} title="Italic">
+                    <em>I</em>
+                  </button>
+                  <button type="button" className="mo-btn" onClick={() => applyCommand('underline')} disabled={loading} title="Underline">
+                    <span style={{ textDecoration: 'underline' }}>U</span>
+                  </button>
+
+                  <div style={{ width: 1, height: 28, background: '#e2e8f0', margin: '0 4px' }} />
+
+                  <label style={{ fontWeight: 800, fontSize: 12, color: '#334155' }}>
+                    Font
+                    <select
+                      onChange={(e) => applyCommand('fontName', e.target.value)}
+                      disabled={loading}
+                      defaultValue="Times New Roman"
+                      style={{ marginLeft: 8, padding: '6px 8px', borderRadius: 10, border: '1px solid #e2e8f0' }}
+                    >
+                      <option value="Times New Roman">Times New Roman</option>
+                      <option value="Arial">Arial</option>
+                      <option value="Calibri">Calibri</option>
+                      <option value="Georgia">Georgia</option>
+                      <option value="Garamond">Garamond</option>
+                    </select>
+                  </label>
+
+                  <label style={{ fontWeight: 800, fontSize: 12, color: '#334155' }}>
+                    Size
+                    <select
+                      onChange={(e) => applyCommand('fontSize', e.target.value)}
+                      disabled={loading}
+                      defaultValue="3"
+                      style={{ marginLeft: 8, padding: '6px 8px', borderRadius: 10, border: '1px solid #e2e8f0' }}
+                      title="Font size (browser scale)"
+                    >
+                      <option value="1">10px</option>
+                      <option value="2">12px</option>
+                      <option value="3">14px</option>
+                      <option value="4">16px</option>
+                      <option value="5">18px</option>
+                      <option value="6">24px</option>
+                      <option value="7">32px</option>
+                    </select>
+                  </label>
+
+                  <div style={{ width: 1, height: 28, background: '#e2e8f0', margin: '0 4px' }} />
+
+                  <button type="button" className="mo-btn" onClick={() => applyCommand('insertUnorderedList')} disabled={loading} title="Bulleted list">
+                    • List
+                  </button>
+                  <button type="button" className="mo-btn" onClick={() => applyCommand('insertOrderedList')} disabled={loading} title="Numbered list">
+                    1. List
+                  </button>
+                </div>
+              ) : null}
 
               <div className="mo-editor-wrap" style={{ marginTop: 0 }}>
                 <div
