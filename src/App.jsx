@@ -3,6 +3,7 @@ import VerifyEmail from './modules/complaints_module/pages/VerifyEmail';
 import RequestVerification from './modules/complaints_module/pages/RequestVerification';
 import EmailVerificationModal from './modules/complaints_module/pages/EmailVerificationModal';
 import ComplaintForm from './modules/complaints_module/pages/ComplaintForm';
+import SpecialComplaintForm from './modules/complaints_module/pages/SpecialComplaintForm';
 import ComplaintConfirmation from './modules/complaints_module/pages/ComplaintConfirmation';
 import TrackComplaint from './modules/tracking_module/pages/TrackComplaint';
 import Login from './modules/dashboard_module/pages/Login';
@@ -139,6 +140,8 @@ function App() {
 
         setVerifiedEmail(decodeURIComponent(emailParam));
         setCurrentPage('complaint');
+      } else if (path === '/special-complaint') {
+        setCurrentPage('special-complaint');
       } else if (path === '/complaint-confirmation') {
         setCurrentPage('complaint-confirmation');
       } else if (path === '/track-complaint') {
@@ -184,6 +187,8 @@ function App() {
         return <RequestVerification />;
       case 'complaint':
         return <ComplaintForm verifiedEmail={verifiedEmail} />;
+      case 'special-complaint':
+        return <SpecialComplaintForm verifiedEmail={verifiedEmail} />;
       case 'complaint-confirmation':
         return <ComplaintConfirmation />;
       case 'track-complaint':
