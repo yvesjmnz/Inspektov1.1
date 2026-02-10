@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import Header from '../../../components/Header';
-import Footer from '../../../components/Footer';
 import { supabase } from '../../../lib/supabase';
 import './Dashboard.css';
 
@@ -36,6 +34,7 @@ export default function DashboardHeadInspector() {
   const [tab, setTab] = useState('todo'); // todo | issued | for-inspection | revisions
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [navCollapsed, setNavCollapsed] = useState(false);
 
   const [complaints, setComplaints] = useState([]);
   const [search, setSearch] = useState('');
@@ -65,7 +64,6 @@ export default function DashboardHeadInspector() {
     }
   };
 
-  
   const loadApprovedComplaints = async () => {
     setError('');
     setLoading(true);
@@ -185,7 +183,6 @@ export default function DashboardHeadInspector() {
     }
   };
 
-  
   useEffect(() => {
     loadApprovedComplaints();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -344,7 +341,6 @@ export default function DashboardHeadInspector() {
     }
   };
 
-  
   const filteredComplaints = useMemo(() => {
     // 1) Apply tab filter (workflow states)
     const normalize = (s) => String(s || '').toLowerCase();
@@ -402,194 +398,233 @@ export default function DashboardHeadInspector() {
 
   return (
     <div className="dash-container">
-      <Header />
       <main className="dash-main">
-        <section className="dash-card">
-          <div className="dash-header">
-            <div>
-              <h2 className="dash-title">Head Inspector Dashboard</h2>
-              <p className="dash-subtitle">Step 1: Review Director-approved complaints eligible for mission orders.</p>
+        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
+          <aside
+            className="dash-side"
+            title="Menu"
+            style={{ width: navCollapsed ? 72 : 240, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+            onClick={(e) => {
+              const t = e.target;
+              if (t && typeof t.closest === 'function' && t.closest('.dash-nav-item')) return;
+              setNavCollapsed((v) => !v);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                const t = e.target;
+                if (t && typeof t.closest === 'function' && t.closest('.dash-nav-item')) return;
+                e.preventDefault();
+                setNavCollapsed((v) => !v);
+              }
+            }}
+          >
+            <div className="dash-side-brand" title="Menu">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                <img src="/logo.png" alt="City Hall Logo" style={{ width: 44, height: 44, objectFit: 'contain', borderRadius: '50%' }} />
+              </div>
+              <div className="hamburger" aria-hidden="true">
+                <div className="hamburger-bar"></div>
+                <div className="hamburger-bar"></div>
+                <div className="hamburger-bar"></div>
+              </div>
             </div>
-            <div className="dash-actions">
-              <a className="dash-link" href="/">Back to Home</a>
-              <button className="dash-logout" type="button" onClick={handleLogout}>
-                Logout
-              </button>
-            </div>
-          </div>
-
-          <div className="dash-toolbar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="dash-btn"
-                onClick={() => setTab('todo')}
-                disabled={loading}
-                style={{
-                  background: tab === 'todo' ? '#0f172a' : '#fff',
-                  color: tab === 'todo' ? '#fff' : '#0f172a',
-                  border: '1px solid #0f172a',
-                }}
-              >
-                To Do
-              </button>
-              <button
-                type="button"
-                className="dash-btn"
-                onClick={() => setTab('issued')}
-                disabled={loading}
-                style={{
-                  background: tab === 'issued' ? '#0f172a' : '#fff',
-                  color: tab === 'issued' ? '#fff' : '#0f172a',
-                  border: '1px solid #0f172a',
-                }}
-              >
-                Issued
-              </button>
-              <button
-                type="button"
-                className="dash-btn"
-                onClick={() => setTab('for-inspection')}
-                disabled={loading}
-                style={{
-                  background: tab === 'for-inspection' ? '#0f172a' : '#fff',
-                  color: tab === 'for-inspection' ? '#fff' : '#0f172a',
-                  border: '1px solid #0f172a',
-                }}
-              >
-                For Inspection
-              </button>
-              <button
-                type="button"
-                className="dash-btn"
-                onClick={() => setTab('revisions')}
-                disabled={loading}
-                style={{
-                  background: tab === 'revisions' ? '#0f172a' : '#fff',
-                  color: tab === 'revisions' ? '#fff' : '#0f172a',
-                  border: '1px solid #0f172a',
-                }}
-              >
-                For Revisions
-              </button>
-            </div>
-
-            <input
-              className="dash-input"
-              type="text"
-              placeholder="Search by business name/address, reporter email, complaint ID, or MO ID..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ flex: 1, minWidth: 260 }}
-            />
-            <button className="dash-btn" type="button" onClick={loadApprovedComplaints} disabled={loading}>
-              {loading ? 'Refreshing…' : 'Refresh'}
+            <ul className="dash-nav" style={{ flex: 1 }}>
+              <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Mission Orders</span>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'todo' ? 'active' : ''}`} onClick={() => setTab('todo')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/menu.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>To Do</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'issued' ? 'active' : ''}`} onClick={() => setTab('issued')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/mo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Issued</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'for-inspection' ? 'active' : ''}`} onClick={() => setTab('for-inspection')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/queue.png" alt="" style={{ width: 24, height: 24, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>For Inspection</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'revisions' ? 'active' : ''}`} onClick={() => setTab('revisions')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>For Revisions</span>
+                </button>
+              </li>
+              <li>
+                <a className="dash-nav-item" href="/">
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Back to Home</span>
+                </a>
+              </li>
+            </ul>
+            <button
+              type="button"
+              className="dash-nav-item"
+              onClick={handleLogout}
+              style={{
+                marginTop: 'auto',
+                border: 'none',
+                background: 'transparent',
+                color: '#ef4444',
+                fontWeight: 800,
+                textAlign: 'left',
+                padding: '10px 12px',
+                borderRadius: 10,
+                cursor: 'pointer',
+                display: 'grid',
+                gridTemplateColumns: '24px 1fr',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <img src="/ui_icons/logout.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(21%) sepia(97%) saturate(4396%) hue-rotate(346deg) brightness(95%) contrast(101%)' }} />
+              </span>
+              <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Logout</span>
             </button>
-          </div>
+          </aside>
 
-          {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
-          {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
+          <div className="dash-maincol">
+            <div className="dash-card">
+              <div className="dash-header">
+                <div>
+                  <h2 className="dash-title">Head Inspector Dashboard</h2>
+                  <p className="dash-subtitle">Step 1: Review Director-approved complaints eligible for mission orders.</p>
+                </div>
+                <div className="dash-actions"></div>
+              </div>
 
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 90 }}>ID</th>
-                  <th>Business</th>
-                  <th style={{ width: 160 }}>Mission Order</th>
-                  <th style={{ width: 200 }}>Approved</th>
-                  <th style={{ width: 200 }}>Submitted</th>
-                  <th style={{ width: 220 }}>Mission Order</th>
-                  <th style={{ width: 260 }}>Inspectors Assigned</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredComplaints.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
-                      {loading ? 'Loading…' : 'No records found for this tab.'}
-                    </td>
-                  </tr>
-                ) : (
-                  complaintsByDay.sortedKeys.flatMap((dayKey) => {
-                    const rows = [];
-                    const label = complaintsByDay.groups[dayKey]?.label || dayKey;
+              <div className="dash-toolbar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  className="dash-input"
+                  type="text"
+                  placeholder="Search by business name/address, reporter email, complaint ID, or MO ID..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  style={{ flex: 1, minWidth: 260 }}
+                />
+                <button className="dash-btn" type="button" onClick={loadApprovedComplaints} disabled={loading}>
+                  {loading ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
 
-                    // Day header row
-                    rows.push(
-                      <tr key={`day-${dayKey}`}>
-                        <td colSpan={7} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>
-                          {label}
+              {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
+              {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
+
+              <div className="dash-table-wrap">
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 90 }}>ID</th>
+                      <th>Business</th>
+                      <th style={{ width: 160 }}>Mission Order</th>
+                      <th style={{ width: 200 }}>Approved</th>
+                      <th style={{ width: 200 }}>Submitted</th>
+                      <th style={{ width: 220 }}>Mission Order</th>
+                      <th style={{ width: 260 }}>Inspectors Assigned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredComplaints.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
+                          {loading ? 'Loading…' : 'No records found for this tab.'}
                         </td>
                       </tr>
-                    );
+                    ) : (
+                      complaintsByDay.sortedKeys.flatMap((dayKey) => {
+                        const rows = [];
+                        const label = complaintsByDay.groups[dayKey]?.label || dayKey;
 
-                    complaintsByDay.groups[dayKey].items.forEach((c) => {
-                      rows.push(
-                        <tr key={c.complaint_id}>
-                          <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
-                          <td>
-                            <div className="dash-cell-title">{c.business_name || '—'}</div>
-                            <div className="dash-cell-sub">{c.business_address || ''}</div>
-                            <div className="dash-cell-sub">{c.reporter_email || ''}</div>
-                          </td>
-                          <td>
-                            <span className={statusBadgeClass(c.mission_order_status)}>
-                              {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
-                            </span>
-                          </td>
-                          <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
-                          <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="dash-btn"
-                              onClick={() => createMissionOrder(c.complaint_id)}
-                              disabled={creatingForId === c.complaint_id}
-                            >
-                              {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
-                            </button>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
-                              {(c.inspector_names || []).length === 0 ? (
-                                <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
-                              ) : (
-                                (c.inspector_names || []).map((name, idx) => (
-                                  <span
-                                    key={`${c.complaint_id}-${idx}`}
-                                    style={{
-                                      padding: '6px 10px',
-                                      borderRadius: 999,
-                                      fontWeight: 800,
-                                      border: '1px solid #e2e8f0',
-                                      background: '#f8fafc',
-                                    }}
-                                  >
-                                    {name}
-                                  </span>
-                                ))
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    });
+                        // Day header row
+                        rows.push(
+                          <tr key={`day-${dayKey}`}>
+                            <td colSpan={7} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>
+                              {label}
+                            </td>
+                          </tr>
+                        );
 
-                    return rows;
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                        complaintsByDay.groups[dayKey].items.forEach((c) => {
+                          rows.push(
+                            <tr key={c.complaint_id}>
+                              <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
+                              <td>
+                                <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                <div className="dash-cell-sub">{c.reporter_email || ''}</div>
+                              </td>
+                              <td>
+                                <span className={statusBadgeClass(c.mission_order_status)}>
+                                  {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                                </span>
+                              </td>
+                              <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
+                              <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="dash-btn"
+                                  onClick={() => createMissionOrder(c.complaint_id)}
+                                  disabled={creatingForId === c.complaint_id}
+                                >
+                                  {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
+                                </button>
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
+                                  {(c.inspector_names || []).length === 0 ? (
+                                    <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                  ) : (
+                                    (c.inspector_names || []).map((name, idx) => (
+                                      <span
+                                        key={`${c.complaint_id}-${idx}`}
+                                        style={{
+                                          padding: '6px 10px',
+                                          borderRadius: 999,
+                                          fontWeight: 800,
+                                          border: '1px solid #e2e8f0',
+                                          background: '#f8fafc',
+                                        }}
+                                      >
+                                        {name}
+                                      </span>
+                                    ))
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        });
 
-          <div className="dash-note">
-            Step 2: “Create MO” will create a draft record in <code>mission_orders</code> for the selected complaint.
-            Duplicate mission orders for the same complaint are prevented.
+                        return rows;
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="dash-note">
+                Step 2: “Create MO” will create a draft record in <code>mission_orders</code> for the selected complaint.
+                Duplicate mission orders for the same complaint are prevented.
+              </div>
+            </div>
           </div>
         </section>
       </main>
-      <Footer />
     </div>
   );
 }
