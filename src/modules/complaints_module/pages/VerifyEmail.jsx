@@ -21,7 +21,9 @@ export default function VerifyEmail() {
       try {
         const result = await verifyEmail(token);
         // Redirect immediately on success to the appropriate form
-        const redirectPath = formType === 'special-complaint' ? '/special-complaint' : '/complaint';
+        // Use formType from API response for accuracy
+        const redirectFormType = result.formType || formType;
+        const redirectPath = redirectFormType === 'special-complaint' ? '/special-complaint' : '/complaint';
         window.location.href = `${redirectPath}?email=${encodeURIComponent(result.email)}`;
       } catch (err) {
         setError(err.message);

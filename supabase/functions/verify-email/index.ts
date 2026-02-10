@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
   // Find token row
   const { data: tokenRow, error: tokenErr } = await supabase
     .from("email_verification_tokens")
-    .select("id,email,complaint_id,expires_at,used_at")
+    .select("id,email,complaint_id,expires_at,used_at,form_type")
     .eq("token_hash", tokenHash)
     .maybeSingle();
 
@@ -84,5 +84,10 @@ Deno.serve(async (req) => {
     if (updErr) return json(500, { error: "Failed to update complaint" });
   }
 
-  return json(200, { success: true, email: tokenRow.email, complaintId: tokenRow.complaint_id ?? null });
+  return json(200, { 
+    success: true, 
+    email: tokenRow.email, 
+    complaintId: tokenRow.complaint_id ?? null,
+    formType: tokenRow.form_type || 'complaint'
+  });
 });

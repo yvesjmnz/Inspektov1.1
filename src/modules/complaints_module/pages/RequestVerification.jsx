@@ -15,7 +15,7 @@ export default function RequestVerification() {
     setLoading(true);
 
     try {
-      await requestEmailVerification(email);
+      await requestEmailVerification(email, null, null, 'complaint');
       setSuccess(true);
       setSubmitted(true);
       setEmail('');

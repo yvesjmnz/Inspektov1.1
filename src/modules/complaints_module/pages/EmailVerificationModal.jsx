@@ -90,7 +90,7 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
       }
 
       // Send verification email with Turnstile token
-      await requestEmailVerification(email, null, turnstileToken);
+      await requestEmailVerification(email, null, turnstileToken, 'complaint');
       setSuccess(true);
       setSubmitted(true);
     } catch (err) {
