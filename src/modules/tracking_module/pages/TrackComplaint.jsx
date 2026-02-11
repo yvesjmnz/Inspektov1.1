@@ -16,7 +16,7 @@ function formatStatus(status) {
 function statusBadgeClass(status) {
   const s = String(status || '').toLowerCase();
   if (['resolved', 'closed', 'completed', 'done'].includes(s)) return 'status-badge status-success';
-  if (['rejected', 'invalid', 'cancelled', 'canceled'].includes(s)) return 'status-badge status-danger';
+  if (['rejected', 'invalid', 'cancelled', 'canceled', 'declined'].includes(s)) return 'status-badge status-danger';
   if (['pending', 'new', 'submitted'].includes(s)) return 'status-badge status-warning';
   if (['in_progress', 'in progress', 'processing', 'under_review', 'under review'].includes(s)) return 'status-badge status-info';
   return 'status-badge';
@@ -157,11 +157,32 @@ export default function TrackComplaint() {
                     return (
                       <div key={index} className="progress-step-wrapper" title={dateDisplay}>
                         <div
-                          className={`progress-step ${isCompleted ? 'completed' : ''} ${isCurrent ? 'current' : ''}`}
+                          className={`progress-step ${isCompleted ? 'completed' : ''} ${isCurrent && !(String(complaint.status || '').toLowerCase() === 'approved' || String(complaint.status || '').toLowerCase() === 'declined') ? 'current' : ''} ${String(complaint.status || '').toLowerCase() === 'approved' && index === 1 ? 'approved' : ''} ${String(complaint.status || '').toLowerCase() === 'declined' && index === 1 ? 'declined' : ''}`}
                         >
-                          {isCompleted ? '✓' : index + 1}
+                          {(() => {
+                            const s = String(complaint.status || '').toLowerCase();
+                            const isFinalDecisionStep = index === 1;
+                            const isApproved = s === 'approved';
+                            const isDeclined = s === 'declined';
+
+                            // Industry-standard: show clear final outcome indicator on the final step.
+                            if (isFinalDecisionStep && (isApproved || isDeclined)) {
+                              return isApproved ? '✓' : '✕';
+                            }
+
+                            // Keep original behavior for other steps.
+                            return isCompleted ? '✓' : index + 1;
+                          })()}
                         </div>
-                        <div className="progress-step-label">{step}</div>
+                        <div className="progress-step-label">
+                          {(() => {
+                            if (index !== 1) return step;
+                            const s = String(complaint.status || '').toLowerCase();
+                            if (s === 'approved') return 'Approved';
+                            if (s === 'declined') return 'Declined';
+                            return 'Decision';
+                          })()}
+                        </div>
                         <div className="progress-step-tooltip">{dateDisplay}</div>
                         {index < PROGRESS_STEPS.length - 1 && (
                           <div className={`progress-line ${isCompleted ? 'completed' : ''}`}></div>
@@ -172,8 +193,52 @@ export default function TrackComplaint() {
                 </div>
               </div>
 
-              {/* Complaint Summary - 2-Column Grid Layout */}
+              {/* Director Decision (industry-standard: clear outcome + timestamp + reason for decline) */}
               <div className="complaint-summary">
+                <div className="summary-row-full">
+                  <div className="summary-card summary-card-with-footer summary-card-decision">
+                    <div>
+                      <div className="summary-item-header">
+                        <img src="/ui_icons/revision.png" alt="Decision" className="summary-item-icon" style={{ filter: 'brightness(0) saturate(100%)' }} />
+                        <span className="summary-label">Director Decision</span>
+                      </div>
+                      <div className="director-decision-body">
+                        {(() => {
+                          const s = String(complaint.status || '').toLowerCase();
+                          const isApproved = s === 'approved';
+                          const isDeclined = s === 'declined';
+
+                          const label = isApproved ? 'Approved' : isDeclined ? 'Declined' : formatStatus(complaint.status);
+
+                          return (
+                            <span className="director-decision-status">
+                              <span className={statusBadgeClass(complaint.status)}>{label}</span>
+                            </span>
+                          );
+                        })()}
+
+                        {String(complaint.status || '').toLowerCase() === 'declined' && complaint.decline_comment ? (
+                          <div className="director-decision-reason" role="note" aria-label="Reason for decision">
+                            <div className="director-decision-reason-label">Reason</div>
+                            <div className="director-decision-reason-text">{complaint.decline_comment}</div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="summary-card-footer">
+                      <span className="summary-footer-label">Decision date:</span>
+                      <span className="summary-footer-value">
+                        {String(complaint.status || '').toLowerCase() === 'approved'
+                          ? (complaint.approved_at ? new Date(complaint.approved_at).toLocaleString() : (complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—'))
+                          : String(complaint.status || '').toLowerCase() === 'declined'
+                          ? (complaint.declined_at ? new Date(complaint.declined_at).toLocaleString() : (complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—'))
+                          : 'Pending'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Complaint Summary - 2-Column Grid Layout */}
                 {/* Row 1: Business (Left) + Address (Right) */}
                 <div className="summary-row-2col">
                   <div className="summary-card">

@@ -181,6 +181,18 @@
   animation: stepComplete 0.5s ease;
 }
 
+.progress-step.approved {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.progress-step.declined {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
 .progress-step.current {
   background: #dbeafe;
   color: #1e40af;
@@ -406,6 +418,57 @@
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   min-height: 100px;
+}
+
+/* Director Decision emphasis */
+.summary-card.summary-card-decision {
+  background: #fef2f2; /* light red tint */
+  border-color: #fecaca;
+}
+
+.director-decision-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.director-decision-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.director-decision-reason {
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+}
+
+.director-decision-reason-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: #991b1b;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+
+.director-decision-reason-text {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.6;
+}
+
+/* Make icons consistent & subtle so they don't distract */
+.summary-item-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  object-fit: contain;
+  filter: grayscale(100%) brightness(0.45);
+  opacity: 0.9;
 }
 
 .summary-card-with-footer {

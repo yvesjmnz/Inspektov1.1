@@ -44,6 +44,10 @@ export default function DashboardDirector() {
   const [auditApproverLabel, setAuditApproverLabel] = useState('');
   const [auditDeclinerLabel, setAuditDeclinerLabel] = useState('');
 
+  // Decline comment (required for declines)
+  const [declineComment, setDeclineComment] = useState('');
+  const [declineCommentError, setDeclineCommentError] = useState('');
+
   const [previewImage, setPreviewImage] = useState(null);
   const closePreview = () => setPreviewImage(null);
   const [navCollapsed, setNavCollapsed] = useState(false);
@@ -465,6 +469,7 @@ export default function DashboardDirector() {
 
   const updateComplaintStatus = async (complaintId, newStatus) => {
     setError('');
+    setDeclineCommentError('');
     setLoading(true);
 
     try {
@@ -478,6 +483,15 @@ export default function DashboardDirector() {
 
       const status = String(newStatus).toLowerCase();
       const nowIso = new Date().toISOString();
+
+      // Enforce required rationale for declines (industry-standard: capture reason for adverse decision)
+      if (status === 'declined') {
+        const comment = declineComment.trim();
+        if (!comment) {
+          setDeclineCommentError('Comment is required to decline a complaint.');
+          throw new Error('Comment is required to decline a complaint.');
+        }
+      }
 
       /**
        * complaints table audit columns:
@@ -495,12 +509,16 @@ export default function DashboardDirector() {
         // clear decline columns if previously declined
         patch.declined_by = null;
         patch.declined_at = null;
+        // clear any previous decline comment
+        patch.decline_comment = null;
       } else if (status === 'declined') {
         patch.declined_by = user.id;
         patch.declined_at = nowIso;
         // clear approve columns if previously approved
         patch.approved_by = null;
         patch.approved_at = null;
+        // store decline rationale
+        patch.decline_comment = declineComment.trim();
       }
 
       // Explicitly touch updated_at to guarantee it changes on update.
@@ -530,6 +548,10 @@ export default function DashboardDirector() {
       // Keep the open full complaint view in sync
       if (fullViewId === complaintId) {
         setFullComplaint((prev) => (prev ? { ...prev, ...patch } : prev));
+      }
+
+      if (status === 'declined') {
+        setDeclineComment('');
       }
     } catch (e) {
       setError(e?.message || 'Failed to update status.');
@@ -1318,7 +1340,30 @@ export default function DashboardDirector() {
                 </div>
 
                 {/* Sticky Action Bar */}
-                <div style={{ position: 'sticky', bottom: 0, background: '#ffffff', borderTop: '1px solid #e2e8f0', padding: 12, display: 'flex', justifyContent: 'flex-end', gap: 8, boxShadow: '0 -2px 8px rgba(2,6,23,0.06)', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
+                <div style={{ position: 'sticky', bottom: 0, background: '#ffffff', borderTop: '1px solid #e2e8f0', padding: 12, display: 'grid', gap: 10, boxShadow: '0 -2px 8px rgba(2,6,23,0.06)', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label htmlFor="decline-comment" style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>
+                      Decline comment <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <textarea
+                      id="decline-comment"
+                      className="dash-input"
+                      value={declineComment}
+                      onChange={(e) => {
+                        setDeclineComment(e.target.value);
+                        if (declineCommentError) setDeclineCommentError('');
+                      }}
+                      rows={3}
+                      placeholder="Required if declining. Provide a brief, specific reason (e.g., insufficient evidence, duplicate report, outside jurisdiction)."
+                      style={{ resize: 'vertical', minHeight: 70 }}
+                    />
+                    {declineCommentError ? (
+                      <div className="dash-alert dash-alert-error" style={{ margin: 0 }}>
+                        {declineCommentError}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                   <button
                     className="dash-btn dash-btn-success"
                     type="button"
@@ -1342,6 +1387,7 @@ export default function DashboardDirector() {
                     Decline
                   </button>
                   <button className="dash-btn" type="button" onClick={() => window.print()} style={{ borderRadius: 999, padding: '0 16px' }}>Print</button>
+                  </div>
                 </div>
               </div>
             ) : null}
