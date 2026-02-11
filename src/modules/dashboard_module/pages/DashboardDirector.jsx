@@ -25,6 +25,29 @@ export default function DashboardDirector() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const pageMeta = useMemo(() => {
+    const meta = {
+      general: {
+        title: 'Director Dashboard',
+        subtitle: 'Complaint oversight: today\'s activity, pending reviews, and recent trends.',
+      },
+      queue: {
+        title: 'Review Queue',
+        subtitle: 'Review new submissions and make approval/decline decisions.',
+      },
+      history: {
+        title: 'Complaint History',
+        subtitle: 'Browse past decisions and view audit details.',
+      },
+      'mission-orders': {
+        title: 'Review Mission Orders',
+        subtitle: 'Review and action mission orders issued for director approval.',
+      },
+    };
+
+    return meta[tab] || meta.general;
+  }, [tab]);
+
   const [complaints, setComplaints] = useState([]);
   const [missionOrders, setMissionOrders] = useState([]);
   const [search, setSearch] = useState('');
@@ -662,8 +685,8 @@ export default function DashboardDirector() {
             <div className="dash-card">
           <div className="dash-header">
             <div>
-              <h2 className="dash-title">Director Dashboard</h2>
-              <p className="dash-subtitle">Complaint oversight: review submissions and track decision history.</p>
+              <h2 className="dash-title">{pageMeta.title}</h2>
+              <p className="dash-subtitle">{pageMeta.subtitle}</p>
             </div>
             <div className="dash-actions"></div>
           </div>
