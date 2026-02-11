@@ -39,6 +39,32 @@ export default function DashboardHeadInspector() {
   const [complaints, setComplaints] = useState([]);
   const [search, setSearch] = useState('');
 
+  const pageMeta = useMemo(() => {
+    const meta = {
+      todo: {
+        title: 'Mission Orders — To Do',
+        subtitle: 'Review Director-approved complaints that still need a mission order draft.',
+      },
+      issued: {
+        title: 'Mission Orders — Issued',
+        subtitle: 'Track mission orders issued and queued for Director review.',
+      },
+      'for-inspection': {
+        title: 'Mission Orders — For Inspection',
+        subtitle: 'Mission orders approved and ready for field inspection.',
+      },
+      revisions: {
+        title: 'Mission Orders — For Revisions',
+        subtitle: 'Review mission orders that were cancelled or returned for changes.',
+      },
+    };
+
+    return meta[tab] || {
+      title: 'Head Inspector Dashboard',
+      subtitle: 'Manage mission orders workflow for Director-approved complaints.',
+    };
+  }, [tab]);
+
   const [creatingForId, setCreatingForId] = useState(null);
   const [toast, setToast] = useState('');
 
@@ -464,12 +490,7 @@ export default function DashboardHeadInspector() {
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>For Revisions</span>
                 </button>
               </li>
-              <li>
-                <a className="dash-nav-item" href="/">
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Back to Home</span>
-                </a>
-              </li>
-            </ul>
+                          </ul>
             <button
               type="button"
               className="dash-nav-item"
@@ -501,8 +522,8 @@ export default function DashboardHeadInspector() {
             <div className="dash-card">
               <div className="dash-header">
                 <div>
-                  <h2 className="dash-title">Head Inspector Dashboard</h2>
-                  <p className="dash-subtitle">Step 1: Review Director-approved complaints eligible for mission orders.</p>
+                  <h2 className="dash-title">{pageMeta.title}</h2>
+                  <p className="dash-subtitle">{pageMeta.subtitle}</p>
                 </div>
                 <div className="dash-actions"></div>
               </div>
