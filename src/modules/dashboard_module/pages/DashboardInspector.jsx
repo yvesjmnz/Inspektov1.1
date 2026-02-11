@@ -230,7 +230,6 @@ export default function DashboardInspector() {
               <p className="dash-subtitle">{userLabel ? `Welcome ${userLabel}!` : 'Welcome!'} View your assigned inspections and open full inspection details.</p>
             </div>
             <div className="dash-actions">
-              <a className="dash-link" href="/">Back to Home</a>
               <button className="dash-logout" type="button" onClick={handleLogout} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <img src="/ui_icons/logout.png" alt="" style={{ width: 18, height: 18, display: 'block', filter: 'brightness(0) invert(1)' }} />
                 Logout

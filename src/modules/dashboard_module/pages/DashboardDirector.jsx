@@ -609,12 +609,7 @@ export default function DashboardDirector() {
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Mission Orders</span>
                 </button>
               </li>
-                            <li>
-                <a className="dash-nav-item" href="/">
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Back to Home</span>
-                </a>
-              </li>
-                          </ul>
+                                                      </ul>
             <button
               type="button"
               className="dash-nav-item"
@@ -760,15 +755,7 @@ export default function DashboardDirector() {
                   ))}
                 </div>
               </div>
-              <div className="dash-tile" style={{ gridColumn: 'span 3' }}>
-                <h3>Quick Actions</h3>
-                <div className="dash-row-actions" style={{ marginTop: 8 }}>
-                  <button className="dash-btn" type="button" onClick={() => setTab('queue')}>Go to Review Queue</button>
-                  <button className="dash-btn" type="button" onClick={() => setTab('mission-orders')}>Go to Review Mission Orders</button>
-                  <button className="dash-btn" type="button" onClick={() => setTab('history')}>Go to Complaint History</button>
-                </div>
-              </div>
-            </div>
+                          </div>
           ) : tab === 'mission-orders' ? (
             <div className="dash-table-wrap">
               <table className="dash-table">
