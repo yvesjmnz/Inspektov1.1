@@ -59,10 +59,115 @@ export default function DashboardDirector() {
   const [fullComplaint, setFullComplaint] = useState(null);
   const [fullPreviewImage, setFullPreviewImage] = useState(null);
   const [evidenceIndex, setEvidenceIndex] = useState(0);
-  // Complaint History date filters
-  const [historyYear, setHistoryYear] = useState('all');
-  const [historyMonth, setHistoryMonth] = useState('all');
-  const [historyDay, setHistoryDay] = useState('all');
+  // Date range filter (history tab)
+  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
+  const [viewMonth, setViewMonth] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [pendingRange, setPendingRange] = useState({ start: null, end: null }); // inclusive
+  const [appliedRange, setAppliedRange] = useState({ start: null, end: null }); // inclusive
+  const [datePreset, setDatePreset] = useState('last-week'); // 'last-week' | 'last-month' | 'last-year' | 'custom'
+
+  // Date helpers
+  const startOfDayLocal = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const isSameDay = (a, b) => !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const isBetween = (x, a, b) => {
+    if (!a || !b) return false;
+    const t = startOfDayLocal(x).getTime();
+    const s = startOfDayLocal(a).getTime();
+    const e = startOfDayLocal(b).getTime();
+    return t >= s && t <= e;
+  };
+
+  // Prepare current week (Sunday–Saturday) as pending selection without applying
+  const setCurrentWeekPending = () => {
+    const t = startOfDayLocal(new Date());
+    const weekday = t.getDay(); // 0=Sun..6=Sat
+    const start = addDays(t, -weekday);
+    const end = addDays(start, 6);
+    setPendingRange({ start, end });
+    setDatePreset('custom'); // avoid highlighting any preset by default
+    setViewMonth(new Date(t.getFullYear(), t.getMonth(), 1));
+  };
+
+  const calendarGrid = (base) => {
+    const first = new Date(base.getFullYear(), base.getMonth(), 1);
+    const day = first.getDay(); // 0 Sun - 6 Sat
+    const offset = (day + 6) % 7; // Monday-first
+    const gridStart = addDays(first, -offset);
+    const days = [];
+    for (let i = 0; i < 42; i++) days.push(addDays(gridStart, i));
+    return days;
+  };
+
+  const applyPresetRange = (p) => {
+    setDatePreset(p);
+    const today = new Date();
+    const t = startOfDayLocal(today);
+
+    if (p === 'custom') {
+      setPendingRange({ start: null, end: null });
+      setViewMonth(new Date(t.getFullYear(), t.getMonth(), 1));
+      return;
+    }
+
+    if (p === 'last-week') {
+      // Week alignment: Sunday–Saturday (matches example Feb 1–7 when today is Feb 14, 2026)
+      const weekday = t.getDay(); // 0=Sun..6=Sat
+      const thisWeekStartSun = addDays(t, -weekday);
+      const lastWeekStartSun = addDays(thisWeekStartSun, -7);
+      const lastWeekEndSat = addDays(lastWeekStartSun, 6);
+      setPendingRange({ start: lastWeekStartSun, end: lastWeekEndSat });
+      setViewMonth(new Date(lastWeekEndSat.getFullYear(), lastWeekEndSat.getMonth(), 1));
+      return;
+    }
+
+    if (p === 'last-month') {
+      const firstOfThisMonth = new Date(t.getFullYear(), t.getMonth(), 1);
+      const firstOfLastMonth = new Date(t.getFullYear(), t.getMonth() - 1, 1);
+      const lastOfLastMonth = new Date(t.getFullYear(), t.getMonth(), 0); // day 0 of this month
+      setPendingRange({ start: firstOfLastMonth, end: lastOfLastMonth });
+      setViewMonth(new Date(firstOfLastMonth.getFullYear(), firstOfLastMonth.getMonth(), 1));
+      return;
+    }
+
+    if (p === 'last-year') {
+      const prevYear = t.getFullYear() - 1;
+      const start = new Date(prevYear, 0, 1);
+      const end = new Date(prevYear, 11, 31);
+      setPendingRange({ start, end });
+      setViewMonth(new Date(prevYear, 0, 1));
+      return;
+    }
+  };
+
+  const onDayClick = (d) => {
+    setDatePreset('custom');
+    const day = startOfDayLocal(d);
+    setPendingRange((r) => {
+      if (!r.start || (r.start && r.end)) return { start: day, end: null };
+      if (day < r.start) return { start: day, end: r.start };
+      return { start: r.start, end: day };
+    });
+  };
+
+  const onApplyDateRange = () => {
+    if (pendingRange.start && pendingRange.end) {
+      setAppliedRange({ start: startOfDayLocal(pendingRange.start), end: startOfDayLocal(pendingRange.end) });
+      setDatePopoverOpen(false);
+    }
+  };
+
+  const formatRangeLabel = (start, end) => {
+    if (!start || !end) return 'Date: All time';
+    const fmt = (dt) => dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return `Date: ${fmt(start)} — ${fmt(end)}`;
+  };
+
+  const rangeLabel = useMemo(() => formatRangeLabel(appliedRange.start, appliedRange.end), [appliedRange]);
   // Resolved labels for audit drawer (emails or names)
   const [auditApproverLabel, setAuditApproverLabel] = useState('');
   const [auditDeclinerLabel, setAuditDeclinerLabel] = useState('');
@@ -120,28 +225,11 @@ export default function DashboardDirector() {
           'declined',
           'rejected',
         ]);
-        // Apply created_at date range for Complaint History if filters are set
-        try {
-          const y = historyYear !== 'all' ? Number(historyYear) : null;
-          const m = historyMonth !== 'all' ? Number(historyMonth) : null; // 1-12
-          const d = historyDay !== 'all' ? Number(historyDay) : null; // 1-31
-          let start = null;
-          let end = null;
-          if (y && !m && !d) {
-            start = new Date(y, 0, 1);
-            end = new Date(y + 1, 0, 1);
-          } else if (y && m && !d) {
-            start = new Date(y, m - 1, 1);
-            end = new Date(y, m, 1);
-          } else if (y && m && d) {
-            start = new Date(y, m - 1, d);
-            end = new Date(y, m - 1, d + 1);
-          }
-          if (start && end) {
-            query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString());
-          }
-        } catch (_) {
-          // ignore invalid date ranges
+        // Apply created_at date range for Complaint History if filters are set via range picker (explicit Apply)
+        if (appliedRange?.start && appliedRange?.end) {
+          const start = new Date(appliedRange.start.getFullYear(), appliedRange.start.getMonth(), appliedRange.start.getDate());
+          const endExclusive = new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), appliedRange.end.getDate() + 1);
+          query = query.gte('created_at', start.toISOString()).lt('created_at', endExclusive.toISOString());
         }
       } else {
         // General or other: no status filter (fetch recent mix for KPIs)
@@ -214,13 +302,13 @@ export default function DashboardDirector() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // Reload history when any date filter changes
+  // Reload history when applied date range changes
   useEffect(() => {
     if (tab === 'history') {
       loadComplaints();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyYear, historyMonth, historyDay]);
+  }, [appliedRange.start, appliedRange.end]);
 
   // Resolve approver/decliner labels (email/name) for audit drawer
   useEffect(() => {
@@ -695,35 +783,68 @@ export default function DashboardDirector() {
 
           <div className="dash-toolbar">
           {tab === 'history' ? (
-          <>
-          <select className="dash-select" value={historyYear} onChange={(e) => setHistoryYear(e.target.value)}>
-          <option value="all">All Years</option>
-          {Array.from({ length: 6 }, (_, i) => currentYear - i).map((y) => (
-          <option key={y} value={String(y)}>{y}</option>
-          ))}
-          </select>
-          <select className="dash-select" value={historyMonth} onChange={(e) => setHistoryMonth(e.target.value)}>
-          <option value="all">All Months</option>
-          <option value="1">Jan</option>
-          <option value="2">Feb</option>
-          <option value="3">Mar</option>
-          <option value="4">Apr</option>
-          <option value="5">May</option>
-          <option value="6">Jun</option>
-          <option value="7">Jul</option>
-          <option value="8">Aug</option>
-          <option value="9">Sep</option>
-          <option value="10">Oct</option>
-          <option value="11">Nov</option>
-          <option value="12">Dec</option>
-          </select>
-          <select className="dash-select" value={historyDay} onChange={(e) => setHistoryDay(e.target.value)}>
-          <option value="all">All Days</option>
-          {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-          <option key={d} value={String(d)}>{d}</option>
-          ))}
-          </select>
-          </>
+            <div className="date-filter">
+              <button
+                type="button"
+                className="dash-select date-filter-btn"
+                onClick={() => {
+                  if (!datePopoverOpen) {
+                    if (appliedRange.start && appliedRange.end) {
+                      setPendingRange({ start: appliedRange.start, end: appliedRange.end });
+                      setDatePreset('custom');
+                      setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
+                    } else {
+                      setCurrentWeekPending();
+                    }
+                  }
+                  setDatePopoverOpen((v) => !v);
+                }}
+                aria-haspopup="dialog"
+                aria-expanded={datePopoverOpen}
+              >
+                {rangeLabel}
+              </button>
+              {datePopoverOpen ? (
+                <div className="date-popover" role="dialog" aria-modal="true">
+                  <div className="date-presets">
+                    <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
+                    <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
+                    <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
+                    <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
+                    <div className="date-apply">
+                      <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
+                    </div>
+                  </div>
+                  <div className="cal-wrap">
+                    <div className="cal-header">
+                      <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
+                      <div className="cal-nav">
+                        <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
+                        <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
+                      </div>
+                    </div>
+                    <div className="cal-grid">
+                      {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
+                        <div key={`h-${d}`} className="cal-dow">{d}</div>
+                      ))}
+                      {calendarGrid(viewMonth).map((d) => {
+                        const inMonth = d.getMonth() === viewMonth.getMonth();
+                        const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
+                        const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
+                        const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
+                        const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
+                        return (
+                          <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
+                        );
+                      })}
+                    </div>
+                    <div className="range-summary">
+                      {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end).replace('Date: ', '') : 'Select a start and end date'}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           <input
           className="dash-input"

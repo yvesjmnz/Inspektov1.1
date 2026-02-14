@@ -39,6 +39,100 @@ export default function DashboardHeadInspector() {
   const [complaints, setComplaints] = useState([]);
   const [search, setSearch] = useState('');
 
+  // Date range picker state (same UX as Director)
+  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
+  const [viewMonth, setViewMonth] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [pendingRange, setPendingRange] = useState({ start: null, end: null });
+  const [appliedRange, setAppliedRange] = useState({ start: null, end: null });
+  const [datePreset, setDatePreset] = useState('last-week');
+
+  const startOfDayLocal = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const isSameDay = (a, b) => !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const isBetween = (x, a, b) => {
+    if (!a || !b) return false;
+    const t = startOfDayLocal(x).getTime();
+    const s = startOfDayLocal(a).getTime();
+    const e = startOfDayLocal(b).getTime();
+    return t >= s && t <= e;
+  };
+  const calendarGrid = (base) => {
+    const first = new Date(base.getFullYear(), base.getMonth(), 1);
+    const day = first.getDay();
+    const offset = (day + 6) % 7;
+    const gridStart = addDays(first, -offset);
+    const days = [];
+    for (let i = 0; i < 42; i++) days.push(addDays(gridStart, i));
+    return days;
+  };
+  const setCurrentWeekPending = () => {
+    const t = startOfDayLocal(new Date());
+    const weekday = t.getDay();
+    const start = addDays(t, -weekday);
+    const end = addDays(start, 6);
+    setPendingRange({ start, end });
+    setDatePreset('custom');
+    setViewMonth(new Date(t.getFullYear(), t.getMonth(), 1));
+  };
+  const applyPresetRange = (p) => {
+    setDatePreset(p);
+    const t = startOfDayLocal(new Date());
+    if (p === 'custom') {
+      setPendingRange({ start: null, end: null });
+      setViewMonth(new Date(t.getFullYear(), t.getMonth(), 1));
+      return;
+    }
+    if (p === 'last-week') {
+      const weekday = t.getDay();
+      const thisWeekStartSun = addDays(t, -weekday);
+      const lastWeekStartSun = addDays(thisWeekStartSun, -7);
+      const lastWeekEndSat = addDays(lastWeekStartSun, 6);
+      setPendingRange({ start: lastWeekStartSun, end: lastWeekEndSat });
+      setViewMonth(new Date(lastWeekEndSat.getFullYear(), lastWeekEndSat.getMonth(), 1));
+      return;
+    }
+    if (p === 'last-month') {
+      const firstOfLastMonth = new Date(t.getFullYear(), t.getMonth() - 1, 1);
+      const lastOfLastMonth = new Date(t.getFullYear(), t.getMonth(), 0);
+      setPendingRange({ start: firstOfLastMonth, end: lastOfLastMonth });
+      setViewMonth(new Date(firstOfLastMonth.getFullYear(), firstOfLastMonth.getMonth(), 1));
+      return;
+    }
+    if (p === 'last-year') {
+      const prevYear = t.getFullYear() - 1;
+      const start = new Date(prevYear, 0, 1);
+      const end = new Date(prevYear, 11, 31);
+      setPendingRange({ start, end });
+      setViewMonth(new Date(prevYear, 0, 1));
+      return;
+    }
+  };
+  const onDayClick = (d) => {
+    setDatePreset('custom');
+    const day = startOfDayLocal(d);
+    setPendingRange((r) => {
+      if (!r.start || (r.start && r.end)) return { start: day, end: null };
+      if (day < r.start) return { start: day, end: r.start };
+      return { start: r.start, end: day };
+    });
+  };
+  const onApplyDateRange = () => {
+    if (pendingRange.start && pendingRange.end) {
+      setAppliedRange({ start: startOfDayLocal(pendingRange.start), end: startOfDayLocal(pendingRange.end) });
+      setDatePopoverOpen(false);
+    }
+  };
+  const formatRangeLabel = (start, end) => {
+    if (!start || !end) return 'Date: All time';
+    const fmt = (dt) => dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return `Date: ${fmt(start)} — ${fmt(end)}`;
+  };
+  const rangeLabel = useMemo(() => formatRangeLabel(appliedRange.start, appliedRange.end), [appliedRange]);
+
   const pageMeta = useMemo(() => {
     const meta = {
       todo: {
@@ -98,10 +192,19 @@ export default function DashboardHeadInspector() {
       // Industry standard: drive this dashboard from Director-approved complaints,
       // regardless of whether a mission order already exists yet.
       // Then attach the latest mission order per complaint (if any).
-      const { data: complaintRows, error: complaintError } = await supabase
+      let complaintQuery = supabase
         .from('complaints')
         .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
         .in('status', ['approved', 'Approved']);
+
+      // Apply date range to the most relevant timestamp for this dashboard (approval date is primary)
+      if (appliedRange?.start && appliedRange?.end) {
+        const start = new Date(appliedRange.start.getFullYear(), appliedRange.start.getMonth(), appliedRange.start.getDate());
+        const endExclusive = new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), appliedRange.end.getDate() + 1);
+        complaintQuery = complaintQuery.gte('approved_at', start.toISOString()).lt('approved_at', endExclusive.toISOString());
+      }
+
+      const { data: complaintRows, error: complaintError } = await complaintQuery;
 
       if (complaintError) throw complaintError;
 
@@ -213,6 +316,12 @@ export default function DashboardHeadInspector() {
     loadApprovedComplaints();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reload when applied date range changes
+  useEffect(() => {
+    loadApprovedComplaints();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedRange.start, appliedRange.end]);
 
   useEffect(() => {
     if (!toast) return;
@@ -529,6 +638,68 @@ export default function DashboardHeadInspector() {
               </div>
 
               <div className="dash-toolbar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div className="date-filter">
+                  <button
+                    type="button"
+                    className="dash-select date-filter-btn"
+                    onClick={() => {
+                      if (!datePopoverOpen) {
+                        if (appliedRange.start && appliedRange.end) {
+                          setPendingRange({ start: appliedRange.start, end: appliedRange.end });
+                          setDatePreset('custom');
+                          setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
+                        } else {
+                          setCurrentWeekPending();
+                        }
+                      }
+                      setDatePopoverOpen((v) => !v);
+                    }}
+                    aria-haspopup="dialog"
+                    aria-expanded={datePopoverOpen}
+                  >
+                    {rangeLabel}
+                  </button>
+                  {datePopoverOpen ? (
+                    <div className="date-popover" role="dialog" aria-modal="true">
+                      <div className="date-presets">
+                        <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
+                        <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
+                        <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
+                        <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
+                        <div className="date-apply">
+                          <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
+                        </div>
+                      </div>
+                      <div className="cal-wrap">
+                        <div className="cal-header">
+                          <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
+                          <div className="cal-nav">
+                            <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
+                            <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
+                          </div>
+                        </div>
+                        <div className="cal-grid">
+                          {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
+                            <div key={`h-${d}`} className="cal-dow">{d}</div>
+                          ))}
+                          {calendarGrid(viewMonth).map((d) => {
+                            const inMonth = d.getMonth() === viewMonth.getMonth();
+                            const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
+                            const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
+                            const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
+                            const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
+                            return (
+                              <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
+                            );
+                          })}
+                        </div>
+                        <div className="range-summary">
+                          {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end).replace('Date: ', '') : 'Select a start and end date'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
                 <input
                   className="dash-input"
                   type="text"
