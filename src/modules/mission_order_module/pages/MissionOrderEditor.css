@@ -9,19 +9,21 @@
   flex: 1;
   display: flex;
   align-items: flex-start;
-  justify-content: center;
-  padding: 28px 16px;
+  justify-content: flex-start; 
+  padding: 0; 
 }
 
 .mo-card {
   width: 100%;
-  max-width: 1100px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(6px);
-  border-radius: 16px;
-  padding: 22px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  max-width: none; 
+  background: #ffffff; 
+  backdrop-filter: none;
+  border-radius: 0;
+  padding: 28px; 
+  box-shadow: none;
+  border: none;
+  min-height: 100vh;
+  box-sizing: border-box;
 }
 
 .mo-header {
@@ -83,23 +85,79 @@
 }
 
 .mo-btn {
-  height: 42px;
-  padding: 0 14px;
-  border: none;
+  height: 36px;
+  padding: 0 12px;
   border-radius: 10px;
-  background: #2563eb;
-  color: #fff;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
   font-weight: 900;
   cursor: pointer;
+  line-height: 1;
 }
 
-.mo-btn-primary {
+.mo-btn--sm { height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; }
+
+.mo-btn-primary,
+.mo-btn[aria-pressed="true"],
+.mo-btn:active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.mo-btn:hover:not(.mo-btn-primary):not([aria-pressed="true"]) {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.mo-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.mo-btn-iconish {
+  width: 34px;
+  padding: 0;
+  border-radius: 8px;
+}
+
+.mo-format-btn {
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
+}
+.mo-format-btn:hover { background: rgba(2, 6, 23, 0.04); border-color: #e2e8f0; }
+.mo-format-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2); }
+.mo-format-btn[aria-pressed="true"],
+.mo-format-btn:active {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+  color: #0f172a;
+}
+
+.mo-format-btn strong,
+.mo-format-btn em,
+.mo-format-btn .u {
+  font-size: 14px;
+}
+
+.mo-btn-primary:hover {
   background: #1d4ed8;
+  color: #fff;
 }
 
 .mo-btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.mo-toolbar-select {
+  height: 32px;
+  border-radius: 8px;
+  padding: 0 8px;
+  font-size: 13px;
 }
 
 .mo-alert {
