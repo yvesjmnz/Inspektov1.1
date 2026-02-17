@@ -16,7 +16,8 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
 type VerifyRequest = {
-  business_pk: number;
+  business_pk?: number | null;
+  business_address?: string;
   reporter_lat: number;
   reporter_lng: number;
   threshold_meters?: number;
@@ -123,20 +124,10 @@ serve(async (req) => {
 
     const body = (await req.json()) as Partial<VerifyRequest>;
     const businessPk = body.business_pk;
+    const userProvidedAddress = body.business_address;
     const reporterLat = body.reporter_lat;
     const reporterLng = body.reporter_lng;
     const threshold = typeof body.threshold_meters === 'number' ? body.threshold_meters : 200;
-
-    if (typeof businessPk !== 'number') {
-      const res: VerifyResponse = { ok: false, error: 'Missing business_pk' };
-      return new Response(JSON.stringify(res), {
-        status: 400,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Content-Type': 'application/json',
-        },
-      });
-    }
 
     if (typeof reporterLat !== 'number' || typeof reporterLng !== 'number') {
       const res: VerifyResponse = { ok: false, error: 'Missing reporter coordinates' };
@@ -149,18 +140,36 @@ serve(async (req) => {
       });
     }
 
-    const supabase = getSupabaseClient(req);
+    let address: string;
 
-    const { data: business, error: businessError } = await supabase
-      .from('businesses')
-      .select('business_address')
-      .eq('business_pk', businessPk)
-      .single();
+    // If user provided an address directly (no-permit case), use it
+    if (typeof userProvidedAddress === 'string' && userProvidedAddress.trim().length > 0) {
+      address = String(userProvidedAddress).trim();
+    } else if (typeof businessPk === 'number') {
+      // Otherwise, fetch from database using business_pk
+      const supabase = getSupabaseClient(req);
+      const { data: business, error: businessError } = await supabase
+        .from('businesses')
+        .select('business_address')
+        .eq('business_pk', businessPk)
+        .single();
 
-    if (businessError || !business?.business_address) {
-      const res: VerifyResponse = { ok: false, error: 'Unable to load business address' };
+      if (businessError || !business?.business_address) {
+        const res: VerifyResponse = { ok: false, error: 'Unable to load business address' };
+        return new Response(JSON.stringify(res), {
+          status: 500,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Content-Type': 'application/json',
+          },
+        });
+      }
+
+      address = String(business.business_address).trim();
+    } else {
+      const res: VerifyResponse = { ok: false, error: 'Missing business_pk or business_address' };
       return new Response(JSON.stringify(res), {
-        status: 500,
+        status: 400,
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Content-Type': 'application/json',
@@ -168,7 +177,6 @@ serve(async (req) => {
       });
     }
 
-    const address = String(business.business_address).trim();
     if (address.length < 5) {
       const res: VerifyResponse = { ok: false, error: 'Business address is missing or too short' };
       return new Response(JSON.stringify(res), {

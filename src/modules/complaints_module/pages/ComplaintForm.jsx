@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, Marker, TileLayer } from 'react-leaflet';
+import { MapContainer, Marker, TileLayer, Polyline } from 'react-leaflet';
+import L from 'leaflet';
 import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/complaints';
 import { supabase } from '../../../lib/supabase';
 import './ComplaintForm.css';
@@ -46,8 +47,9 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [proximityVerified, setProximityVerified] = useState(false);
   const [proximityTag, setProximityTag] = useState(null);
+  const [businessCoords, setBusinessCoords] = useState(null); // Store geocoded business location
 
-  const withinRange = proximityTag === 'Passed Location Verification';
+  const withinRange = proximityTag === 'Location Verified';
   const outOfRange = proximityTag === 'Failed Location Verification';
   const [locationCheckAttempted, setLocationCheckAttempted] = useState(false);
 
@@ -117,7 +119,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
     setFormData((prev) => {
       const nextTags = (prev.tags || []).filter(
-        (t) => t !== 'Verification Unavailable' && t !== 'Failed Location Verification' && t !== 'Passed Location Verification'
+        (t) => t !== 'Verification Unavailable' && t !== 'Failed Location Verification' && t !== 'Location Verified'
       );
 
       return {
@@ -386,6 +388,81 @@ export default function ComplaintForm({ verifiedEmail }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, cameraOpen]);
 
+  // Sanitize address input: remove leading/trailing whitespace and limit length
+  const sanitizeAddress = (input) => {
+    if (typeof input !== 'string') return '';
+    return input.trim().slice(0, 500);
+  };
+
+  // Normalize address for comparison (lowercase, trim extra spaces)
+  const normalizeAddress = (addr) => {
+    if (!addr) return '';
+    return addr.toLowerCase().trim().replace(/\s+/g, ' ');
+  };
+
+  // Validate address format before API call
+  const validateAddressInput = (address) => {
+    if (!address) {
+      return { valid: false, error: 'Address is required' };
+    }
+
+    const trimmed = address.trim();
+
+    if (trimmed.length < 5) {
+      return { valid: false, error: 'Address must be at least 5 characters' };
+    }
+
+    if (trimmed.length > 500) {
+      return { valid: false, error: 'Address is too long (max 500 characters)' };
+    }
+
+    // Check for obviously invalid patterns (only special chars, no alphanumeric)
+    if (!/[a-zA-Z0-9]/.test(trimmed)) {
+      return { valid: false, error: 'Address must contain letters or numbers' };
+    }
+
+    return { valid: true, error: null };
+  };
+
+  // Check if manually entered address matches any business in database
+  const checkAddressMatch = async (address) => {
+    // Validate input first
+    const validation = validateAddressInput(address);
+    if (!validation.valid) {
+      console.warn('Address validation failed:', validation.error);
+      return null;
+    }
+
+    try {
+      // Search for businesses with this address
+      const results = await getBusinesses(address);
+      
+      if (results && results.length > 0) {
+        const normalizedInput = normalizeAddress(address);
+        
+        // Find exact or close match
+        const match = results.find((business) => {
+          const normalizedDb = normalizeAddress(business.business_address);
+          return normalizedDb === normalizedInput;
+        });
+
+        if (match) {
+          return match;
+        }
+      }
+    } catch (err) {
+      // Log error for debugging but don't block form
+      console.error('Error checking address match:', {
+        address: address.substring(0, 50), // Log only first 50 chars for privacy
+        error: err?.message || String(err),
+        timestamp: new Date().toISOString(),
+      });
+      // Return null to allow form to continue (fail-open)
+    }
+
+    return null;
+  };
+
   const verifyBusinessProximity = async (coords) => {
     const lat = coords?.lat ?? formData.reporter_lat;
     const lng = coords?.lng ?? formData.reporter_lng;
@@ -400,28 +477,34 @@ export default function ComplaintForm({ verifiedEmail }) {
       return;
     }
 
-    // For "No-Permit" / business-not-in-db submissions, we don't have a business_pk.
-    // Skip proximity verification and allow continuation.
-    if (!formData.business_pk) {
-      setProximityTag('Verification Unavailable');
-      setFormData((prev) => ({
-        ...prev,
-        tags: [...new Set([...(prev.tags || []), 'Verification Unavailable'])],
-      }));
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
     try {
+      // Prepare request body: use business_pk if available, otherwise use user-provided address
+      const requestBody = {
+        reporter_lat: lat,
+        reporter_lng: lng,
+        threshold_meters: 200,
+      };
+
+      if (formData.business_pk) {
+        requestBody.business_pk = formData.business_pk;
+      } else if (businessNotInDb && formData.business_address) {
+        // For no-permit submissions, pass the sanitized address
+        requestBody.business_address = sanitizeAddress(formData.business_address);
+      } else {
+        setProximityTag('Verification Unavailable');
+        setFormData((prev) => ({
+          ...prev,
+          tags: [...new Set([...(prev.tags || []), 'Verification Unavailable'])],
+        }));
+        setLoading(false);
+        return;
+      }
+
       const { data, error: invokeError } = await supabase.functions.invoke('verify-business-proximity', {
-        body: {
-          business_pk: formData.business_pk,
-          reporter_lat: lat,
-          reporter_lng: lng,
-          threshold_meters: 200,
-        },
+        body: requestBody,
       });
 
       // Fail-open: always allow continuation, but warn if far
@@ -431,11 +514,25 @@ export default function ComplaintForm({ verifiedEmail }) {
           ...prev,
           tags: [...new Set([...prev.tags, 'Verification Unavailable'])],
         }));
+        
+        // Provide user feedback about verification failure
+        if (invokeError) {
+          setError(
+            'Location verification encountered an error. You can still submit your complaint, ' +
+            'but location verification will not be available.'
+          );
+        }
         return;
       }
 
       const tag = data.tag;
       setProximityTag(tag);
+      
+      // Store business coordinates for map display
+      if (data.business_coords) {
+        setBusinessCoords(data.business_coords);
+      }
+
       setFormData((prev) => ({
         ...prev,
         tags: [...new Set([...prev.tags, tag])],
@@ -508,6 +605,37 @@ export default function ComplaintForm({ verifiedEmail }) {
       await verifyBusinessProximity(coords);
     }
   };
+
+  // Check if manually entered address matches a database business
+  useEffect(() => {
+    if (!businessNotInDb || !formData.business_address || formData.business_pk) {
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      const match = await checkAddressMatch(formData.business_address);
+      
+      if (cancelled) return;
+
+      if (match) {
+        // Found a matching business in database - auto-link to it
+        setFormData((prev) => ({
+          ...prev,
+          business_pk: match.business_pk,
+          business_name: match.business_name,
+          business_address: match.business_address,
+        }));
+        // Exit "Business not listed" mode since we found a match
+        setBusinessNotInDb(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [businessNotInDb, formData.business_address, formData.business_pk]);
 
   useEffect(() => {
     // When Step 2 (Confirm Location) is shown, automatically re-check device location
@@ -823,28 +951,60 @@ export default function ComplaintForm({ verifiedEmail }) {
                 </div>
               </div>
 
-              {locationCheckAttempted && (
+              {businessCoords && formData.reporter_lat != null && formData.reporter_lng != null && (
                 <div className="form-group">
-                  <label>Map Preview</label>
+                  <label>Location Comparison</label>
                   <div className="map-box">
-                    {formData.reporter_lat != null && formData.reporter_lng != null ? (
-                      <MapContainer
-                        center={[formData.reporter_lat, formData.reporter_lng]}
-                        zoom={18}
-                        style={{ height: '100%', width: '100%' }}
-                        scrollWheelZoom={false}
-                      >
-                        <TileLayer
-                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        />
-                        <Marker position={[formData.reporter_lat, formData.reporter_lng]} />
-                      </MapContainer>
-                    ) : (
-                      <div style={{ padding: 12, color: '#0f172a', fontWeight: 800 }}>
-                        Location could not be captured. Please try again.
-                      </div>
-                    )}
+                    <MapContainer
+                      bounds={[
+                        [formData.reporter_lat, formData.reporter_lng],
+                        [businessCoords.lat, businessCoords.lng],
+                      ]}
+                      style={{ height: '100%', width: '100%' }}
+                      scrollWheelZoom={false}
+                    >
+                      <TileLayer
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      />
+                      <Marker 
+                        position={[formData.reporter_lat, formData.reporter_lng]} 
+                        title="Your Location"
+                        icon={L.icon({
+                          iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+                          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                          iconSize: [25, 41],
+                          iconAnchor: [12, 41],
+                          popupAnchor: [1, -34],
+                          shadowSize: [41, 41],
+                        })}
+                      />
+                      <Marker 
+                        position={[businessCoords.lat, businessCoords.lng]} 
+                        title="Business Location"
+                        icon={L.icon({
+                          iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                          iconSize: [25, 41],
+                          iconAnchor: [12, 41],
+                          popupAnchor: [1, -34],
+                          shadowSize: [41, 41],
+                        })}
+                      />
+                      <Polyline 
+                        positions={[
+                          [formData.reporter_lat, formData.reporter_lng],
+                          [businessCoords.lat, businessCoords.lng],
+                        ]}
+                        color="#666"
+                        weight={2}
+                        opacity={0.7}
+                        dashArray="5, 5"
+                      />
+                    </MapContainer>
+                  </div>
+                  <div className="inline-note" style={{ marginTop: 8 }}>
+                    <strong>Blue pin:</strong> Your location | <strong>Red pin:</strong> Business location | <strong>Dashed line:</strong> Distance between locations
                   </div>
                 </div>
               )}
