@@ -68,7 +68,7 @@
 
 .hero-title {
   margin: 18px 0 10px;
-  font-size: 56px;
+  font-size: clamp(28px, 5vw, 56px);
   line-height: 1.05;
   font-weight: 900;
   color: #0f172a;
@@ -79,7 +79,7 @@
 .hero-sub {
   margin: 0 0 22px;
   color: #475569;
-  font-size: 18px;
+  font-size: clamp(14px, 2.2vw, 18px);
   text-shadow: none;
 }
 
@@ -88,13 +88,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 48px;
-  padding: 0 18px;
+  height: clamp(40px, 6vw, 48px);
+  padding: 0 clamp(12px, 3.2vw, 18px);
   border-radius: 9999px;
   font-weight: 800;
   text-decoration: none;
   border: 2px solid transparent;
   cursor: pointer;
+  font-size: clamp(13px, 1.6vw, 16px);
 }
 .pill-primary { background: #F0B429; color: #0f172a; }
 .pill-primary:hover { background: #DAA21D; }
@@ -144,9 +145,9 @@
 .band-header .label { color: #F0B429; font-weight: 800; margin-bottom: 6px; }
 .band-header h2 { color: #fff; font-size: 32px; margin: 0 0 20px; }
 .step-cards { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; }
-.step-card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; padding: 16px; color: #e2e8f0; position: relative; }
+.step-card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; padding: 20px 36px 16px 16px; color: #e2e8f0; position: relative; }
 .step-num { position: absolute; top: 10px; right: 12px; color: rgba(255,255,255,0.14); font-weight: 900; font-size: 24px; }
-.step-card h3 { margin: 0 0 10px; color: #fff; }
+.step-card h3 { margin: 0 0 10px; color: #fff; padding-right: 8px; }
 .step-card p { margin: 0; font-size: 14px; color: #cbd5e1; }
 
 .band-light { background: transparent; padding: 32px 0; }
@@ -270,3 +271,161 @@
 .mini-card:nth-child(1) { animation-delay: .12s; }
 .mini-card:nth-child(2) { animation-delay: .2s; }
 .hours-card { animation-delay: .28s; }
+
+/* Responsive grids and containers */
+@media (max-width: 1200px) {
+  .band-dark::before { width: min(100% - 48px, 1200px); }
+}
+
+@media (max-width: 1100px) {
+  .hero-grid { gap: 32px; }
+}
+
+@media (max-width: 1024px) {
+  /* Rebalance hero for tablet landscape */
+  .hero-wrap { padding: 28px 20px 44px; }
+  .band-wrap { padding: 0 20px 20px; }
+  .hero-grid { grid-template-columns: 1.05fr 0.95fr; gap: 32px; align-items: start; }
+  .mock-card { max-width: 460px; margin-left: auto; }
+
+  /* Reduce hero title slightly more and enforce safe wrapping */
+  .hero-title { font-size: clamp(30px, 4vw, 46px); line-height: 1.12; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; }
+  .hero-sub { line-height: 1.55; max-width: 54ch; }
+
+  /* Center outer panels with comfortable gutters */
+  .home-standalone::before { left: 50%; right: auto; transform: translateX(-50%); width: calc(100% - 40px); border-radius: 12px; box-shadow: 0 8px 20px rgba(0,0,0,0.12); }
+  .band-dark { margin-top: 10px; }
+  .band-dark::before { left: 50%; right: auto; transform: translateX(-50%); width: calc(100% - 40px); border-radius: 12px; box-shadow: 0 8px 18px rgba(0,0,0,0.12); }
+
+  /* Improve card readability at this width */
+  .step-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .step-card { padding: 20px 42px 16px 16px; min-height: 124px; }
+  .step-num { font-size: 18px; top: 8px; right: 10px; }
+  .step-card h3 { line-height: 1.25; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; }
+  .step-card p { line-height: 1.5; }
+
+  /* Scale section header slightly to prevent crowding */
+  .band-header h2 { font-size: clamp(24px, 2.8vw, 28px); margin-bottom: 18px; }
+
+  /* Keep contact info at 2 columns here */
+  .contact-info-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Tablet landscape fine-tuning to remove any residual overlaps */
+@media (max-width: 1024px) {
+  /* Limit text column width to avoid crowded lines next to mock card */
+  .hero-grid .hero-col:first-child { max-width: 600px; }
+  .hero-title { margin-bottom: 12px; }
+  .hero-actions { margin-top: 6px; }
+
+  /* Ensure band header has enough breathing room */
+  .band-dark .band-wrap { padding-top: 16px; }
+  .band-header h2 { line-height: 1.2; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; }
+
+  /* Extra spacing and tighter badge to prevent collisions */
+  .step-cards { margin-top: 8px; }
+  .step-card { padding-right: 50px; }
+  .step-num { font-size: 16px; top: 8px; right: 8px; }
+}
+
+@media (max-width: 992px) {
+  .step-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 24px; }
+}
+
+@media (max-width: 768px) {
+  /* Increase inner padding so we can let outer containers be full-bleed */
+  .hero-wrap { padding: 24px 16px; }
+  .band-wrap { padding: 0 16px 16px; }
+
+  /* Make outer white container centered and fluid to avoid edge clipping */
+  .home-standalone::before {
+    left: 50%; right: auto; transform: translateX(-50%); width: calc(100% - 24px);
+    border-radius: 10px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  }
+
+  /* Make dark band centered and fluid, reduce radius/shadow to prevent clipping */
+  .band-dark { padding: 20px 0; }
+  .band-dark::before {
+    left: 50%; right: auto; transform: translateX(-50%); width: calc(100% - 24px);
+    border-radius: 10px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+  }
+
+  /* Buttons: tighter gaps; allow wrapping and even distribution */
+  .hero-actions { gap: 10px; }
+  .hero-actions .pill-btn { flex: 1 1 calc(50% - 10px); min-width: 0; }
+}
+
+@media (max-width: 600px) {
+  .step-cards { grid-template-columns: 1fr; }
+  .mock-card { width: 100%; }
+  .contact-header h2 { font-size: clamp(20px, 6vw, 26px); }
+  .band-header h2 { font-size: clamp(20px, 6vw, 26px); }
+  /* Ensure no accidental overflow for narrow devices */
+  .band-wrap, .hero-wrap { padding-left: 14px; padding-right: 14px; }
+}
+
+/* Ultra-compact phones */
+@media (max-width: 430px) {
+  .hero-wrap { padding-top: 16px; padding-bottom: 16px; }
+  .band-wrap { padding-left: 12px; padding-right: 12px; }
+
+  .home-standalone::before { border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  .band-dark::before { border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+
+  .hero-actions { gap: 8px; }
+  .hero-actions .pill-btn { flex: 1 1 100%; width: 100%; }
+
+  .step-cards { gap: 10px; }
+  .contact-info-row { gap: 10px; }
+}
+
+@supports (padding: max(0px)) {
+  .hero-wrap { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  .band-wrap { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+}
+
+/* Global safeguard to prevent accidental horizontal scroll on small devices */
+html, body { overflow-x: hidden; }
+
+/* Orientation-aware tweaks for portrait across devices */
+@media (orientation: portrait) and (max-width: 900px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 20px; }
+  .hero-wrap { padding-top: 20px; padding-bottom: 20px; }
+  .mock-card { width: 100%; max-width: 520px; margin: 0 auto; }
+
+  /* Even button layout in portrait */
+  .hero-actions { gap: 8px; flex-wrap: wrap; }
+  .hero-actions .pill-btn { flex: 1 1 calc(50% - 8px); min-width: 0; }
+
+  /* Full-bleed dark band to avoid edge artifacts */
+  .band-dark { margin-top: 12px; }
+  .band-dark::before { left: 50%; right: auto; transform: translateX(-50%); width: calc(100% - 24px); border-radius: 10px; }
+
+  .step-cards { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .contact-info-row { grid-template-columns: 1fr; gap: 12px; }
+}
+
+/* Extra compact rules for very small portrait phones */
+@media (orientation: portrait) and (max-width: 480px) {
+  .home-standalone::before { left: 50%; right: auto; transform: translateX(-50%); width: calc(100% - 16px); border-radius: 10px; box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
+  .band-dark::before { left: 50%; right: auto; transform: translateX(-50%); width: calc(100% - 16px); border-radius: 10px; box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
+  .band-wrap { padding: 0 12px; }
+  .hero-actions { flex-direction: column; align-items: stretch; }
+  .hero-actions .pill-btn { width: 100%; }
+  .step-cards { grid-template-columns: 1fr; }
+  .category-selector { gap: 8px; }
+  .category-btn { padding: 8px 12px; font-size: 13px; }
+}
+
+/* Compact layout for short landscape screens (e.g., phones rotated) */
+@media (max-height: 700px) and (orientation: landscape) and (max-width: 900px) {
+  .hero-wrap { padding-top: 16px; padding-bottom: 16px; }
+  .hero-grid { gap: 20px; }
+  .mock-card { transform: scale(0.96); transform-origin: top center; }
+}
