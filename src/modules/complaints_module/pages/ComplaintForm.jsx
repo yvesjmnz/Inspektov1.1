@@ -920,8 +920,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                   required
                   disabled={true}
                 />
-                <div className="inline-note">We will send updates to this email address.</div>
-              </div>
+                              </div>
             </>
           ) : null}
 
