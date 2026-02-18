@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-import Header from '../../../components/Header';
-import Footer from '../../../components/Footer';
 import { supabase } from '../../../lib/supabase';
 import './Login.css';
 
@@ -27,11 +25,6 @@ export default function Login() {
   }, []);
 
   const routeByRole = async (user) => {
-    // Strategy (in priority order):
-    // 1) custom claim in app_metadata.role
-    // 2) user_metadata.role
-    // 3) profiles table (if you have one) -> profiles.role
-
     const role = user?.app_metadata?.role || user?.user_metadata?.role;
 
     if (role) {
@@ -39,8 +32,6 @@ export default function Login() {
       return;
     }
 
-    // Optional fallback: try a profiles table if it exists.
-    // If it doesn't exist, we silently ignore and show a helpful error.
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -66,8 +57,6 @@ export default function Login() {
   const navigateToDashboard = (roleValue) => {
     const role = String(roleValue).toLowerCase();
 
-    // Adjust these mappings later when dashboards exist.
-    // Role mapping (can be adjusted later)
     if (role === 'director') {
       window.location.href = '/dashboard/director';
       return;
@@ -120,49 +109,66 @@ export default function Login() {
   };
 
   return (
-    <div className="login-container">
-      <Header />
-      <main className="login-main">
-        <section className="login-card">
-          <h2 className="login-title">Login</h2>
-          <p className="login-subtitle">Sign in to continue to your dashboard.</p>
+    <div className="auth-root">
+      <div className="auth-split">
+        {/* Left column: branding + form (light panel) */}
+        <aside className="auth-left">
+          <div className="auth-left-inner">
+            <div className="auth-brand">
+              <img className="auth-logo" src="/bureau-permits.png" alt="Bureau of Permits" />
+              <div className="auth-brand-text">
+                <h1 className="auth-brand-title">Inspekto</h1>
+              </div>
+            </div>
 
-          <form className="login-form" onSubmit={handleSubmit}>
-            <label className="login-label" htmlFor="email">Email</label>
-            <input
-              id="email"
-              className="login-input"
-              type="email"
-              placeholder="name@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-            />
+            <section className="auth-card">
+              <h2 className="auth-title">Sign in</h2>
+              <form className="auth-form" onSubmit={handleSubmit}>
+                <label className="auth-label" htmlFor="email">Email address</label>
+                <input
+                  id="email"
+                  className="auth-input"
+                  type="email"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                />
 
-            <label className="login-label" htmlFor="password">Password</label>
-            <input
-              id="password"
-              className="login-input"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-            />
+                <label className="auth-label" htmlFor="password">Password</label>
+                <input
+                  id="password"
+                  className="auth-input"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
 
-            <button className="login-btn" type="submit" disabled={loading}>
-              {loading ? 'Signing in…' : 'Sign In'}
-            </button>
-          </form>
+                <button className="auth-btn" type="submit" disabled={loading}>
+                  {loading ? 'Signing in…' : 'Sign In'}
+                </button>
+              </form>
 
-          {error ? <div className="login-alert login-alert-error">{error}</div> : null}
+              {error ? <div className="auth-alert auth-alert-error">{error}</div> : null}
 
-          <div className="login-help">
-            <a className="login-back" href="/">Back to Home</a>
+              <div className="auth-help">
+                <a className="auth-link" href="/">Back to Home</a>
+              </div>
+            </section>
+
+            <footer className="auth-left-footer">
+              <p className="auth-powered">© {new Date().getFullYear()} City Government of Manila</p>
+            </footer>
           </div>
-        </section>
-      </main>
-      <Footer />
+        </aside>
+
+        {/* Right column: image panel */}
+        <div className="auth-right" aria-hidden="true">
+          <div className="auth-photo-overlay" />
+        </div>
+      </div>
     </div>
   );
 }
