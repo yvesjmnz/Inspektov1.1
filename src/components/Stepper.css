@@ -1,5 +1,6 @@
 /* Stepper base */
 .stepper {
+  /* Let the stepper fill its wrapper (card) */
   width: 100%;
   margin: 8px 0 20px;
 }
@@ -88,7 +89,9 @@
 }
 
 .stepper-connector.completed {
-  background: linear-gradient(90deg, #2563eb 0%, #2563eb 70%, #e2e8f0 70%, #e2e8f0 100%);
+  /* Fill fully to the next step, covering border/AA of next node */
+  background: #2563eb;
+  right: calc(-50% - 20px);
 }
 
 /* Responsive tweak for small screens */
@@ -106,9 +109,14 @@
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
   border: 1px solid #e2e8f0; /* slate-200 */
   padding: 16px 20px;
-  margin: 8px 0 16px;
+  /* Constrain and center to match the complaint form card width */
+  margin: 8px auto 16px; /* center horizontally */
+  width: min(92vw, 980px); /* match form card width */
+  max-width: 100%;
 }
 
 .stepper-card .stepper {
+  /* Fill the wrapper's width */
+  width: 100%;
   margin: 0;
 }
