@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/complaints';
 import { requestEmailVerification } from '../../../lib/api';
 import { supabase } from '../../../lib/supabase';
+import Header from '../../../components/Header.jsx';
+import Stepper from '../../../components/Stepper.jsx';
+import '../../../components/Stepper.css';
 import './ComplaintForm.css';
 
 export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEmail }) {
@@ -480,29 +483,31 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
   }
 
   return (
-    <div className="complaint-form-container">
+    <>
+      <Header />
+      <div className="complaint-form-container">
+      <div className="stepper-card">
+          <Stepper
+            steps={[
+              'Business Search',
+              'Evidence (Photos)',
+              'Complaint Description',
+              'Confirmation',
+            ]}
+            currentStep={step}
+          />
+        </div>
       <div className="complaint-form-card">
         <h1>Submit a Special Complaint</h1>
         <p>Please complete the steps below to file your complaint.</p>
-
-        <div className="complaint-steps">
-          <div className="complaint-progress" aria-label="Progress">
-            <div className="complaint-progress-bar" style={{ width: `${progressPct}%` }} />
-          </div>
-          <div className="complaint-step-meta">
-            <span>Step {step} of {TOTAL_STEPS}</span>
-            <span>{progressPct}%</span>
-          </div>
-          <div className="complaint-step-title">{stepTitle}</div>
-        </div>
 
         <form onSubmit={handleFinalSubmit} className="complaint-form">
           {step === 1 ? (
             <>
               <div className="form-group">
-                <label htmlFor="business_search">Business Search</label>
                 <input
                   id="business_search"
+                  aria-label="Business Search"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => handleBusinessSearch(e.target.value)}
@@ -636,13 +641,12 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
           {step === 2 ? (
             <>
               <div className="form-group">
-                <label>Evidence Photos</label>
 
                 <div className="inline-note" style={{ marginTop: 10 }}>
                   Upload one or more photos from your device. You can add up to 5 photos.
                 </div>
 
-                <div className="file-upload" style={{ marginTop: 10 }}>
+                <div className="file-upload" aria-label="Evidence (File Upload)" style={{ marginTop: 10 }}>
                   <input
                     ref={additionalImageInputRef}
                     type="file"
@@ -686,9 +690,9 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
           {step === 3 ? (
             <>
               <div className="form-group">
-                <label htmlFor="complaint_description">Complaint Description</label>
                 <textarea
                   id="complaint_description"
+                  aria-label="Complaint Description"
                   value={formData.complaint_description}
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, complaint_description: e.target.value }))
@@ -801,5 +805,6 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
         </form>
       </div>
     </div>
+    </>
   );
 }

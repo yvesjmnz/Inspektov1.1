@@ -3,6 +3,9 @@ import { MapContainer, Marker, TileLayer, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/complaints';
 import { supabase } from '../../../lib/supabase';
+import Header from '../../../components/Header.jsx';
+import Stepper from '../../../components/Stepper.jsx';
+import '../../../components/Stepper.css';
 import './ComplaintForm.css';
 
 export default function ComplaintForm({ verifiedEmail }) {
@@ -686,6 +689,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
 
     if (step === 4) {
+      const descLen = String(formData.complaint_description || '').length;
       if (descLen < 20) {
         setError('Description is too short (minimum 20 characters).');
         return;
@@ -771,29 +775,33 @@ export default function ComplaintForm({ verifiedEmail }) {
   };
 
   return (
-    <div className="complaint-form-container">
-      <div className="complaint-form-card">
+    <>
+      <Header />
+      <div className="complaint-form-container">
+            <div className="stepper-card">
+              <Stepper
+                steps={[
+                  'Business Search',
+                  'Confirm Location',
+                  'Evidence (Photos)',
+                  'Complaint Description',
+                  'Confirmation',
+                ]}
+                currentStep={step}
+              />
+            </div>
+            <div className="complaint-form-card">
+        
         <h1>Submit a Complaint</h1>
         <p>Please complete the steps below to file your complaint.</p>
-
-        <div className="complaint-steps">
-          <div className="complaint-progress" aria-label="Progress">
-            <div className="complaint-progress-bar" style={{ width: `${progressPct}%` }} />
-          </div>
-          <div className="complaint-step-meta">
-            <span>Step {step} of {TOTAL_STEPS}</span>
-            <span>{progressPct}%</span>
-          </div>
-          <div className="complaint-step-title">{stepTitle}</div>
-        </div>
 
         <form onSubmit={handleFinalSubmit} className="complaint-form">
           {step === 1 ? (
             <>
               <div className="form-group">
-                <label htmlFor="business_search">Business Search</label>
                 <input
                   id="business_search"
+                  aria-label="Business Search"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => handleBusinessSearch(e.target.value)}
@@ -1013,7 +1021,6 @@ export default function ComplaintForm({ verifiedEmail }) {
           {step === 3 ? (
             <>
               <div className="form-group">
-                <label>Evidence Photos</label>
 
                 {withinRange ? (
                   <div className="inline-note">
@@ -1032,7 +1039,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                 {/* Camera controls (allowed when within range or verification unavailable) */}
                 {!outOfRange ? (
                   <>
-                    <div className="file-upload" style={{ flexWrap: 'wrap', marginTop: 10 }}>
+                    <div className="file-upload" aria-label="Evidence (Camera Controls)" style={{ flexWrap: 'wrap', marginTop: 10 }}>
                       <button
                         type="button"
                         onClick={openCameraFlow}
@@ -1092,7 +1099,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                     <div className="inline-note" style={{ marginTop: 14 }}>
                       Upload one or more photos.
                     </div>
-                    <div className="file-upload" style={{ marginTop: 8 }}>
+                    <div className="file-upload" aria-label="Evidence (File Upload)" style={{ marginTop: 8 }}>
                       <input
                         ref={primaryImageInputRef}
                         type="file"
@@ -1141,9 +1148,9 @@ export default function ComplaintForm({ verifiedEmail }) {
           {step === 4 ? (
             <>
               <div className="form-group">
-                <label htmlFor="complaint_description">Complaint Description</label>
                 <textarea
                   id="complaint_description"
+                  aria-label="Complaint Description"
                   value={formData.complaint_description}
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, complaint_description: e.target.value }))
@@ -1257,5 +1264,6 @@ export default function ComplaintForm({ verifiedEmail }) {
         </form>
       </div>
     </div>
+    </>
   );
 }
