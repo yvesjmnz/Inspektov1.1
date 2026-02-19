@@ -54,6 +54,13 @@
   color: #0f172a;
 }
 
+.auth-brand-tagline {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-weight: 600;
+  font-size: clamp(11px, 1.4vw, 13px);
+}
+
 .auth-brand-sub {
   margin: 2px 0 0;
   color: #64748b;

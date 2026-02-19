@@ -20,6 +20,32 @@ function statusBadgeClass(status) {
   return 'status-badge';
 }
 
+function getUrgencyStyle(urgency) {
+  const u = Number(urgency);
+  if (u === 100) {
+    return {
+      badge: { background: '#dcfce7', border: '1px solid #22c55e', color: '#166534' },
+      hover: { borderLeft: '4px solid #22c55e' }
+    };
+  }
+  if (u === 50) {
+    return {
+      badge: { background: '#fef3c7', border: '1px solid #eab308', color: '#854d0e' },
+      hover: { borderLeft: '4px solid #eab308' }
+    };
+  }
+  if (u === 25) {
+    return {
+      badge: { background: '#fee2e2', border: '1px solid #ef4444', color: '#991b1b' },
+      hover: { borderLeft: '4px solid #ef4444' }
+    };
+  }
+  return {
+    badge: { background: '#e2e8f0', border: '1px solid #cbd5e1', color: '#334155' },
+    hover: { borderLeft: '4px solid #cbd5e1' }
+  };
+}
+
 export default function DashboardDirector() {
   const [tab, setTab] = useState('general'); // general | queue | mission-orders | history
   const [loading, setLoading] = useState(false);
@@ -32,7 +58,7 @@ export default function DashboardDirector() {
         subtitle: 'Complaint oversight: today\'s activity, pending reviews, and recent trends.',
       },
       queue: {
-        title: 'Review Queue',
+        title: 'Review Complaints',
         subtitle: 'Review new submissions and make approval/decline decisions.',
       },
       history: {
@@ -385,7 +411,7 @@ export default function DashboardDirector() {
     });
   }, [missionOrders, search]);
 
-  // Group complaints by day for Review Queue
+  // Group complaints by day for Review Complaints
   const complaintsByDay = useMemo(() => {
     // Group by day for both queue and history tabs
     if (tab === 'mission-orders') return { groups: {}, sortedKeys: [] };
@@ -393,8 +419,20 @@ export default function DashboardDirector() {
     for (const c of filteredComplaints) {
       const d = c.created_at ? new Date(c.created_at) : null;
       const key = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10) : 'unknown';
-      if (!groups[key]) groups[key] = { label: d ? d.toLocaleDateString() : 'Unknown Date', items: [] };
+      if (!groups[key]) {
+        // Format as "MMMM D" (e.g., "February 17")
+        const label = d ? d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }) : 'Unknown Date';
+        groups[key] = { label, items: [] };
+      }
       groups[key].items.push(c);
+    }
+    // Sort items within each day by created_at descending (newest first)
+    for (const key in groups) {
+      groups[key].items.sort((a, b) => {
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return timeB - timeA;
+      });
     }
     const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1)); // desc by date key YYYY-MM-DD
     return { groups, sortedKeys };
@@ -720,7 +758,7 @@ export default function DashboardDirector() {
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img src="/ui_icons/queue.png" alt="" style={{ width: 26, height: 26, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Queue</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Complaints</span>
                 </button>
               </li>
               <li>
@@ -890,7 +928,7 @@ export default function DashboardDirector() {
               <div className="dash-tile">
                 <h3>Pending Review</h3>
                 <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.pendingReview}</div>
-                <div className="dash-cell-sub">In Review Queue</div>
+                <div className="dash-cell-sub">In Review Complaints</div>
               </div>
               <div className="dash-tile">
                 <h3>Approved Today</h3>
@@ -967,183 +1005,182 @@ export default function DashboardDirector() {
               </table>
             </div>
           ) : (
-            <div className="dash-table-wrap">
-              <table className="dash-table">
-                <thead>
-                  {tab === 'queue' ? (
-                    <tr>
-                      <th style={{ width: 90 }}>ID</th>
-                      <th>Business</th>
-                      <th style={{ width: 160 }}>Urgency</th>
-                      <th style={{ width: 200 }}>Submitted</th>
-                    </tr>
-                  ) : (
-                    <tr>
-                      <th style={{ width: 90 }}>ID</th>
-                      <th>Business</th>
-                      <th style={{ width: 240 }}>Status</th>
-                      {tab === 'history' ? <th style={{ width: 280 }}>Decision</th> : null}
-                      <th style={{ width: 180 }}>Authenticity Level</th>
-                      <th style={{ width: 200 }}>Submitted</th>
-                      <th style={{ width: 280 }}>Evidence</th>
-                    </tr>
-                  )}
-                </thead>
-                <tbody>
-                  {filteredComplaints.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
-                        {loading ? 'Loading…' : 'No records found.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    tab === 'queue'
-                      ? (
-                        complaintsByDay.sortedKeys.flatMap((dayKey) => {
-                          const rows = [];
-                          const label = complaintsByDay.groups[dayKey]?.label || dayKey;
-                          rows.push(
-                            <tr key={`day-${dayKey}`}>
-                              <td colSpan={4} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>{label}</td>
-                            </tr>
-                          );
-                          complaintsByDay.groups[dayKey].items.forEach((c) => {
-                            rows.push(
-                              <tr key={c.id} onClick={() => openFullComplaint(c.id)} style={{ cursor: 'pointer' }}>
-                                <td>{c.id}</td>
-                                <td>
-                                  <div className="dash-cell-title">{c.business_name || '—'}</div>
-                                  <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                </td>
-                                <td>
-                                  <span className="status-badge status-warning">{c?.authenticity_level ?? '—'}</span>
-                                </td>
-                                <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
-                                                              </tr>
-                            );
-                          });
-                          return rows;
-                        })
-                      ) : (
-                        complaintsByDay.sortedKeys.flatMap((dayKey) => {
-                          const rows = [];
-                          const label = complaintsByDay.groups[dayKey]?.label || dayKey;
-                          rows.push(
-                            <tr key={`dayh-${dayKey}`}>
-                              <td colSpan={7} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>{label}</td>
-                            </tr>
-                          );
-                          complaintsByDay.groups[dayKey].items.forEach((c) => {
-                            rows.push(
-                              <tr key={c.id}>
-                            <td>{c.id}</td>
-                            <td>
-                              <div className="dash-cell-title">{c.business_name || '—'}</div>
-                              <div className="dash-cell-sub">{c.business_address || ''}</div>
-                              <div className="dash-cell-sub">{c.reporter_email || ''}</div>
-                            </td>
-                            <td>
-                              <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
-                            </td>
-                            {tab === 'history' ? (
-                              <td>
-                                <div className="dash-cell-sub">
-                                  {(() => {
-                                    const s = String(c.status || '').toLowerCase();
-                                    if (s === 'approved') {
-                                      const label = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '��';
-                                      return `Approved by ${label} on ${c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}`;
-                                    }
-                                    if (s === 'declined') {
-                                      const label = c.declined_by ? String(c.declined_by).slice(0, 8) + '…' : '—';
-                                      return `Declined by ${label} on ${c.declined_at ? new Date(c.declined_at).toLocaleString() : '—'}`;
-                                    }
-                                    return '—';
-                                  })()}
-                                </div>
-                                <div style={{ marginTop: 6 }}>
-                                  <button className="dash-link" type="button" onClick={() => setAuditComplaint(c)}>View audit</button>
-                                </div>
-                              </td>
-                            ) : null}
-                            <td>{c?.authenticity_level ?? '—'}</td>
-                            <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
-                            <td>
-                              <div style={{ display: 'grid', gap: 8 }}>
-                                {c?.complaint_description ? (
-                                  <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap' }}>
-                                    {String(c.complaint_description).slice(0, 220)}
-                                    {String(c.complaint_description).length > 220 ? '…' : ''}
-                                  </div>
-                                ) : (
-                                  <div style={{ color: '#64748b', fontWeight: 700 }}>No description</div>
-                                )}
+            <div style={{ display: 'grid', gap: 20 }}>
+              {filteredComplaints.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                  {loading ? 'Loading…' : 'No records found.'}
+                </div>
+              ) : (
+                complaintsByDay.sortedKeys.map((dayKey) => {
+                  const dayGroup = complaintsByDay.groups[dayKey];
+                  const label = dayGroup?.label || dayKey;
+                  const pendingCount = dayGroup?.items?.length || 0;
+                  
+                  // Only render day block if there are items
+                  if (pendingCount === 0) return null;
+                  
+                  return (
+                    <div
+                      key={`day-card-${dayKey}`}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 12,
+                        boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {/* Day Header */}
+                      <div style={{ padding: '16px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: '#0f172a' }}>{label}</h3>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginTop: 4 }}>Pending Complaints: {pendingCount}</div>
+                      </div>
 
-                                {Array.isArray(c?.image_urls) && c.image_urls.length > 0 ? (
-                                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                    {c.image_urls.slice(0, 3).map((url) => (
-                                      <img
-                                        key={url}
-                                        src={url}
-                                        alt="Evidence"
-                                        onClick={() => setPreviewImage(url)}
-                                        style={{
-                                          width: 68,
-                                          height: 46,
-                                          objectFit: 'cover',
-                                          borderRadius: 10,
-                                          border: '1px solid #e2e8f0',
-                                          cursor: 'pointer',
-                                        }}
-                                        loading="lazy"
-                                      />
-                                    ))}
-                                    {c.image_urls.length > 3 ? (
-                                      <span style={{ color: '#64748b', fontWeight: 800, alignSelf: 'center' }}>
-                                        +{c.image_urls.length - 3} more
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                ) : (
-                                  <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
-                                )}
-                              </div>
-                            </td>
-                            {tab === 'queue' ? (
-                              <td>
-                                <div className="dash-row-actions">
-                                  <button
-                                    type="button"
-                                    className="dash-btn dash-btn-success dash-btn-icon"
-                                    onClick={() => updateComplaintStatus(c.id, 'approved')}
-                                    disabled={loading}
-                                    aria-label="Approve"
-                                    title="Approve"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="dash-btn dash-btn-danger dash-btn-icon"
-                                    onClick={() => updateComplaintStatus(c.id, 'declined')}
-                                    disabled={loading}
-                                    aria-label="Decline"
-                                    title="Decline"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              </td>
-                            ) : null}
-                          </tr>
-                            );
-                          });
-                          return rows;
-                        })
-                      )
-                  )}
-                </tbody>
-              </table>
+                      {/* Table for this day */}
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                              {tab === 'queue' ? (
+                                <>
+                                  <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Urgency</th>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business</th>
+                                  <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
+                                </>
+                              ) : (
+                                <>
+                                  <th style={{ width: 90, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>ID</th>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business</th>
+                                  <th style={{ width: 240, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
+                                  {tab === 'history' ? <th style={{ width: 280, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Decision</th> : null}
+                                  <th style={{ width: 180, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Authenticity Level</th>
+                                  <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
+                                  <th style={{ width: 280, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Evidence</th>
+                                </>
+                              )}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dayGroup.items.map((c) => {
+                              const urgencyStyle = tab === 'queue' ? getUrgencyStyle(c?.authenticity_level) : null;
+                              return (
+                                <tr
+                                  key={c.id}
+                                  onClick={() => openFullComplaint(c.id)}
+                                  style={{
+                                    cursor: 'pointer',
+                                    borderBottom: '1px solid #e2e8f0',
+                                    transition: 'background-color 0.2s ease, box-shadow 0.2s ease',
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = '#f8fafc';
+                                    if (urgencyStyle) {
+                                      e.currentTarget.style.boxShadow = urgencyStyle.hover.boxShadow;
+                                    }
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = '#ffffff';
+                                    e.currentTarget.style.boxShadow = 'none';
+                                  }}
+                                >
+                                  {tab === 'queue' ? (
+                                    <>
+                                      <td style={{ padding: '12px' }}>
+                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 700, fontSize: 13, padding: '6px 12px', borderRadius: 6, display: 'inline-block' }}>{c?.authenticity_level ?? '—'}</span>
+                                      </td>
+                                      <td style={{ padding: '12px' }}>
+                                        <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                        <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                      </td>
+                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <td style={{ padding: '12px', color: '#0f172a', fontWeight: 700 }}>{c.id}</td>
+                                      <td style={{ padding: '12px' }}>
+                                        <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                        <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                        <div className="dash-cell-sub">{c.reporter_email || ''}</div>
+                                      </td>
+                                      <td style={{ padding: '12px' }}>
+                                        <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
+                                      </td>
+                                      {tab === 'history' ? (
+                                        <td style={{ padding: '12px' }}>
+                                          <div className="dash-cell-sub">
+                                            {(() => {
+                                              const s = String(c.status || '').toLowerCase();
+                                              if (s === 'approved') {
+                                                const approverLabel = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '—';
+                                                return `Approved by ${approverLabel} on ${c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}`;
+                                              }
+                                              if (s === 'declined') {
+                                                const declinerLabel = c.declined_by ? String(c.declined_by).slice(0, 8) + '…' : '—';
+                                                return `Declined by ${declinerLabel} on ${c.declined_at ? new Date(c.declined_at).toLocaleString() : '—'}`;
+                                              }
+                                              return '—';
+                                            })()}
+                                          </div>
+                                          <div style={{ marginTop: 6 }}>
+                                            <button className="dash-link" type="button" onClick={() => setAuditComplaint(c)}>View audit</button>
+                                          </div>
+                                        </td>
+                                      ) : null}
+                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c?.authenticity_level ?? '—'}</td>
+                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                                      <td style={{ padding: '12px' }}>
+                                        <div style={{ display: 'grid', gap: 8 }}>
+                                          {c?.complaint_description ? (
+                                            <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap', fontSize: 13 }}>
+                                              {String(c.complaint_description).slice(0, 220)}
+                                              {String(c.complaint_description).length > 220 ? '…' : ''}
+                                            </div>
+                                          ) : (
+                                            <div style={{ color: '#64748b', fontWeight: 700 }}>No description</div>
+                                          )}
+
+                                          {Array.isArray(c?.image_urls) && c.image_urls.length > 0 ? (
+                                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                              {c.image_urls.slice(0, 3).map((url) => (
+                                                <img
+                                                  key={url}
+                                                  src={url}
+                                                  alt="Evidence"
+                                                  onClick={() => setPreviewImage(url)}
+                                                  style={{
+                                                    width: 68,
+                                                    height: 46,
+                                                    objectFit: 'cover',
+                                                    borderRadius: 10,
+                                                    border: '1px solid #e2e8f0',
+                                                    cursor: 'pointer',
+                                                  }}
+                                                  loading="lazy"
+                                                />
+                                              ))}
+                                              {c.image_urls.length > 3 ? (
+                                                <span style={{ color: '#64748b', fontWeight: 800, alignSelf: 'center' }}>
+                                                  +{c.image_urls.length - 3} more
+                                                </span>
+                                              ) : null}
+                                            </div>
+                                          ) : (
+                                            <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </>
+                                  )}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           )}
 

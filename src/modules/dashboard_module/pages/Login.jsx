@@ -119,6 +119,7 @@ export default function Login() {
               <img className="auth-logo" src="/bureau-permits.png" alt="Bureau of Permits" />
               <div className="auth-brand-text">
                 <h1 className="auth-brand-title">Inspekto</h1>
+                <p className="auth-brand-tagline">Complaint Management System</p>
               </div>
             </div>
 
@@ -154,7 +155,7 @@ export default function Login() {
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
                     <img
-                      src={showPassword ? './open eye.png' : './closed eye.png'}
+                      src={showPassword ? '/open eye.png' : '/closed eye.png'}
                       alt={showPassword ? 'Hide password' : 'Show password'}
                       className="auth-password-icon"
                     />
