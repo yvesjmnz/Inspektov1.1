@@ -7,6 +7,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   // If already logged in, go straight to role routing.
   useEffect(() => {
@@ -136,15 +137,29 @@ export default function Login() {
                 />
 
                 <label className="auth-label" htmlFor="password">Password</label>
-                <input
-                  id="password"
-                  className="auth-input"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
+                <div className="auth-password-wrapper">
+                  <input
+                    id="password"
+                    className="auth-input"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    className="auth-password-toggle"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    <img
+                      src={showPassword ? './open eye.png' : './closed eye.png'}
+                      alt={showPassword ? 'Hide password' : 'Show password'}
+                      className="auth-password-icon"
+                    />
+                  </button>
+                </div>
 
                 <button className="auth-btn" type="submit" disabled={loading}>
                   {loading ? 'Signing in…' : 'Sign In'}
@@ -152,15 +167,7 @@ export default function Login() {
               </form>
 
               {error ? <div className="auth-alert auth-alert-error">{error}</div> : null}
-
-              <div className="auth-help">
-                <a className="auth-link" href="/">Back to Home</a>
-              </div>
             </section>
-
-            <footer className="auth-left-footer">
-              <p className="auth-powered">© {new Date().getFullYear()} City Government of Manila</p>
-            </footer>
           </div>
         </aside>
 
