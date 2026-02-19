@@ -46,6 +46,12 @@ function getUrgencyStyle(urgency) {
   };
 }
 
+function formatDateNoSeconds(isoString) {
+  if (!isoString) return '—';
+  const date = new Date(isoString);
+  return date.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
 export default function DashboardDirector() {
   const [tab, setTab] = useState('general'); // general | queue | mission-orders | history
   const [loading, setLoading] = useState(false);
@@ -819,7 +825,6 @@ export default function DashboardDirector() {
 
           {null}
 
-          <div className="dash-toolbar">
           {tab === 'history' ? (
             <div className="date-filter">
               <button
@@ -884,39 +889,8 @@ export default function DashboardDirector() {
               ) : null}
             </div>
           ) : null}
-          <input
-          className="dash-input"
-          type="text"
-          placeholder="Search by business name/address, reporter email, or ID..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          />
-          <button className="dash-btn" type="button" onClick={handleRefresh} disabled={loading}>
-          {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <button
-          className="dash-btn"
-          type="button"
-          onClick={handleExport}
-          disabled={loading || (tab === 'mission-orders' ? filteredMissionOrders.length === 0 : filteredComplaints.length === 0)}
-          >
-          Export CSV
-          </button>
-          </div>
 
           {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
-          <div style={{ margin: '10px 0', color: '#475569', fontSize: 12 }}>
-            {tab === 'mission-orders' ? (
-              <span>
-                Orders: {summary.total} • Issued: {summary.issued} • For Inspection: {summary.forInspection} • Cancelled: {summary.cancelled} • Avg Inspection Duration: —
-              </span>
-            ) : (
-              <span>
-                Complaints: {summary.total} • Approved: {summary.approved} • Declined: {summary.declined} • Pending: {summary.pending}
-                {summary.avgDecisionHours ? ` • Avg decision time: ${summary.avgDecisionHours}h` : ''}
-              </span>
-            )}
-          </div>
 
           {tab === 'general' ? (
             <div className="dash-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
@@ -990,7 +964,7 @@ export default function DashboardDirector() {
                         <td>
                           <span className={statusBadgeClass(mo.status)}>{formatStatus(mo.status)}</span>
                         </td>
-                        <td>{mo.submitted_at ? new Date(mo.submitted_at).toLocaleString() : '—'}</td>
+                        <td>{formatDateNoSeconds(mo.submitted_at)}</td>
                         <td>
                           <div className="dash-row-actions">
                             <a className="dash-btn" href={`/mission-order/review?id=${mo.id}`}>
@@ -1025,15 +999,27 @@ export default function DashboardDirector() {
                       style={{
                         background: '#ffffff',
                         border: '1px solid #e2e8f0',
-                        borderRadius: 12,
-                        boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
+                        borderRadius: 14,
+                        boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
                         overflow: 'hidden',
+                        transition: 'box-shadow 0.2s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
                       }}
                     >
                       {/* Day Header */}
-                      <div style={{ padding: '16px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: '#0f172a' }}>{label}</h3>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginTop: 4 }}>Pending Complaints: {pendingCount}</div>
+                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                          {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
+                        </h3>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
+                          <span>{pendingCount} Pending {pendingCount === 1 ? 'Complaint' : 'Complaints'}</span>
+                        </div>
                       </div>
 
                       {/* Table for this day */}
@@ -1044,13 +1030,13 @@ export default function DashboardDirector() {
                               {tab === 'queue' ? (
                                 <>
                                   <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Urgency</th>
-                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business</th>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
                                   <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
                                 </>
                               ) : (
                                 <>
                                   <th style={{ width: 90, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>ID</th>
-                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business</th>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
                                   <th style={{ width: 240, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
                                   {tab === 'history' ? <th style={{ width: 280, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Decision</th> : null}
                                   <th style={{ width: 180, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Authenticity Level</th>
@@ -1063,6 +1049,13 @@ export default function DashboardDirector() {
                           <tbody>
                             {dayGroup.items.map((c) => {
                               const urgencyStyle = tab === 'queue' ? getUrgencyStyle(c?.authenticity_level) : null;
+                              const urgencyColor = tab === 'queue' ? (() => {
+                                const u = Number(c?.authenticity_level);
+                                if (u === 100) return '#22c55e'; // green
+                                if (u === 50) return '#eab308'; // yellow
+                                if (u === 25) return '#ef4444'; // red
+                                return '#cbd5e1'; // gray
+                              })() : null;
                               return (
                                 <tr
                                   key={c.id}
@@ -1070,16 +1063,22 @@ export default function DashboardDirector() {
                                   style={{
                                     cursor: 'pointer',
                                     borderBottom: '1px solid #e2e8f0',
-                                    transition: 'background-color 0.2s ease, box-shadow 0.2s ease',
+                                    transition: 'background-color 0.2s ease, box-shadow 0.2s ease, border-left 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                    position: 'relative',
+                                    borderLeft: tab === 'queue' ? '4px solid transparent' : 'none',
                                   }}
                                   onMouseEnter={(e) => {
                                     e.currentTarget.style.background = '#f8fafc';
+                                    if (tab === 'queue') {
+                                      e.currentTarget.style.borderLeft = `4px solid ${urgencyColor}`;
+                                    }
                                     if (urgencyStyle) {
                                       e.currentTarget.style.boxShadow = urgencyStyle.hover.boxShadow;
                                     }
                                   }}
                                   onMouseLeave={(e) => {
                                     e.currentTarget.style.background = '#ffffff';
+                                    e.currentTarget.style.borderLeft = tab === 'queue' ? '4px solid transparent' : 'none';
                                     e.currentTarget.style.boxShadow = 'none';
                                   }}
                                 >
@@ -1092,7 +1091,7 @@ export default function DashboardDirector() {
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
                                         <div className="dash-cell-sub">{c.business_address || ''}</div>
                                       </td>
-                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
                                     </>
                                   ) : (
                                     <>
@@ -1127,7 +1126,7 @@ export default function DashboardDirector() {
                                         </td>
                                       ) : null}
                                       <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c?.authenticity_level ?? '—'}</td>
-                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
                                       <td style={{ padding: '12px' }}>
                                         <div style={{ display: 'grid', gap: 8 }}>
                                           {c?.complaint_description ? (
