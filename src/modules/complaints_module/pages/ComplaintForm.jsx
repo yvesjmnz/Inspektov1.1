@@ -48,6 +48,8 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [firstSearchDone, setFirstSearchDone] = useState(false);
+  const [nameSearchQuery, setNameSearchQuery] = useState('');
   const [proximityVerified, setProximityVerified] = useState(false);
   const [proximityTag, setProximityTag] = useState(null);
   const [businessCoords, setBusinessCoords] = useState(null); // Store geocoded business location
@@ -100,7 +102,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
   };
 
-  const selectBusiness = (business) => {
+  const selectBusiness = (business, source = 'initial') => {
     setBusinessNotInDb(false);
 
     setFormData((prev) => ({
@@ -109,8 +111,18 @@ export default function ComplaintForm({ verifiedEmail }) {
       business_name: business.business_name,
       business_address: business.business_address,
     }));
+
+    // Close suggestions
     setShowBusinessList(false);
-    setSearchQuery('');
+
+    if (source === 'initial') {
+      setFirstSearchDone(true);
+      setSearchQuery('');
+      setNameSearchQuery(business.business_name || '');
+    } else {
+      // source === 'name'
+      setNameSearchQuery(business.business_name || '');
+    }
   };
 
   const clearSelectedBusiness = () => {
@@ -118,6 +130,8 @@ export default function ComplaintForm({ verifiedEmail }) {
     setBusinesses([]);
     setShowBusinessList(false);
     setSearchQuery('');
+    setNameSearchQuery('');
+    setFirstSearchDone(false);
     setProximityTag(null);
 
     setFormData((prev) => {
@@ -144,6 +158,24 @@ export default function ComplaintForm({ verifiedEmail }) {
       return `Invalid file format: ${file.name}. Only JPG, JPEG, and PNG are allowed.`;
     }
     return null;
+  };
+
+  const handleNameSearch = async (query) => {
+    setNameSearchQuery(query);
+    setError(null);
+
+    if (query.length > 2) {
+      try {
+        const results = await getBusinesses(query);
+        setBusinesses(results);
+        setShowBusinessList(true);
+      } catch (err) {
+        setError(err.message);
+      }
+    } else {
+      setBusinesses([]);
+      setShowBusinessList(false);
+    }
   };
 
   const handleEvidenceFileUpload = async (e) => {
@@ -799,18 +831,6 @@ export default function ComplaintForm({ verifiedEmail }) {
           {step === 1 ? (
             <>
               <div className="form-group">
-                <input
-                  id="business_search"
-                  aria-label="Business Search"
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => handleBusinessSearch(e.target.value)}
-                  placeholder="Search business name or address..."
-                  className="form-input"
-                  autoComplete="off"
-                  disabled={businessNotInDb}
-                />
-
                 <div className="check-row" style={{ marginTop: 10 }}>
                   <input
                     id="businessNotInDb"
@@ -841,46 +861,75 @@ export default function ComplaintForm({ verifiedEmail }) {
                     }}
                   />
                   <label htmlFor="businessNotInDb" style={{ margin: 0, fontWeight: 800, color: '#0f172a' }}>
-                    Business not listed (No-Permit violation)
+                    Business not listed? (No Permit Violation)
                   </label>
                 </div>
 
-                {showBusinessList && businesses.length > 0 ? (
-                  <div className="business-list">
-                    {businesses.map((business) => (
-                      <div
-                        key={business.business_pk}
-                        className="business-item"
-                        onClick={() => selectBusiness(business)}
-                      >
-                        <div className="business-name">{business.business_name}</div>
-                        <div className="business-address">{business.business_address}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                {formData.business_name ? (
-                  <div className="inline-note" style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-                    <div>
-                      {businessNotInDb ? (
-                        <>Manual entry: <strong>{formData.business_name}</strong></>
-                      ) : (
-                        <>Selected: <strong>{formData.business_name}</strong></>
-                      )}
-                    </div>
-
-                    {!businessNotInDb ? (
-                      <button type="button" className="btn btn-secondary" onClick={clearSelectedBusiness}>
-                        Remove selection
-                      </button>
-                    ) : null}
-                  </div>
-                ) : (
+                {!formData.business_name ? (
                   <div className="inline-note">
                     {businessNotInDb ? 'Enter the business name below.' : 'Select from the list to auto-fill the address.'}
                   </div>
+                ) : null}
+
+                {!businessNotInDb && (!firstSearchDone || !formData.business_name) && (
+                  <>
+                    <input
+                      id="business_search"
+                      aria-label="Business Search"
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => handleBusinessSearch(e.target.value)}
+                      placeholder="Search business name or address..."
+                      className="form-input"
+                      autoComplete="off"
+                    />
+
+                    {showBusinessList && businesses.length > 0 ? (
+                      <div className="business-list">
+                        {businesses.map((business) => (
+                          <div
+                            key={business.business_pk}
+                            className="business-item"
+                            onClick={() => selectBusiness(business, 'initial')}
+                          >
+                            <div className="business-name">{business.business_name}</div>
+                            <div className="business-address">{business.business_address}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
                 )}
+
+                {!businessNotInDb && firstSearchDone && formData.business_name ? (
+                  <div className="form-group" style={{ marginTop: 8 }}>
+                    <label htmlFor="business_name_search">Business Name</label>
+                    <input
+                      id="business_name_search"
+                      type="text"
+                      value={nameSearchQuery || formData.business_name}
+                      onChange={(e) => handleNameSearch(e.target.value)}
+                      className="form-input"
+                      placeholder="Search or change business name"
+                      autoComplete="off"
+                    />
+
+                    {showBusinessList && businesses.length > 0 ? (
+                      <div className="business-list">
+                        {businesses.map((business) => (
+                          <div
+                            key={business.business_pk}
+                            className="business-item"
+                            onClick={() => selectBusiness(business, 'name')}
+                          >
+                            <div className="business-name">{business.business_name}</div>
+                            <div className="business-address">{business.business_address}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               {businessNotInDb ? (
@@ -900,35 +949,39 @@ export default function ComplaintForm({ verifiedEmail }) {
                 </div>
               ) : null}
 
-              <div className="form-group">
-                <label htmlFor="business_address">Business Address</label>
-                <input
-                  id="business_address"
-                  type="text"
-                  value={formData.business_address}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, business_address: e.target.value }))
-                  }
-                  placeholder="Full business address"
-                  className="form-input"
-                  required
-                />
-              </div>
+              {(businessNotInDb || (firstSearchDone && formData.business_name)) ? (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="business_address">Business Address</label>
+                    <input
+                      id="business_address"
+                      type="text"
+                      value={formData.business_address}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, business_address: e.target.value }))
+                      }
+                      placeholder="Full business address"
+                      className="form-input"
+                      required
+                    />
+                  </div>
 
-              <div className="form-group">
-                <label htmlFor="reporter_email">Your Email</label>
-                <input
-                  id="reporter_email"
-                  type="email"
-                  value={formData.reporter_email}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, reporter_email: e.target.value }))
-                  }
-                  className="form-input"
-                  required
-                  disabled={true}
-                />
-                              </div>
+                  <div className="form-group">
+                    <label htmlFor="reporter_email">Your Email</label>
+                    <input
+                      id="reporter_email"
+                      type="email"
+                      value={formData.reporter_email}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, reporter_email: e.target.value }))
+                      }
+                      className="form-input"
+                      required
+                      disabled={true}
+                    />
+                                  </div>
+                </>
+              ) : null}
             </>
           ) : null}
 
