@@ -1148,59 +1148,6 @@ export default function ComplaintForm({ verifiedEmail }) {
                 ) : null}
 
                 {/* File upload (allowed when out of range, verification unavailable, or within range after camera capture) */}
-                {outOfRange || cameraPhotoUrls.length > 0 ? (
-                  <>
-                    <div
-                      className={`dropzone ${loading ? '' : ''}`}
-                      onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('hover'); }}
-                      onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('hover'); }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        e.currentTarget.classList.remove('hover');
-                        if (loading) return;
-                        const dtFiles = Array.from(e.dataTransfer.files || []);
-                        if (dtFiles.length) {
-                          const mockEvent = { target: { files: dtFiles } };
-                          handleEvidenceFileUpload(mockEvent);
-                        }
-                      }}
-                      role="button"
-                      aria-label="Evidence Dropzone"
-                      style={{ marginTop: 8 }}
-                    >
-                      <div className="dropzone-content">
-                        <div className="dropzone-icon"></div>
-                        <div className="dropzone-title">Upload Image</div>
-                        <div className="dropzone-subtitle">JPG, PNG • Drag and drop or click to select</div>
-                        <button
-                          type="button"
-                          className="btn btn-secondary dropzone-button"
-                          onClick={(e) => { e.stopPropagation(); primaryImageInputRef.current?.click(); }}
-                          disabled={loading}
-                        >
-                          Upload Image
-                        </button>
-                      </div>
-                      <input
-                        ref={primaryImageInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={handleEvidenceFileUpload}
-                        disabled={loading}
-                        className="file-input"
-                      />
-                    </div>
-                    <div className="inline-note" style={{ marginTop: 14 }}>
-                      Upload one or more photos.
-                    </div>
-                  </>
-                ) : withinRange && cameraPhotoUrls.length === 0 ? (
-                  <div className="inline-note" style={{ marginTop: 14, color: '#666', fontStyle: 'italic' }}>
-                    Capture at least one photo using the camera first to unlock device upload.
-                  </div>
-                ) : null}
-
                 {evidenceImages.length > 0 ? (
                   <div
                     style={{
