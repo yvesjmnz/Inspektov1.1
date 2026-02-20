@@ -962,6 +962,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                       }
                       placeholder="Full business address"
                       className="form-input"
+                      readOnly={!!formData.business_pk}
                       required
                     />
                   </div>
@@ -1147,48 +1148,65 @@ export default function ComplaintForm({ verifiedEmail }) {
                 ) : null}
 
                 {/* File upload (allowed when out of range, verification unavailable, or within range after camera capture) */}
-                {outOfRange || cameraPhotoUrls.length > 0 ? (
-                  <>
-                    <div className="inline-note" style={{ marginTop: 14 }}>
-                      Upload one or more photos.
-                    </div>
-                    <div className="file-upload" aria-label="Evidence (File Upload)" style={{ marginTop: 8 }}>
-                      <input
-                        ref={primaryImageInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={handleEvidenceFileUpload}
-                        disabled={loading}
-                        className="file-input"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => primaryImageInputRef.current?.click()}
-                        disabled={loading}
-                        className="btn btn-secondary"
-                      >
-                        Choose from Device
-                      </button>
-                    </div>
-                  </>
-                ) : withinRange && cameraPhotoUrls.length === 0 ? (
-                  <div className="inline-note" style={{ marginTop: 14, color: '#666', fontStyle: 'italic' }}>
-                    Capture at least one photo using the camera first to unlock device upload.
-                  </div>
-                ) : null}
-
                 {evidenceImages.length > 0 ? (
-                  <div className="file-list" style={{ marginTop: 10 }}>
+                  <div
+                    style={{
+                      marginTop: 10,
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
+                      gap: 10,
+                    }}
+                  >
                     {evidenceImages.map((url, index) => (
-                      <div key={`${url}-${index}`} className="file-item">
-                        <span>{url.split('/').pop()}</span>
+                      <div
+                        key={`${url}-${index}`}
+                        title={url.split('/').pop()}
+                        style={{
+                          position: 'relative',
+                          borderRadius: 12,
+                          overflow: 'visible',
+                          border: '1px solid #e2e8f0',
+                          background: '#fff',
+                          aspectRatio: '1 / 1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <img
+                          src={url}
+                          alt="Evidence"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
                         <button
                           type="button"
                           onClick={() => removeEvidenceImage(index)}
-                          className="btn-remove"
+                          aria-label="Remove image"
+                          style={{
+                            position: 'absolute',
+                            top: -10,
+                            right: -10,
+                            background: '#f3f4f6',
+                            color: '#ef4444',
+                            border: '1.5px solid #e5e7eb',
+                            boxShadow: '0 1px 2px rgba(15,23,42,0.15)',
+                            width: 20,
+                            height: 20,
+                            borderRadius: '50%',
+                            boxSizing: 'border-box',
+                            padding: 0,
+                            fontWeight: 900,
+                            fontSize: 12,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            lineHeight: 1,
+                            zIndex: 1,
+                            userSelect: 'none',
+                          }}
                         >
-                          Remove
+                          ×
                         </button>
                       </div>
                     ))}
