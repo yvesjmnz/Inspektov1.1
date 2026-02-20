@@ -15,6 +15,7 @@ import DashboardInspector from './modules/dashboard_module/pages/DashboardInspec
 import InspectorInspectionDetails from './modules/dashboard_module/pages/InspectorInspectionDetails';
 import MissionOrderEditor from './modules/mission_order_module/pages/MissionOrderEditor';
 import MissionOrderReview from './modules/mission_order_module/pages/MissionOrderReview';
+import InspectionSlipCreate from './modules/inspection_slip_module/pages/InspectionSlipCreate';
 import LandingPage from './LandingPage';
 import ComplaintView from './modules/complaints_module/pages/ComplaintView';
 import { supabase } from './lib/supabase';
@@ -69,6 +70,9 @@ function App() {
     if (path === '/mission-order') return normalizedRole === 'head_inspector';
     if (path === '/mission-order/review') return normalizedRole === 'director';
 
+    // Inspection slip
+    if (path === '/inspection-slip/create') return normalizedRole === 'inspector';
+
     // Complaint view (director only)
     if (path === '/complaints/view') return normalizedRole === 'director';
 
@@ -100,6 +104,7 @@ function App() {
         path === '/dashboard/inspector/inspection' ||
         path === '/mission-order' ||
         path === '/mission-order/review' ||
+        path === '/inspection-slip/create' ||
         path === '/complaints/view';
 
       let normalizedRole = null;
@@ -187,6 +192,8 @@ function App() {
         setCurrentPage('mission-order');
       } else if (path === '/mission-order/review') {
         setCurrentPage('mission-order-review');
+      } else if (path === '/inspection-slip/create') {
+        setCurrentPage('inspection-slip-create');
       } else if (path === '/complaints/view') {
         setCurrentPage('complaint-view');
       } else {
@@ -232,6 +239,8 @@ function App() {
         return <MissionOrderEditor />;
       case 'mission-order-review':
         return <MissionOrderReview />;
+      case 'inspection-slip-create':
+        return <InspectionSlipCreate />;
       case 'complaint-view':
         return <ComplaintView />;
       case 'no-permission':
