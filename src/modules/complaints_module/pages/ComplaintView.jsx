@@ -146,12 +146,6 @@ export default function ComplaintView() {
                 )}
               </div>
 
-              {/* Details (lower priority) */}
-              <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(240px, 1fr))', marginTop: 16 }}>
-                <div style={{ color: '#64748b', fontWeight: 700 }}>Reporter Email</div>
-                <div style={{ fontWeight: 700, color: '#0f172a' }}>{complaint.reporter_email || '—'}</div>
-              </div>
-
               {/* Audit (lowest priority) */}
               <div style={{ marginTop: 14 }}>
                 <div style={{ fontWeight: 800, marginBottom: 6, color: '#0f172a' }}>Audit</div>

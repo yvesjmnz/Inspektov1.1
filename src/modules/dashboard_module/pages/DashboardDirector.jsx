@@ -53,7 +53,17 @@ function formatDateNoSeconds(isoString) {
 }
 
 export default function DashboardDirector() {
-  const [tab, setTab] = useState('general'); // general | queue | mission-orders | history
+  // Initialize tab from URL query parameter, default to 'general'
+  const getInitialTab = () => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    if (tabParam && ['general', 'queue', 'mission-orders', 'history'].includes(tabParam)) {
+      return tabParam;
+    }
+    return 'general';
+  };
+
+  const [tab, setTab] = useState(getInitialTab); // general | queue | mission-orders | history
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
