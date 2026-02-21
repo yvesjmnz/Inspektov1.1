@@ -48,6 +48,8 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [firstSearchDone, setFirstSearchDone] = useState(false);
+  const [nameSearchQuery, setNameSearchQuery] = useState('');
   const [proximityVerified, setProximityVerified] = useState(false);
   const [proximityTag, setProximityTag] = useState(null);
   const [businessCoords, setBusinessCoords] = useState(null); // Store geocoded business location
@@ -100,7 +102,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
   };
 
-  const selectBusiness = (business) => {
+  const selectBusiness = (business, source = 'initial') => {
     setBusinessNotInDb(false);
 
     setFormData((prev) => ({
@@ -109,8 +111,18 @@ export default function ComplaintForm({ verifiedEmail }) {
       business_name: business.business_name,
       business_address: business.business_address,
     }));
+
+    // Close suggestions
     setShowBusinessList(false);
-    setSearchQuery('');
+
+    if (source === 'initial') {
+      setFirstSearchDone(true);
+      setSearchQuery('');
+      setNameSearchQuery(business.business_name || '');
+    } else {
+      // source === 'name'
+      setNameSearchQuery(business.business_name || '');
+    }
   };
 
   const clearSelectedBusiness = () => {
@@ -118,6 +130,8 @@ export default function ComplaintForm({ verifiedEmail }) {
     setBusinesses([]);
     setShowBusinessList(false);
     setSearchQuery('');
+    setNameSearchQuery('');
+    setFirstSearchDone(false);
     setProximityTag(null);
 
     setFormData((prev) => {
@@ -144,6 +158,24 @@ export default function ComplaintForm({ verifiedEmail }) {
       return `Invalid file format: ${file.name}. Only JPG, JPEG, and PNG are allowed.`;
     }
     return null;
+  };
+
+  const handleNameSearch = async (query) => {
+    setNameSearchQuery(query);
+    setError(null);
+
+    if (query.length > 2) {
+      try {
+        const results = await getBusinesses(query);
+        setBusinesses(results);
+        setShowBusinessList(true);
+      } catch (err) {
+        setError(err.message);
+      }
+    } else {
+      setBusinesses([]);
+      setShowBusinessList(false);
+    }
   };
 
   const handleEvidenceFileUpload = async (e) => {
@@ -799,18 +831,6 @@ export default function ComplaintForm({ verifiedEmail }) {
           {step === 1 ? (
             <>
               <div className="form-group">
-                <input
-                  id="business_search"
-                  aria-label="Business Search"
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => handleBusinessSearch(e.target.value)}
-                  placeholder="Search business name or address..."
-                  className="form-input"
-                  autoComplete="off"
-                  disabled={businessNotInDb}
-                />
-
                 <div className="check-row" style={{ marginTop: 10 }}>
                   <input
                     id="businessNotInDb"
@@ -841,46 +861,75 @@ export default function ComplaintForm({ verifiedEmail }) {
                     }}
                   />
                   <label htmlFor="businessNotInDb" style={{ margin: 0, fontWeight: 800, color: '#0f172a' }}>
-                    Business not listed (No-Permit violation)
+                    Business not listed? (No Permit Violation)
                   </label>
                 </div>
 
-                {showBusinessList && businesses.length > 0 ? (
-                  <div className="business-list">
-                    {businesses.map((business) => (
-                      <div
-                        key={business.business_pk}
-                        className="business-item"
-                        onClick={() => selectBusiness(business)}
-                      >
-                        <div className="business-name">{business.business_name}</div>
-                        <div className="business-address">{business.business_address}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                {formData.business_name ? (
-                  <div className="inline-note" style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-                    <div>
-                      {businessNotInDb ? (
-                        <>Manual entry: <strong>{formData.business_name}</strong></>
-                      ) : (
-                        <>Selected: <strong>{formData.business_name}</strong></>
-                      )}
-                    </div>
-
-                    {!businessNotInDb ? (
-                      <button type="button" className="btn btn-secondary" onClick={clearSelectedBusiness}>
-                        Remove selection
-                      </button>
-                    ) : null}
-                  </div>
-                ) : (
+                {!formData.business_name ? (
                   <div className="inline-note">
                     {businessNotInDb ? 'Enter the business name below.' : 'Select from the list to auto-fill the address.'}
                   </div>
+                ) : null}
+
+                {!businessNotInDb && (!firstSearchDone || !formData.business_name) && (
+                  <>
+                    <input
+                      id="business_search"
+                      aria-label="Business Search"
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => handleBusinessSearch(e.target.value)}
+                      placeholder="Search business name or address..."
+                      className="form-input"
+                      autoComplete="off"
+                    />
+
+                    {showBusinessList && businesses.length > 0 ? (
+                      <div className="business-list">
+                        {businesses.map((business) => (
+                          <div
+                            key={business.business_pk}
+                            className="business-item"
+                            onClick={() => selectBusiness(business, 'initial')}
+                          >
+                            <div className="business-name">{business.business_name}</div>
+                            <div className="business-address">{business.business_address}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
                 )}
+
+                {!businessNotInDb && firstSearchDone && formData.business_name ? (
+                  <div className="form-group" style={{ marginTop: 8 }}>
+                    <label htmlFor="business_name_search">Business Name</label>
+                    <input
+                      id="business_name_search"
+                      type="text"
+                      value={nameSearchQuery || formData.business_name}
+                      onChange={(e) => handleNameSearch(e.target.value)}
+                      className="form-input"
+                      placeholder="Search or change business name"
+                      autoComplete="off"
+                    />
+
+                    {showBusinessList && businesses.length > 0 ? (
+                      <div className="business-list">
+                        {businesses.map((business) => (
+                          <div
+                            key={business.business_pk}
+                            className="business-item"
+                            onClick={() => selectBusiness(business, 'name')}
+                          >
+                            <div className="business-name">{business.business_name}</div>
+                            <div className="business-address">{business.business_address}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               {businessNotInDb ? (
@@ -900,35 +949,40 @@ export default function ComplaintForm({ verifiedEmail }) {
                 </div>
               ) : null}
 
-              <div className="form-group">
-                <label htmlFor="business_address">Business Address</label>
-                <input
-                  id="business_address"
-                  type="text"
-                  value={formData.business_address}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, business_address: e.target.value }))
-                  }
-                  placeholder="Full business address"
-                  className="form-input"
-                  required
-                />
-              </div>
+              {(businessNotInDb || (firstSearchDone && formData.business_name)) ? (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="business_address">Business Address</label>
+                    <input
+                      id="business_address"
+                      type="text"
+                      value={formData.business_address}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, business_address: e.target.value }))
+                      }
+                      placeholder="Full business address"
+                      className="form-input"
+                      readOnly={!!formData.business_pk}
+                      required
+                    />
+                  </div>
 
-              <div className="form-group">
-                <label htmlFor="reporter_email">Your Email</label>
-                <input
-                  id="reporter_email"
-                  type="email"
-                  value={formData.reporter_email}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, reporter_email: e.target.value }))
-                  }
-                  className="form-input"
-                  required
-                  disabled={true}
-                />
-                              </div>
+                  <div className="form-group">
+                    <label htmlFor="reporter_email">Your Email</label>
+                    <input
+                      id="reporter_email"
+                      type="email"
+                      value={formData.reporter_email}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, reporter_email: e.target.value }))
+                      }
+                      className="form-input"
+                      required
+                      disabled={true}
+                    />
+                                  </div>
+                </>
+              ) : null}
             </>
           ) : null}
 
@@ -1094,48 +1148,65 @@ export default function ComplaintForm({ verifiedEmail }) {
                 ) : null}
 
                 {/* File upload (allowed when out of range, verification unavailable, or within range after camera capture) */}
-                {outOfRange || cameraPhotoUrls.length > 0 ? (
-                  <>
-                    <div className="inline-note" style={{ marginTop: 14 }}>
-                      Upload one or more photos.
-                    </div>
-                    <div className="file-upload" aria-label="Evidence (File Upload)" style={{ marginTop: 8 }}>
-                      <input
-                        ref={primaryImageInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={handleEvidenceFileUpload}
-                        disabled={loading}
-                        className="file-input"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => primaryImageInputRef.current?.click()}
-                        disabled={loading}
-                        className="btn btn-secondary"
-                      >
-                        Choose from Device
-                      </button>
-                    </div>
-                  </>
-                ) : withinRange && cameraPhotoUrls.length === 0 ? (
-                  <div className="inline-note" style={{ marginTop: 14, color: '#666', fontStyle: 'italic' }}>
-                    Capture at least one photo using the camera first to unlock device upload.
-                  </div>
-                ) : null}
-
                 {evidenceImages.length > 0 ? (
-                  <div className="file-list" style={{ marginTop: 10 }}>
+                  <div
+                    style={{
+                      marginTop: 10,
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
+                      gap: 10,
+                    }}
+                  >
                     {evidenceImages.map((url, index) => (
-                      <div key={`${url}-${index}`} className="file-item">
-                        <span>{url.split('/').pop()}</span>
+                      <div
+                        key={`${url}-${index}`}
+                        title={url.split('/').pop()}
+                        style={{
+                          position: 'relative',
+                          borderRadius: 12,
+                          overflow: 'visible',
+                          border: '1px solid #e2e8f0',
+                          background: '#fff',
+                          aspectRatio: '1 / 1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <img
+                          src={url}
+                          alt="Evidence"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
                         <button
                           type="button"
                           onClick={() => removeEvidenceImage(index)}
-                          className="btn-remove"
+                          aria-label="Remove image"
+                          style={{
+                            position: 'absolute',
+                            top: -10,
+                            right: -10,
+                            background: '#f3f4f6',
+                            color: '#ef4444',
+                            border: '1.5px solid #e5e7eb',
+                            boxShadow: '0 1px 2px rgba(15,23,42,0.15)',
+                            width: 20,
+                            height: 20,
+                            borderRadius: '50%',
+                            boxSizing: 'border-box',
+                            padding: 0,
+                            fontWeight: 900,
+                            fontSize: 12,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            lineHeight: 1,
+                            zIndex: 1,
+                            userSelect: 'none',
+                          }}
                         >
-                          Remove
+                          ×
                         </button>
                       </div>
                     ))}

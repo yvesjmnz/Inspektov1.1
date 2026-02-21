@@ -16,6 +16,7 @@ import InspectorInspectionDetails from './modules/dashboard_module/pages/Inspect
 import MissionOrderEditor from './modules/mission_order_module/pages/MissionOrderEditor';
 import MissionOrderReview from './modules/mission_order_module/pages/MissionOrderReview';
 import ComplaintReview from './modules/complaints_module/pages/ComplaintReview';
+import InspectionSlipCreate from './modules/inspection_slip_module/pages/InspectionSlipCreate';
 import LandingPage from './LandingPage';
 import ComplaintView from './modules/complaints_module/pages/ComplaintView';
 import { supabase } from './lib/supabase';
@@ -70,6 +71,9 @@ function App() {
     if (path === '/mission-order') return normalizedRole === 'head_inspector';
     if (path === '/mission-order/review') return normalizedRole === 'director';
 
+    // Inspection slip
+    if (path === '/inspection-slip/create') return normalizedRole === 'inspector';
+
     // Complaint view (director only)
     if (path === '/complaints/view') return normalizedRole === 'director';
     if (path === '/complaint/review') return normalizedRole === 'director';
@@ -103,7 +107,8 @@ function App() {
         path === '/mission-order' ||
         path === '/mission-order/review' ||
         path === '/complaints/view' ||
-        path === '/complaint/review';
+        path === '/complaint/review' ||
+        path === '/inspection-slip/create';
 
       let normalizedRole = null;
       if (isProtected) {
@@ -190,6 +195,8 @@ function App() {
         setCurrentPage('mission-order');
       } else if (path === '/mission-order/review') {
         setCurrentPage('mission-order-review');
+      } else if (path === '/inspection-slip/create') {
+        setCurrentPage('inspection-slip-create');
       } else if (path === '/complaints/view') {
         setCurrentPage('complaint-view');
       } else if (path === '/complaint/review') {
@@ -237,6 +244,8 @@ function App() {
         return <MissionOrderEditor />;
       case 'mission-order-review':
         return <MissionOrderReview />;
+      case 'inspection-slip-create':
+        return <InspectionSlipCreate />;
       case 'complaint-view':
         return <ComplaintView />;
       case 'complaint-review':

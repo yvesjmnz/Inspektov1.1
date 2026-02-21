@@ -262,12 +262,13 @@ export default function DashboardInspector() {
                   <th style={{ width: 200 }}>Assigned</th>
                   <th style={{ width: 200 }}>Updated</th>
                   <th style={{ width: 180 }}>Details</th>
+                  <th style={{ width: 190 }}>Inspection Slip</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredAssigned.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
                       {loading ? 'Loading…' : 'No assigned inspections found.'}
                     </td>
                   </tr>
@@ -286,9 +287,14 @@ export default function DashboardInspector() {
                       <td>{r.assigned_at ? new Date(r.assigned_at).toLocaleString() : '—'}</td>
                       <td>{r.mission_order_updated_at ? new Date(r.mission_order_updated_at).toLocaleString() : '—'}</td>
                       <td>
-                        <a className="dash-link" href={`/dashboard/inspector/inspection?id=${r.mission_order_id}`}>
-                          Open
-                        </a>
+                      <a className="dash-link" href={`/dashboard/inspector/inspection?id=${r.mission_order_id}`}>
+                      Open
+                      </a>
+                      </td>
+                      <td>
+                      <a className="dash-link" href={`/inspection-slip/create?missionOrderId=${r.mission_order_id}`}>
+                      Start Inspection
+                      </a>
                       </td>
                     </tr>
                   ))
