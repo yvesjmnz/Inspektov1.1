@@ -15,6 +15,7 @@ import DashboardInspector from './modules/dashboard_module/pages/DashboardInspec
 import InspectorInspectionDetails from './modules/dashboard_module/pages/InspectorInspectionDetails';
 import MissionOrderEditor from './modules/mission_order_module/pages/MissionOrderEditor';
 import MissionOrderReview from './modules/mission_order_module/pages/MissionOrderReview';
+import ComplaintReview from './modules/complaints_module/pages/ComplaintReview';
 import LandingPage from './LandingPage';
 import ComplaintView from './modules/complaints_module/pages/ComplaintView';
 import { supabase } from './lib/supabase';
@@ -71,6 +72,7 @@ function App() {
 
     // Complaint view (director only)
     if (path === '/complaints/view') return normalizedRole === 'director';
+    if (path === '/complaint/review') return normalizedRole === 'director';
 
     // Public routes
     return true;
@@ -100,7 +102,8 @@ function App() {
         path === '/dashboard/inspector/inspection' ||
         path === '/mission-order' ||
         path === '/mission-order/review' ||
-        path === '/complaints/view';
+        path === '/complaints/view' ||
+        path === '/complaint/review';
 
       let normalizedRole = null;
       if (isProtected) {
@@ -189,6 +192,8 @@ function App() {
         setCurrentPage('mission-order-review');
       } else if (path === '/complaints/view') {
         setCurrentPage('complaint-view');
+      } else if (path === '/complaint/review') {
+        setCurrentPage('complaint-review');
       } else {
         setCurrentPage('home');
       }
@@ -234,6 +239,8 @@ function App() {
         return <MissionOrderReview />;
       case 'complaint-view':
         return <ComplaintView />;
+      case 'complaint-review':
+        return <ComplaintReview />;
       case 'no-permission':
         return <NoPermission />;
       default:

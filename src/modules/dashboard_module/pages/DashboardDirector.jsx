@@ -84,7 +84,7 @@ export default function DashboardDirector() {
   const [missionOrders, setMissionOrders] = useState([]);
   const [search, setSearch] = useState('');
   const [auditComplaint, setAuditComplaint] = useState(null);
-  // Full complaint popup state
+  // Full complaint sidebar state (for history tab audit view)
   const [fullViewId, setFullViewId] = useState(null);
   const [fullViewLoading, setFullViewLoading] = useState(false);
   const [fullViewError, setFullViewError] = useState('');
@@ -1059,7 +1059,7 @@ export default function DashboardDirector() {
                               return (
                                 <tr
                                   key={c.id}
-                                  onClick={() => openFullComplaint(c.id)}
+                                  onClick={() => window.location.assign(`/complaint/review?id=${c.id}`)}
                                   style={{
                                     cursor: 'pointer',
                                     borderBottom: '1px solid #e2e8f0',
