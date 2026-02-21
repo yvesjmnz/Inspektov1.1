@@ -22,6 +22,10 @@
   padding: 40px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.3);
+  display: flex;              
+  flex-direction: column;      
+  position: relative;         
+  padding-bottom: 72px;    
 }
 
 .track-title {
@@ -29,11 +33,13 @@
   font-size: 24px;
   font-weight: 700;
   color: #0f172a;
+  text-align: center;
 }
 
 .track-subtitle {
   margin: 0 0 18px;
   color: #475569;
+  text-align: center;
 }
 
 .track-form {
@@ -331,7 +337,7 @@
 
 .track-meta-container {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr; 
   gap: 32px;
   margin-top: 12px;
   align-items: start;
@@ -355,6 +361,15 @@
   align-items: baseline;
   gap: 8px;
   line-height: 1.4;
+}
+
+.track-meta-item .monospace {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  white-space: nowrap;   
+  overflow: visible;     
+  text-overflow: clip;   
+  display: inline-block;
+  max-width: 100%;      
 }
 
 .track-meta-right .track-meta-item {
@@ -434,8 +449,7 @@
 }
 
 .director-decision-status {
-  display: inline-flex;
-  align-items: center;
+  display: none !important;
 }
 
 .director-decision-reason {
@@ -743,16 +757,41 @@
 }
 
 .track-help {
-  margin-top: 16px;
+  position: absolute;         
+  left: 40px;                  
+  right: 40px;                 
+  bottom: 24px;                
+  transform: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  width: auto;                 
+  margin: 0;                  
+  text-align: center;
+  padding-top: 12px;           
+  border-top: 1px solid #e2e8f0;
+}
+
+.track-card .track-help {
+  grid-column: 1 / -1;
 }
 
 .track-back {
-  color: #2563eb;
-  font-weight: 700;
+  color: #0f172a;
+  font-weight: 600; 
   text-decoration: none;
+  font-size: 13px;
 }
 
-.track-back:hover {
+.track-help-text {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.track-back:hover,
+.track-back:focus-visible {
   text-decoration: underline;
 }
 
@@ -760,12 +799,14 @@
   .track-card {
     padding: 32px;
   }
+  .track-help { left: 32px; right: 32px; }
 }
 
 @media (max-width: 768px) {
   .track-card {
     padding: 28px;
   }
+  .track-help { left: 28px; right: 28px; }
 
   .track-result-header .track-title {
     font-size: 24px;
@@ -796,6 +837,16 @@
 @media (max-width: 600px) {
   .track-card {
     padding: 24px;
+  }
+
+  .track-help { left: 24px; right: 24px; width: auto; }
+
+  .track-meta-item .monospace {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    max-width: 100%;
+    word-break: break-all;
   }
 
   .track-input-row {
@@ -895,6 +946,7 @@
   .track-card {
     padding: 20px;
   }
+  .track-help { left: 20px; right: 20px; }
 
   .track-title {
     font-size: 20px;
@@ -931,4 +983,110 @@
     padding: 10px 20px;
     font-size: 13px;
   }
+}
+
+/* Complaint Progress Card (vertical timeline) */
+.progress-card {
+  margin: 8px 0 24px 0;
+  padding: 16px 18px;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.progress-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.progress-card-header-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  filter: grayscale(100%) brightness(0.45);
+  opacity: 0.9;
+}
+
+.progress-card-title {
+  font-size: 12px;
+  font-weight: 900;
+  color: #0f172a;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+/* Vertical timeline rail */
+.vtl {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.vtl-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px 1fr; /* marker + content */
+  align-items: start;
+  column-gap: 14px;
+}
+
+/* vertical connector between steps */
+.vtl-step::before {
+  content: '';
+  position: absolute;
+  left: 20px; /* half of 40px marker column */
+  top: 44px; /* starts just under the marker */
+  width: 2px;
+  height: calc(100% - 44px);
+  background: #e2e8f0;
+}
+.vtl-step:last-child::before { display: none; }
+
+/* markers */
+.vtl-marker {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 14px;
+  color: #1f2937;
+  background: #fff;
+  border: 2px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+.vtl-step.active .vtl-marker {
+  background: #2563eb; /* blue */
+  color: #fff;
+  border-color: #2563eb;
+}
+.vtl-step.completed .vtl-marker {
+  background: #dcfce7; /* green tint */
+  color: #166534;
+  border-color: #86efac;
+}
+
+/* content */
+.vtl-content { display: flex; flex-direction: column; gap: 6px; }
+.vtl-title { font-size: 16px; font-weight: 800; color: #0f172a; }
+.vtl-step.inactive .vtl-title { color: #334155; font-weight: 700; }
+.vtl-desc { font-size: 13px; color: #64748b; }
+.vtl-detail { font-size: 12px; color: #0f172a; }
+.vtl-detail-label { font-weight: 800; color: #334155; margin-right: 4px; }
+.vtl-detail-value.status-approved { color: #166534; font-weight: 800; }
+.vtl-detail-value.status-declined { color: #b91c1c; font-weight: 800; }
+
+@media (max-width: 600px) {
+  .progress-card { padding: 14px; }
+  .vtl { gap: 16px; }
+  .vtl-step { grid-template-columns: 36px 1fr; column-gap: 12px; }
+  .vtl-step::before { left: 18px; top: 40px; height: calc(100% - 40px); }
+  .vtl-marker { width: 36px; height: 36px; font-size: 13px; }
+  .vtl-title { font-size: 15px; }
+  .vtl-desc { font-size: 12px; }
 }

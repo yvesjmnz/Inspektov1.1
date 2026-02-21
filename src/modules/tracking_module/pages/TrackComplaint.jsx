@@ -110,6 +110,7 @@ export default function TrackComplaint() {
               {error ? <div className="track-alert track-alert-error">{error}</div> : null}
 
               <div className="track-help">
+                <span className="track-help-text">Need to file a new complaint? </span>
                 <a className="track-back" href="/">Back to Home</a>
               </div>
             </>
@@ -130,114 +131,69 @@ export default function TrackComplaint() {
                   </div>
                 </div>
               </div>
-              {/* Progress Indicator with Dates */}
-              <div className="progress-indicator">
-                <div className="progress-steps">
-                  {PROGRESS_STEPS.map((step, index) => {
-                    const currentStep = getStatusStep(complaint.status);
-                    const isCompleted = index < currentStep;
-                    const isCurrent = index === currentStep;
-                    
-                    let dateDisplay = '—';
-                    
-                    if (index === 0 && complaint.created_at) {
-                      // Submitted step uses created_at
-                      dateDisplay = new Date(complaint.created_at).toLocaleString();
-                    } else if (isCurrent && complaint.updated_at) {
-                      // Current step uses updated_at
-                      dateDisplay = new Date(complaint.updated_at).toLocaleString();
-                    } else if (isCompleted && complaint.updated_at) {
-                      // Completed steps use updated_at as fallback
-                      dateDisplay = new Date(complaint.updated_at).toLocaleString();
-                    } else if (!isCompleted && !isCurrent) {
-                      // Future steps show Pending
-                      dateDisplay = 'Pending';
-                    }
-                    
-                    return (
-                      <div key={index} className="progress-step-wrapper" title={dateDisplay}>
-                        <div
-                          className={`progress-step ${isCompleted ? 'completed' : ''} ${isCurrent && !(String(complaint.status || '').toLowerCase() === 'approved' || String(complaint.status || '').toLowerCase() === 'declined') ? 'current' : ''} ${String(complaint.status || '').toLowerCase() === 'approved' && index === 1 ? 'approved' : ''} ${String(complaint.status || '').toLowerCase() === 'declined' && index === 1 ? 'declined' : ''}`}
-                        >
-                          {(() => {
-                            const s = String(complaint.status || '').toLowerCase();
-                            const isFinalDecisionStep = index === 1;
-                            const isApproved = s === 'approved';
-                            const isDeclined = s === 'declined';
+              {/* Vertical Complaint Progress */}
+              {(() => {
+                const s = String(complaint.status || '').toLowerCase();
+                const currentStep = (() => {
+                  if (["approved", "declined"].includes(s)) return 2;
+                  if (["under_review", "under review", "in_progress", "in progress", "processing"].includes(s)) return 1;
+                  return 0; // submitted/new/pending/default
+                })();
 
-                            // Industry-standard: show clear final outcome indicator on the final step.
-                            if (isFinalDecisionStep && (isApproved || isDeclined)) {
-                              return isApproved ? '✓' : '✕';
-                            }
+                const receivedDate = complaint.created_at ? new Date(complaint.created_at).toLocaleString() : '—';
+                const reviewDate = complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—';
+                const decisionDate = (() => {
+                  if (s === 'approved') return complaint.approved_at ? new Date(complaint.approved_at).toLocaleString() : (complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—');
+                  if (s === 'declined') return complaint.declined_at ? new Date(complaint.declined_at).toLocaleString() : (complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—');
+                  return '—';
+                })();
+                const decisionLabel = s === 'approved' ? 'Approved' : s === 'declined' ? 'Declined' : 'Pending';
 
-                            // Keep original behavior for other steps.
-                            return isCompleted ? '✓' : index + 1;
-                          })()}
+                return (
+                  <div className="progress-card">
+                    <div className="progress-card-header">
+                      <img src="/ui_icons/revision.png" alt="" className="progress-card-header-icon" />
+                      <span className="progress-card-title">COMPLAINT PROGRESS</span>
+                    </div>
+                    <div className="vtl">
+                      {/* Step 1 - Complaint Received */}
+                      <div className={`vtl-step completed`}>
+                        <div className="vtl-marker">✓</div>
+                        <div className="vtl-content">
+                          <div className="vtl-title">Complaint Received</div>
+                          <div className="vtl-desc">Your complaint has been logged in our system</div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{receivedDate}</span></div>
                         </div>
-                        <div className="progress-step-label">
-                          {(() => {
-                            if (index !== 1) return step;
-                            const s = String(complaint.status || '').toLowerCase();
-                            if (s === 'approved') return 'Approved';
-                            if (s === 'declined') return 'Declined';
-                            return 'Decision';
-                          })()}
-                        </div>
-                        <div className="progress-step-tooltip">{dateDisplay}</div>
-                        {index < PROGRESS_STEPS.length - 1 && (
-                          <div className={`progress-line ${isCompleted ? 'completed' : ''}`}></div>
-                        )}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
+
+                      {/* Step 2 - Under Review */}
+                      <div className={`vtl-step ${["approved", "declined"].includes(s) ? 'completed' : 'active'}`}>
+                        <div className="vtl-marker">{["approved", "declined"].includes(s) ? '✓' : 2}</div>
+                        <div className="vtl-content">
+                          <div className="vtl-title">Under Review</div>
+                          <div className="vtl-desc">Director is reviewing your complaint</div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{currentStep === 1 ? 'Pending Review' : (currentStep > 1 ? 'Completed' : 'Queued')}</span></div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{reviewDate}</span></div>
+                        </div>
+                      </div>
+
+                      {/* Step 3 - Decision Made */}
+                      <div className={`vtl-step ${["approved","declined"].includes(s) ? 'active' : (currentStep > 2 ? 'completed' : 'inactive')}`}>
+                        <div className="vtl-marker">{["approved","declined"].includes(s) ? (s === 'approved' ? '✓' : '✕') : 3}</div>
+                        <div className="vtl-content">
+                          <div className="vtl-title">Decision Made</div>
+                          <div className="vtl-desc">Final decision has been issued</div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${s === 'approved' ? 'status-approved' : s === 'declined' ? 'status-declined' : ''}`}>{decisionLabel}</span></div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Decision Date:</span> <span className="vtl-detail-value">{decisionDate}</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Director Decision (industry-standard: clear outcome + timestamp + reason for decline) */}
               <div className="complaint-summary">
-                <div className="summary-row-full">
-                  <div className="summary-card summary-card-with-footer summary-card-decision">
-                    <div>
-                      <div className="summary-item-header">
-                        <img src="/ui_icons/revision.png" alt="Decision" className="summary-item-icon" style={{ filter: 'brightness(0) saturate(100%)' }} />
-                        <span className="summary-label">Director Decision</span>
-                      </div>
-                      <div className="director-decision-body">
-                        {(() => {
-                          const s = String(complaint.status || '').toLowerCase();
-                          const isApproved = s === 'approved';
-                          const isDeclined = s === 'declined';
-
-                          const label = isApproved ? 'Approved' : isDeclined ? 'Declined' : formatStatus(complaint.status);
-
-                          return (
-                            <span className="director-decision-status">
-                              <span className={statusBadgeClass(complaint.status)}>{label}</span>
-                            </span>
-                          );
-                        })()}
-
-                        {String(complaint.status || '').toLowerCase() === 'declined' && complaint.decline_comment ? (
-                          <div className="director-decision-reason" role="note" aria-label="Reason for decision">
-                            <div className="director-decision-reason-label">Reason</div>
-                            <div className="director-decision-reason-text">{complaint.decline_comment}</div>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="summary-card-footer">
-                      <span className="summary-footer-label">Decision date:</span>
-                      <span className="summary-footer-value">
-                        {String(complaint.status || '').toLowerCase() === 'approved'
-                          ? (complaint.approved_at ? new Date(complaint.approved_at).toLocaleString() : (complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—'))
-                          : String(complaint.status || '').toLowerCase() === 'declined'
-                          ? (complaint.declined_at ? new Date(complaint.declined_at).toLocaleString() : (complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—'))
-                          : 'Pending'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
                 {/* Complaint Summary - 2-Column Grid Layout */}
                 {/* Row 1: Business (Left) + Address (Right) */}
                 <div className="summary-row-2col">

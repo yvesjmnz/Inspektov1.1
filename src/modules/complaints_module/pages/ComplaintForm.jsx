@@ -1194,7 +1194,59 @@ export default function ComplaintForm({ verifiedEmail }) {
                   </>
                 ) : null}
 
-                {/* File upload (allowed when out of range, verification unavailable, or within range after camera capture) */}
+                {/* File upload (show drag/drop when user is out of range) */}
+                {outOfRange ? (
+                  <>
+                    <div
+                      className={`dropzone ${loading ? '' : ''}`}
+                      onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('hover'); }}
+                      onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('hover'); }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.classList.remove('hover');
+                        if (loading) return;
+                        const dtFiles = Array.from(e.dataTransfer.files || []);
+                        if (dtFiles.length) {
+                          const mockEvent = { target: { files: dtFiles } };
+                          handleEvidenceFileUpload(mockEvent);
+                        }
+                      }}
+                      role="button"
+                      aria-label="Evidence Dropzone"
+                      style={{ marginTop: 10 }}
+                    >
+                      <div className="dropzone-content">
+                        <div className="dropzone-icon"></div>
+                        <div className="dropzone-title">Upload Image</div>
+                        <div className="dropzone-subtitle">JPG, PNG • Drag and drop or click to select</div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary dropzone-button"
+                          onClick={(e) => { e.stopPropagation(); additionalImageInputRef.current?.click(); }}
+                          disabled={loading}
+                        >
+                          Upload Image
+                        </button>
+                      </div>
+                      <input
+                        ref={additionalImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleEvidenceFileUpload}
+                        disabled={loading}
+                        className="file-input"
+                      />
+                    </div>
+
+                    <div className="inline-note" style={{ marginTop: 10 }}>
+                      Upload one or more photos from your device. You can add up to 5 photos.
+                    </div>
+
+                    <div style={{ marginTop: 8 }}><span className="small-pill">{evidenceImages.length} / 5 added</span></div>
+                  </>
+                ) : null}
+
                 {evidenceImages.length > 0 ? (
                   <div
                     style={{
