@@ -1094,52 +1094,99 @@ export default function ComplaintForm({ verifiedEmail }) {
                 {!outOfRange ? (
                   <>
                     <div className="file-upload" aria-label="Evidence (Camera Controls)" style={{ flexWrap: 'wrap', marginTop: 10 }}>
-                      <button
-                        type="button"
-                        onClick={openCameraFlow}
-                        disabled={loading || cameraBusy}
-                        className="btn btn-secondary"
-                      >
-                        {cameraBusy ? 'Opening…' : (cameraOpen ? 'Camera Open' : 'Open Camera')}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={switchCamera}
-                        disabled={loading || cameraBusy || !cameraOpen}
-                        className="btn btn-secondary"
-                      >
-                        Switch Camera
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={closeCamera}
-                        disabled={loading || cameraBusy || !cameraOpen}
-                        className="btn btn-secondary"
-                      >
-                        Close
-                      </button>
-
-                      <span className="small-pill">{evidenceImages.length} added</span>
+                      {!cameraOpen ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={openCameraFlow}
+                            disabled={loading || cameraBusy}
+                            className="btn btn-secondary"
+                          >
+                            {cameraBusy ? 'Opening…' : 'Open Camera'}
+                          </button>
+                          <span className="small-pill">{evidenceImages.length} added</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="small-pill">{evidenceImages.length} added</span>
+                        </>
+                      )}
                     </div>
 
                     {cameraError ? <div className="error-message">{cameraError}</div> : null}
 
                     {cameraOpen ? (
                       <div style={{ marginTop: 12 }}>
-                        <div className="camera-box">
+                        <div className="camera-box" style={{ position: 'relative' }}>
                           <video ref={videoRef} playsInline muted autoPlay className="camera-video" />
-                        </div>
-
-                        <div className="form-nav" style={{ marginTop: 12 }}>
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: 12,
+                              right: 12,
+                              bottom: 12,
+                              display: 'grid',
+                              gridTemplateColumns: '1fr auto 1fr',
+                              alignItems: 'center',
+                              columnGap: 16,
+                              background: 'transparent',
+                              padding: '0 12px',
+                              borderRadius: 12
+                            }}
+                          >
+                            <div style={{ justifySelf: 'end' }}>
+                              <button
+                                type="button"
+                                onClick={switchCamera}
+                                disabled={loading || cameraBusy}
+                                className="btn btn-secondary"
+                                style={{ width: 40, height: 40, borderRadius: '999px', padding: 0, display: 'inline-flex' }}
+                                aria-label="Switch Camera"
+                                title="Switch Camera"
+                                >
+                                <img src="/ui_icons/switch-camera.png" alt="Switch" style={{ width: 18, height: 18, filter: 'invert(1) brightness(2) contrast(100%)' }} />
+                                </button>
+                            </div>
+                            <div style={{ justifySelf: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={captureFromCamera}
+                                disabled={loading || cameraBusy}
+                                className="btn btn-primary"
+                                style={{ width: 64, height: 64, borderRadius: '999px', padding: 0, boxShadow: '0 6px 16px rgba(0,0,0,0.25)', display: 'inline-flex' }}
+                                aria-label="Capture Photo"
+                                title="Capture Photo"
+                              >
+                                <img src="/ui_icons/camera.png" alt="Capture" style={{ width: 26, height: 26, filter: 'invert(1) brightness(2) contrast(100%)' }} />
+                              </button>
+                            </div>
+                            <div />
+                          </div>
                           <button
                             type="button"
-                            className="btn btn-primary"
-                            onClick={captureFromCamera}
+                            onClick={closeCamera}
                             disabled={loading || cameraBusy}
+                            aria-label="Close Camera"
+                            title="Close Camera"
+                            className="btn"
+                            style={{
+                              position: 'absolute',
+                              top: 10,
+                              right: 10,
+                              width: 40,
+                              height: 40,
+                              borderRadius: '999px',
+                              padding: 0,
+                              background: '#ffffff',
+                              color: '#dc2626',
+                              border: '1.5px solid #e5e7eb',
+                              boxShadow: '0 4px 10px rgba(0,0,0,0.2)',
+                              fontWeight: 900,
+                              lineHeight: '40px',
+                              textAlign: 'center'
+                            }}
                           >
-                            {cameraBusy ? 'Capturing…' : 'Capture Photo'}
+                            ×
                           </button>
                         </div>
                       </div>
@@ -1301,7 +1348,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                       }
                     }}
                   />
-                  <label htmlFor="confirmTruth" style={{ margin: 0, fontWeight: 800, color: '#0f172a' }}>
+                  <label htmlFor="confirmTruth" style={{ margin: 0, fontWeight: 500, color: '#0f172a' }}>
                     I confirm that the details are true and inaccurate information may lead to the non-processing of the complaint.
                   </label>
                 </div>

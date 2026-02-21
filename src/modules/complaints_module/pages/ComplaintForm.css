@@ -299,6 +299,19 @@
   background: #111827;
 }
 
+/* Danger button for critical actions in Step 3 when within 200m */
+.btn-danger {
+  background: #dc2626; /* red-600 */
+  color: #fff;
+}
+.btn-danger:hover {
+  background: #b91c1c; /* red-700 */
+}
+.btn-danger:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .btn-large {
   width: 100%;
 }
@@ -412,11 +425,18 @@
 }
 
 .camera-box {
-  height: 340px;
+  height: 540px; /* increased for portrait-like preview */
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid #e2e8f0;
   background: #0b1220;
+}
+
+/* Make the camera slightly shorter on smaller screens for usability */
+@media (max-width: 700px) {
+  .camera-box {
+    height: 440px;
+  }
 }
 
 .camera-video {
@@ -451,7 +471,7 @@
 
 .review-value {
   color: #334155;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .review-image-grid {

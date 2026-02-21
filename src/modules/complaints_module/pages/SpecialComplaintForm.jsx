@@ -892,7 +892,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                       }
                     }}
                   />
-                  <label htmlFor="confirmTruth" style={{ margin: 0, fontWeight: 800, color: '#0f172a' }}>
+                  <label htmlFor="confirmTruth" style={{ margin: 0, fontWeight: 500, color: '#0f172a' }}>
                     I confirm that the details are true and inaccurate information may lead to the non-processing of the complaint.
                   </label>
                 </div>
