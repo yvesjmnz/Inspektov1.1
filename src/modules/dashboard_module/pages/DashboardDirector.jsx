@@ -1069,7 +1069,7 @@ export default function DashboardDirector() {
                               return (
                                 <tr
                                   key={c.id}
-                                  onClick={() => window.location.assign(`/complaint/review?id=${c.id}`)}
+                                  onClick={() => window.location.assign(`/complaint/review?id=${c.id}&source=${tab}`)}
                                   style={{
                                     cursor: 'pointer',
                                     borderBottom: '1px solid #e2e8f0',
@@ -1192,10 +1192,6 @@ export default function DashboardDirector() {
               )}
             </div>
           )}
-
-          <div className="dash-note">
-            Note: Inspection monitoring, audit trails, reports, exports, and printing will be implemented next.
-          </div>
             </div>
           </div>
         </section>

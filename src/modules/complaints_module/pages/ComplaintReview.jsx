@@ -57,6 +57,13 @@ export default function ComplaintReview() {
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
 
+  // Determine which tab the user came from (queue or history)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const source = params.get('source') || 'queue'; // default to queue
+    sessionStorage.setItem('complaintReviewSource', source);
+  }, []);
+
   const handleCopyId = () => {
     if (complaint?.id) {
       navigator.clipboard.writeText(complaint.id);
@@ -70,6 +77,26 @@ export default function ComplaintReview() {
     const t = setTimeout(() => setToast(''), 3500);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Handle keyboard navigation in full-picture mode
+  useEffect(() => {
+    if (!previewImage || !complaint?.image_urls) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const n = complaint.image_urls.length;
+        setEvidenceIndex((i) => (i - 1 + n) % n);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const n = complaint.image_urls.length;
+        setEvidenceIndex((i) => (i + 1) % n);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewImage, complaint?.image_urls]);
 
   const load = async () => {
     if (!complaintId) {
@@ -199,6 +226,10 @@ export default function ComplaintReview() {
       return;
     }
     await updateComplaintStatus('approved');
+    // Navigate back to review complaints after approval
+    setTimeout(() => {
+      window.location.href = '/dashboard/director?tab=queue';
+    }, 100);
   };
 
   const handleReject = async () => {
@@ -213,6 +244,10 @@ export default function ComplaintReview() {
     }
 
     await updateComplaintStatus('declined');
+    // Navigate back to review complaints after decline
+    setTimeout(() => {
+      window.location.href = '/dashboard/director?tab=queue';
+    }, 100);
   };
 
   const handleLogout = async () => {
@@ -251,7 +286,7 @@ export default function ComplaintReview() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
                 {/* Back Button - Top Left */}
                 <a
-                  href="/dashboard/director"
+                  href="/dashboard/director?tab=queue"
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -279,7 +314,7 @@ export default function ComplaintReview() {
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
                     <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  Back to Review Queue
+                  Back to Review Complaints
                 </a>
 
                 {/* Action Buttons - Top Right */}
@@ -619,7 +654,118 @@ export default function ComplaintReview() {
             <button className="overlay-close" onClick={() => setPreviewImage(null)} aria-label="Close">
               &times;
             </button>
-            <img src={previewImage} alt="Evidence Preview" className="overlay-full-img" />
+            
+            {/* Left Arrow Button */}
+            {complaint?.image_urls && complaint.image_urls.length > 1 && (
+              <button
+                type="button"
+                aria-label="Previous image"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const n = complaint.image_urls.length;
+                  setEvidenceIndex((i) => (i - 1 + n) % n);
+                }}
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: 20,
+                  transform: 'translateY(-50%)',
+                  background: 'rgba(15,23,42,0.85)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 999,
+                  width: 50,
+                  height: 50,
+                  display: 'grid',
+                  placeItems: 'center',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                  padding: 0,
+                  lineHeight: 0,
+                  boxSizing: 'border-box',
+                  zIndex: 10,
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(15,23,42,0.95)';
+                  e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(15,23,42,0.85)';
+                  e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+                }}
+              >
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ display: 'block' }}>
+                  <path d="M15 18L9 12L15 6" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
+
+            {/* Right Arrow Button */}
+            {complaint?.image_urls && complaint.image_urls.length > 1 && (
+              <button
+                type="button"
+                aria-label="Next image"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const n = complaint.image_urls.length;
+                  setEvidenceIndex((i) => (i + 1) % n);
+                }}
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  right: 20,
+                  transform: 'translateY(-50%)',
+                  background: 'rgba(15,23,42,0.85)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 999,
+                  width: 50,
+                  height: 50,
+                  display: 'grid',
+                  placeItems: 'center',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                  padding: 0,
+                  lineHeight: 0,
+                  boxSizing: 'border-box',
+                  zIndex: 10,
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(15,23,42,0.95)';
+                  e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(15,23,42,0.85)';
+                  e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+                }}
+              >
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ display: 'block' }}>
+                  <path d="M10 6L16 12L10 18" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
+
+            {/* Image Counter */}
+            {complaint?.image_urls && complaint.image_urls.length > 1 && (
+              <div style={{
+                position: 'absolute',
+                bottom: 20,
+                right: 20,
+                background: 'rgba(15,23,42,0.85)',
+                color: '#fff',
+                fontWeight: 800,
+                padding: '8px 14px',
+                borderRadius: 8,
+                fontSize: 14,
+                zIndex: 10,
+              }}>
+                {evidenceIndex + 1} / {complaint.image_urls.length}
+              </div>
+            )}
+
+            <img src={complaint?.image_urls?.[evidenceIndex] || previewImage} alt="Evidence Preview" className="overlay-full-img" />
           </div>
         </div>
       ) : null}

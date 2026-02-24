@@ -145,6 +145,51 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
 
   const navItems = getNavItems();
 
+  // Determine active nav item based on current URL
+  const getActiveNavItem = () => {
+    const path = window.location.pathname;
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+
+    // For complaint review page, check if we came from queue or history
+    if (path === '/complaint/review') {
+      const referrerTab = sessionStorage.getItem('complaintReviewSource');
+      if (referrerTab === 'history') {
+        return 'Complaint History';
+      }
+      return 'Review Complaints'; // default to queue
+    }
+
+    // For mission order review page
+    if (path === '/mission-order/review') {
+      return 'Review Mission Orders';
+    }
+
+    // For dashboard pages with tabs
+    if (path === '/dashboard/director') {
+      if (tab === 'queue') return 'Review Complaints';
+      if (tab === 'history') return 'Complaint History';
+      if (tab === 'mission-orders') return 'Review Mission Orders';
+      return 'Dashboard';
+    }
+
+    if (path === '/dashboard/head-inspector') {
+      if (tab === 'todo') return 'To Do';
+      if (tab === 'issued') return 'Issued';
+      if (tab === 'for-inspection') return 'For Inspection';
+      if (tab === 'revisions') return 'Revisions';
+      return 'Dashboard';
+    }
+
+    if (path === '/dashboard/inspector') {
+      return 'Dashboard';
+    }
+
+    return null;
+  };
+
+  const activeItem = getActiveNavItem();
+
   return (
     <aside
       className="dash-side"
@@ -180,11 +225,12 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           }
 
           // Navigation item
+          const isActive = item.label === activeItem;
           return (
             <li key={`nav-${idx}`}>
               <button
                 type="button"
-                className="dash-nav-item"
+                className={`dash-nav-item ${isActive ? 'active' : ''}`}
                 onClick={() => window.location.assign(item.href)}
               >
                 <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
