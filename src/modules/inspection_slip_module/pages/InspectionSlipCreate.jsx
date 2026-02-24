@@ -20,6 +20,23 @@ export default function InspectionSlipCreate() {
   const [businessResult, setBusinessResult] = useState(null);
   const [checkingBusiness, setCheckingBusiness] = useState(false);
 
+  const [ownerDetails, setOwnerDetails] = useState({
+    lastName: '',
+    firstName: '',
+    middleName: '',
+    businessName: '',
+  });
+
+  const [businessDetails, setBusinessDetails] = useState({
+    bin: '',
+    address: '',
+    estimatedAreaSqm: '',
+    numberOfEmployees: '',
+    landline: '',
+    cellphone: '',
+    email: '',
+  });
+
   const [lineOfBusiness, setLineOfBusiness] = useState('');
 
   const [checklist, setChecklist] = useState({
@@ -85,6 +102,24 @@ export default function InspectionSlipCreate() {
 
     loadMissionOrder();
   }, [missionOrderId]);
+
+  const handleUseBusiness = (b) => {
+    if (!b) return;
+    setOwnerDetails((prev) => ({
+      ...prev,
+      businessName: b.business_name || prev.businessName,
+    }));
+    setBusinessDetails((prev) => ({
+      ...prev,
+      bin: b.epermit_no || b.permit_number || prev.bin,
+      address:
+        b.address ||
+        b.business_address ||
+        b.full_address ||
+        b.business_address1 ||
+        prev.address,
+    }));
+  };
 
   const handleCheckBusiness = async () => {
     if (!businessSearch.trim()) {
@@ -153,7 +188,264 @@ export default function InspectionSlipCreate() {
           ) : (
             <div style={{ display: 'grid', gap: 14, marginTop: 14 }}>
               <div>
-                <div className="mo-label">Step 1: Validate Business Permit</div>
+                <div className="mo-label">[SECTION 1 REQUIRED] Business Owner Details</div>
+                <div
+                  style={{
+                    marginTop: 10,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: 10,
+                  }}
+                >
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Last Name
+                    </div>
+                    <input
+                      value={ownerDetails.lastName}
+                      onChange={(e) =>
+                        setOwnerDetails((prev) => ({ ...prev, lastName: e.target.value }))
+                      }
+                      placeholder="Enter last name"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      First Name
+                    </div>
+                    <input
+                      value={ownerDetails.firstName}
+                      onChange={(e) =>
+                        setOwnerDetails((prev) => ({ ...prev, firstName: e.target.value }))
+                      }
+                      placeholder="Enter first name"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Middle Name
+                    </div>
+                    <input
+                      value={ownerDetails.middleName}
+                      onChange={(e) =>
+                        setOwnerDetails((prev) => ({ ...prev, middleName: e.target.value }))
+                      }
+                      placeholder="Enter middle name"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Business Name
+                    </div>
+                    <input
+                      value={ownerDetails.businessName}
+                      onChange={(e) =>
+                        setOwnerDetails((prev) => ({ ...prev, businessName: e.target.value }))
+                      }
+                      placeholder="Enter business name"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="mo-label">[SECTION 2 REQUIRED] Business Details</div>
+                <div
+                  style={{
+                    marginTop: 10,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: 10,
+                  }}
+                >
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      BIN #
+                    </div>
+                    <input
+                      value={businessDetails.bin}
+                      onChange={(e) =>
+                        setBusinessDetails((prev) => ({ ...prev, bin: e.target.value }))
+                      }
+                      placeholder="Enter BIN #"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Address
+                    </div>
+                    <input
+                      value={businessDetails.address}
+                      onChange={(e) =>
+                        setBusinessDetails((prev) => ({ ...prev, address: e.target.value }))
+                      }
+                      placeholder="Address (autofilled when selecting a business, editable)"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Estimated Area (in SQM)
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      value={businessDetails.estimatedAreaSqm}
+                      onChange={(e) =>
+                        setBusinessDetails((prev) => ({
+                          ...prev,
+                          estimatedAreaSqm: e.target.value,
+                        }))
+                      }
+                      placeholder="Enter estimated area"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      No. of Employees
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      value={businessDetails.numberOfEmployees}
+                      onChange={(e) =>
+                        setBusinessDetails((prev) => ({
+                          ...prev,
+                          numberOfEmployees: e.target.value,
+                        }))
+                      }
+                      placeholder="Enter number of employees"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Landline #
+                    </div>
+                    <input
+                      value={businessDetails.landline}
+                      onChange={(e) =>
+                        setBusinessDetails((prev) => ({ ...prev, landline: e.target.value }))
+                      }
+                      placeholder="Enter landline #"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Cellphone #
+                    </div>
+                    <input
+                      value={businessDetails.cellphone}
+                      onChange={(e) =>
+                        setBusinessDetails((prev) => ({ ...prev, cellphone: e.target.value }))
+                      }
+                      placeholder="Enter cellphone #"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Email Address
+                    </div>
+                    <input
+                      type="email"
+                      value={businessDetails.email}
+                      onChange={(e) =>
+                        setBusinessDetails((prev) => ({ ...prev, email: e.target.value }))
+                      }
+                      placeholder="Enter email address"
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '0 12px',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="mo-label">Step 3: Validate Business Permit</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
                   <input
                     value={businessSearch}
@@ -196,12 +488,19 @@ export default function InspectionSlipCreate() {
                               borderRadius: 12,
                               padding: 10,
                               background: '#fff',
+                              cursor: 'pointer',
                             }}
+                            onClick={() => handleUseBusiness(b)}
                           >
                             <div style={{ fontWeight: 900, color: '#0f172a' }}>{b.business_name || '—'}</div>
                             <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
                               Permit: {b.epermit_no || '—'}
                             </div>
+                            {b.address || b.business_address || b.full_address ? (
+                              <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
+                                Address: {b.address || b.business_address || b.full_address}
+                              </div>
+                            ) : null}
                             {b.permit_status ? (
                               <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
                                 Status: {b.permit_status}
@@ -216,7 +515,7 @@ export default function InspectionSlipCreate() {
               </div>
 
               <div>
-                <div className="mo-label">Step 2: Line of Business</div>
+                <div className="mo-label">Step 4: Line of Business</div>
                 <input
                   value={lineOfBusiness}
                   onChange={(e) => setLineOfBusiness(e.target.value)}
@@ -234,7 +533,7 @@ export default function InspectionSlipCreate() {
               </div>
 
               <div>
-                <div className="mo-label">Step 3: Compliance Checklist</div>
+                <div className="mo-label">Step 5: Compliance Checklist</div>
                 <div className="mo-meta" style={{ marginTop: 6 }}>
                   Mark items as compliant/non-compliant during the inspection.
                 </div>
