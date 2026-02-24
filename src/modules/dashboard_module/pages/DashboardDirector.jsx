@@ -1026,10 +1026,34 @@ export default function DashboardDirector() {
                         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                           {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
                         </h3>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
-                          <span>{pendingCount} Pending {pendingCount === 1 ? 'Complaint' : 'Complaints'}</span>
-                        </div>
+                        {tab === 'history' ? (
+                          // Statistics for history tab
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
+                            {/* Total */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span>Total</span>
+                              <span>{pendingCount}</span>
+                            </div>
+                            <span>|</span>
+                            {/* Approved */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#22c55e' }}>
+                              <span>Approved</span>
+                              <span>{dayGroup.items.filter(c => String(c.status || '').toLowerCase() === 'approved').length}</span>
+                            </div>
+                            <span>|</span>
+                            {/* Declined */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#ef4444' }}>
+                              <span>Declined</span>
+                              <span>{dayGroup.items.filter(c => String(c.status || '').toLowerCase() === 'declined').length}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          // Pending count for queue tab
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
+                            <span>{pendingCount} Pending {pendingCount === 1 ? 'Complaint' : 'Complaints'}</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Table for this day */}
@@ -1045,9 +1069,8 @@ export default function DashboardDirector() {
                                 </>
                               ) : (
                                 <>
-                                  <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Urgency</th>
+                                  <th style={{ width: 180, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaint Status</th>
                                   <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
-                                  <th style={{ width: 240, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaint Status</th>
                                   <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
                                 </>
                               )}
@@ -1103,14 +1126,11 @@ export default function DashboardDirector() {
                                   ) : tab === 'history' ? (
                                     <>
                                       <td style={{ padding: '12px' }}>
-                                        <span className="status-badge" style={{ ...getUrgencyStyle(c?.authenticity_level).badge, fontWeight: 700, fontSize: 13, padding: '6px 12px', borderRadius: 6, display: 'inline-block' }}>{c?.authenticity_level ?? '—'}</span>
+                                        <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
                                       </td>
                                       <td style={{ padding: '12px' }}>
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
                                         <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                      </td>
-                                      <td style={{ padding: '12px' }}>
-                                        <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
                                       </td>
                                       <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
                                     </>

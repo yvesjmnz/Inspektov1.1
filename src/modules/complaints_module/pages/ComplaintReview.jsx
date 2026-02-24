@@ -12,6 +12,15 @@ function formatStatus(status) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function statusBadgeClass(status) {
+  const s = String(status || '').toLowerCase();
+  if (['approved'].includes(s)) return 'status-badge status-success';
+  if (['declined', 'rejected', 'invalid'].includes(s)) return 'status-badge status-danger';
+  if (['submitted', 'pending', 'new'].includes(s)) return 'status-badge status-warning';
+  if (['on hold', 'on_hold', 'hold'].includes(s)) return 'status-badge status-info';
+  return 'status-badge';
+}
+
 function getUrgencyStyle(urgency) {
   const u = Number(urgency);
   if (u === 100) {
@@ -403,11 +412,17 @@ export default function ComplaintReview() {
                     padding: 24,
                     position: 'relative',
                   }}>
-                    {/* Urgency Tag - Top Right */}
+                    {/* Badge - Top Right (Urgency for queue, Status for history) */}
                     <div style={{ position: 'absolute', top: 24, right: 24 }}>
-                      <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 800, fontSize: 14, padding: '8px 14px' }}>
-                        {complaint?.authenticity_level ?? '—'}
-                      </span>
+                      {source === 'history' ? (
+                        <span className={statusBadgeClass(complaint?.status)} style={{ fontWeight: 800, fontSize: 14, padding: '8px 14px' }}>
+                          {formatStatus(complaint?.status) ?? '—'}
+                        </span>
+                      ) : (
+                        <span className="status-badge" style={{ ...getUrgencyStyle(complaint?.authenticity_level).badge, fontWeight: 800, fontSize: 14, padding: '8px 14px' }}>
+                          {complaint?.authenticity_level ?? '—'}
+                        </span>
+                      )}
                     </div>
 
                     {/* Business Name - Large Title */}
@@ -568,77 +583,104 @@ export default function ComplaintReview() {
                   </div>
 
                   {/* General Comments Card */}
-                  <div style={{
-                    background: '#f8fafc',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 16,
-                    boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
-                    padding: 16,
-                  }}>
-                    <style>{`
-                      textarea:focus {
-                        border-color: #2563eb !important;
-                        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
-                      }
-                    `}</style>
-                    
-                    {/* Title */}
-                    <label htmlFor="declineComment" style={{ display: 'block', marginBottom: 12 }}>
-                      <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 16, marginBottom: 8 }}>
+                  {source === 'history' ? (
+                    <div style={{
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 16,
+                      boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
+                      padding: 16,
+                    }}>
+                      <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 16, marginBottom: 12 }}>
                         General Comments
                       </div>
-                      
-                      {/* Rule Hints - Small rows */}
-                      <div style={{ display: 'grid', gap: 4 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                          <span style={{ color: '#dc2626', fontWeight: 800 }}>•</span> Required if Declining
-                        </div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                          <span style={{ color: '#22c55e', fontWeight: 800 }}>•</span> Optional if Approving
-                        </div>
-                      </div>
-                    </label>
-
-                    {/* Textarea */}
-                    <textarea
-                      id="declineComment"
-                      value={declineComment}
-                      onChange={(e) => setDeclineComment(e.target.value)}
-                      placeholder="Provide the reason for declining, or optional instructions if approving…"
-                      disabled={loading || savingDecision}
-                      style={{
-                        width: '100%',
-                        minHeight: 110,
-                        borderRadius: 12,
-                        border: declineCommentError ? '1px solid #ef4444' : '1px solid #cbd5e1',
-                        background: '#fff',
-                        color: '#0f172a',
-                        padding: 12,
-                        outline: 'none',
-                        fontSize: 14,
-                        fontFamily: 'inherit',
-                        transition: 'all 0.2s ease',
-                        resize: 'vertical',
-                        marginTop: 8,
-                      }}
-                    />
-
-                    {/* Validation Message - Only show when declining and empty */}
-                    {declineCommentError && (
                       <div style={{
-                        marginTop: 8,
-                        padding: 8,
-                        background: '#fee2e2',
-                        border: '1px solid #fecaca',
-                        borderRadius: 8,
-                        color: '#991b1b',
-                        fontSize: 12,
-                        fontWeight: 700,
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 12,
+                        padding: 12,
+                        color: '#0f172a',
+                        fontSize: 14,
+                        lineHeight: 1.6,
+                        whiteSpace: 'pre-wrap',
+                        minHeight: 110,
                       }}>
-                        {declineCommentError}
+                        {declineComment || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No comments</span>}
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 16,
+                      boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
+                      padding: 16,
+                    }}>
+                      <style>{`
+                        textarea:focus {
+                          border-color: #2563eb !important;
+                          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+                        }
+                      `}</style>
+                      
+                      {/* Title */}
+                      <label htmlFor="declineComment" style={{ display: 'block', marginBottom: 12 }}>
+                        <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 16, marginBottom: 8 }}>
+                          General Comments
+                        </div>
+                        
+                        {/* Rule Hints - Small rows */}
+                        <div style={{ display: 'grid', gap: 4 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
+                            <span style={{ color: '#dc2626', fontWeight: 800 }}>•</span> Required if Declining
+                          </div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
+                            <span style={{ color: '#22c55e', fontWeight: 800 }}>•</span> Optional if Approving
+                          </div>
+                        </div>
+                      </label>
+
+                      {/* Textarea */}
+                      <textarea
+                        id="declineComment"
+                        value={declineComment}
+                        onChange={(e) => setDeclineComment(e.target.value)}
+                        placeholder="Provide the reason for declining, or optional instructions if approving…"
+                        disabled={loading || savingDecision}
+                        style={{
+                          width: '100%',
+                          minHeight: 110,
+                          borderRadius: 12,
+                          border: declineCommentError ? '1px solid #ef4444' : '1px solid #cbd5e1',
+                          background: '#fff',
+                          color: '#0f172a',
+                          padding: 12,
+                          outline: 'none',
+                          fontSize: 14,
+                          fontFamily: 'inherit',
+                          transition: 'all 0.2s ease',
+                          resize: 'vertical',
+                          marginTop: 8,
+                        }}
+                      />
+
+                      {/* Validation Message - Only show when declining and empty */}
+                      {declineCommentError && (
+                        <div style={{
+                          marginTop: 8,
+                          padding: 8,
+                          background: '#fee2e2',
+                          border: '1px solid #fecaca',
+                          borderRadius: 8,
+                          color: '#991b1b',
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}>
+                          {declineCommentError}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
