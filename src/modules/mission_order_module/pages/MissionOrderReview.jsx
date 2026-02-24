@@ -58,7 +58,7 @@ export default function MissionOrderReview() {
       const { data: mo, error: moError } = await supabase
         .from('mission_orders')
         .select(
-          'id, title, content, status, complaint_id, created_at, updated_at, submitted_at, submitted_by, reviewed_at, reviewed_by, director_comment, created_by'
+          'id, title, content, status, complaint_id, created_at, updated_at, submitted_at, submitted_by, reviewed_at, reviewed_by, director_comment, director_signature_url, created_by'
         )
         .eq('id', missionOrderId)
         .single();
@@ -158,7 +158,21 @@ export default function MissionOrderReview() {
 
       // Render HTML safely (this app stores MO content as HTML; we assume only trusted users can edit it)
       if (previewRef.current) {
-        previewRef.current.innerHTML = mo?.content || '';
+        let contentToDisplay = mo?.content || '';
+        
+        // If mission order is approved and has a signature, inject it above the director's name
+        if (mo?.director_signature_url && String(mo?.status || '').toLowerCase() === 'for inspection') {
+          // Insert signature image directly above "LEVI C. FACUNDO" line
+          const signatureImg = `<img src="${mo.director_signature_url}" alt="Director Signature" style="max-width: 120px; height: auto; display: block; margin: 0 auto 2px auto; padding: 0;" />`;
+          
+          // Match the exact pattern: <p style="margin: 0; font-weight: 800;">LEVI C. FACUNDO</p>
+          contentToDisplay = contentToDisplay.replace(
+            /(<p style="margin: 0; font-weight: 800;">LEVI C\. FACUNDO<\/p>)/i,
+            signatureImg + '$1'
+          );
+        }
+        
+        previewRef.current.innerHTML = contentToDisplay;
       }
     } catch (e) {
       setError(e?.message || 'Failed to load mission order.');
@@ -244,6 +258,11 @@ export default function MissionOrderReview() {
         reviewed_at: nowIso,
         updated_at: nowIso,
       };
+
+      // Add director's e-signature URL only on approval
+      if (nextStatus === 'for inspection') {
+        patch.director_signature_url = 'https://nxmenhwpxtknrgvarioe.supabase.co/storage/v1/object/sign/e-signature%20bucket/634074338_937186158874457_7418890435965105244_n-removebg-preview.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV80MGY2ZWI5OS1iM2FjLTRmYzMtYjRlMS1kMTUyMTFjOTg5ODgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJlLXNpZ25hdHVyZSBidWNrZXQvNjM0MDc0MzM4XzkzNzE4NjE1ODg3NDQ1N183NDE4ODkwNDM1OTY1MTA1MjQ0X24tcmVtb3ZlYmctcHJldmlldy5wbmciLCJpYXQiOjE3NzE5NDMxNjIsImV4cCI6MTkyOTYyMzE2Mn0.h6eRnX-BS0hCB2-47DUnGDTAhHhg8k1DWqUO62qwxUY';
+      }
 
       const { error: updateError } = await supabase.from('mission_orders').update(patch).eq('id', missionOrderId);
       if (updateError) throw updateError;

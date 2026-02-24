@@ -412,12 +412,30 @@ export default function ComplaintReview() {
                     padding: 24,
                     position: 'relative',
                   }}>
-                    {/* Badge - Top Right (Urgency for queue, Status for history) */}
+                    {/* Badge - Top Right (Tags for queue, Status for history) */}
                     <div style={{ position: 'absolute', top: 24, right: 24 }}>
                       {source === 'history' ? (
                         <span className={statusBadgeClass(complaint?.status)} style={{ fontWeight: 800, fontSize: 14, padding: '8px 14px' }}>
                           {formatStatus(complaint?.status) ?? '—'}
                         </span>
+                      ) : Array.isArray(complaint?.tags) && complaint?.tags.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+                          {complaint.tags.map((tag, idx) => (
+                            <span
+                              key={idx}
+                              style={{
+                                ...getUrgencyStyle(complaint?.authenticity_level).badge,
+                                fontWeight: 700,
+                                fontSize: 12,
+                                padding: '6px 12px',
+                                borderRadius: 999,
+                                display: 'inline-block'
+                              }}
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
                       ) : (
                         <span className="status-badge" style={{ ...getUrgencyStyle(complaint?.authenticity_level).badge, fontWeight: 800, fontSize: 14, padding: '8px 14px' }}>
                           {complaint?.authenticity_level ?? '—'}
@@ -579,6 +597,32 @@ export default function ComplaintReview() {
                           <div style={{ color: '#64748b', fontWeight: 700, fontSize: 13 }}>No images</div>
                         )}
                       </div>
+
+                      {/* Tags Label - Only show in history view (not in queue review) */}
+                      {source === 'history' && Array.isArray(complaint.tags) && complaint.tags.length > 0 && (
+                        <>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Tags</div>
+                          {/* Tags Value */}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                            {complaint.tags.map((tag, idx) => (
+                              <span
+                                key={idx}
+                                style={{
+                                  background: '#e0e7ff',
+                                  color: '#1e3a8a',
+                                  fontWeight: 700,
+                                  border: '1px solid #c7d2fe',
+                                  padding: '6px 12px',
+                                  borderRadius: 999,
+                                  fontSize: 13
+                                }}
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 

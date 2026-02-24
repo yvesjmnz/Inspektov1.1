@@ -20,6 +20,20 @@ function statusBadgeClass(status) {
   return 'status-badge';
 }
 
+function getUrgencyText(authenticityLevel) {
+  const u = Number(authenticityLevel);
+  if (u < 50) {
+    return 'For monitoring and records only';
+  }
+  if (u === 50) {
+    return 'Schedule Inspection';
+  }
+  if (u > 50) {
+    return 'For Immediate Inspection';
+  }
+  return '—';
+}
+
 function getUrgencyStyle(urgency) {
   const u = Number(urgency);
   if (u === 100) {
@@ -57,13 +71,13 @@ export default function DashboardDirector() {
   const getInitialTab = () => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
-    if (tabParam && ['general', 'queue', 'mission-orders', 'history'].includes(tabParam)) {
+    if (tabParam && ['general', 'queue', 'mission-orders', 'mission-orders-history', 'history'].includes(tabParam)) {
       return tabParam;
     }
     return 'general';
   };
 
-  const [tab, setTab] = useState(getInitialTab); // general | queue | mission-orders | history
+  const [tab, setTab] = useState(getInitialTab); // general | queue | mission-orders | mission-orders-history | history
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -82,8 +96,12 @@ export default function DashboardDirector() {
         subtitle: 'Browse past decisions and view audit details.',
       },
       'mission-orders': {
-        title: 'Review Mission Orders',
-        subtitle: 'Review and action mission orders issued for director approval.',
+        title: 'Review Pending Mission Orders',
+        subtitle: 'Review and action mission orders awaiting director approval.',
+      },
+      'mission-orders-history': {
+        title: 'Mission Order History',
+        subtitle: 'Browse all mission orders and track their status.',
       },
     };
 
@@ -260,7 +278,7 @@ export default function DashboardDirector() {
     try {
       let query = supabase
         .from('complaints')
-        .select('id, status, created_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, approved_by, approved_at, declined_by, declined_at')
+        .select('id, status, created_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, approved_by, approved_at, declined_by, declined_at, tags')
         .order('created_at', { ascending: false })
         .limit(200);
 
@@ -354,6 +372,8 @@ export default function DashboardDirector() {
 
       if (tab === 'mission-orders') {
         query = query.eq('status', 'issued');
+      } else if (tab === 'mission-orders-history') {
+        query = query.eq('status', 'for inspection');
       }
 
       const searchVal = search.trim();
@@ -374,7 +394,7 @@ export default function DashboardDirector() {
   };
 
   useEffect(() => {
-    if (tab === 'mission-orders') {
+    if (tab === 'mission-orders' || tab === 'mission-orders-history') {
       loadMissionOrders();
     } else if (tab === 'general') {
       // Load both datasets for the overview
@@ -478,7 +498,7 @@ export default function DashboardDirector() {
   // Group complaints by day for Review Complaints
   const complaintsByDay = useMemo(() => {
     // Group by day for both queue and history tabs
-    if (tab === 'mission-orders') return { groups: {}, sortedKeys: [] };
+    if (tab === 'mission-orders' || tab === 'mission-orders-history') return { groups: {}, sortedKeys: [] };
     const groups = {};
     for (const c of filteredComplaints) {
       const d = c.created_at ? new Date(c.created_at) : null;
@@ -501,6 +521,31 @@ export default function DashboardDirector() {
     const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1)); // desc by date key YYYY-MM-DD
     return { groups, sortedKeys };
   }, [filteredComplaints, tab]);
+
+  // Group mission orders by day for Mission Order History
+  const missionOrdersByDay = useMemo(() => {
+    if (tab !== 'mission-orders-history') return { groups: {}, sortedKeys: [] };
+    const groups = {};
+    for (const mo of filteredMissionOrders) {
+      const d = mo.submitted_at ? new Date(mo.submitted_at) : null;
+      const key = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10) : 'unknown';
+      if (!groups[key]) {
+        const label = d ? d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }) : 'Unknown Date';
+        groups[key] = { label, items: [] };
+      }
+      groups[key].items.push(mo);
+    }
+    // Sort items within each day by submitted_at descending (newest first)
+    for (const key in groups) {
+      groups[key].items.sort((a, b) => {
+        const timeA = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+        const timeB = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
+        return timeB - timeA;
+      });
+    }
+    const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
+    return { groups, sortedKeys };
+  }, [filteredMissionOrders, tab]);
 
   // Utilities: export and print
   const toCsvValue = (v) => {
@@ -595,7 +640,7 @@ export default function DashboardDirector() {
     try {
       const { data, error } = await supabase
         .from('complaints')
-        .select('*')
+        .select('id, status, created_at, updated_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, approved_by, approved_at, declined_by, declined_at, tags')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -842,6 +887,14 @@ export default function DashboardDirector() {
                     <img src="/ui_icons/mo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Review Mission Orders</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'mission-orders-history' ? 'active' : ''}`} onClick={() => setTab('mission-orders-history')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Mission Order History</span>
                 </button>
               </li>
                                                       </ul>
@@ -1195,6 +1248,112 @@ export default function DashboardDirector() {
                 </tbody>
               </table>
             </div>
+          ) : tab === 'mission-orders-history' ? (
+            <div style={{ display: 'grid', gap: 20 }}>
+              {filteredMissionOrders.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                  {loading ? 'Loading…' : 'No records found.'}
+                </div>
+              ) : (
+                missionOrdersByDay.sortedKeys.map((dayKey) => {
+                  const dayGroup = missionOrdersByDay.groups[dayKey];
+                  const label = dayGroup?.label || dayKey;
+                  const itemCount = dayGroup?.items?.length || 0;
+                  
+                  if (itemCount === 0) return null;
+                  
+                  return (
+                    <div
+                      key={`day-card-${dayKey}`}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 14,
+                        boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                        overflow: 'hidden',
+                        transition: 'box-shadow 0.2s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                      }}
+                    >
+                      {/* Day Header */}
+                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                          {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
+                        </h3>
+                        {/* Statistics for mission order history */}
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>Total</span>
+                            <span>{itemCount}</span>
+                          </div>
+                          <span>|</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#22c55e' }}>
+                            <span>For Inspection</span>
+                            <span>{dayGroup.items.filter(mo => String(mo.status || '').toLowerCase() === 'for inspection').length}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Table for this day */}
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                            <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                              <th style={{ width: 120, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO ID</th>
+                              <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Title</th>
+                              <th style={{ width: 180, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
+                              <th style={{ width: 220, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
+                              <th style={{ width: 220, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                            {dayGroup.items.map((mo) => (
+                              <tr
+                                key={mo.id}
+                                style={{
+                                  cursor: 'pointer',
+                                  borderBottom: '1px solid #e2e8f0',
+                                  transition: 'background-color 0.2s ease',
+                                  position: 'relative',
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = '#f8fafc';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = '#ffffff';
+                                }}
+                              >
+                                <td style={{ padding: '12px' }} title={mo.id}>{String(mo.id).slice(0, 8)}…</td>
+                                <td style={{ padding: '12px' }}>
+                          <div className="dash-cell-title">{mo.title || 'Mission Order'}</div>
+                          <div className="dash-cell-sub">Complaint: {mo.complaint_id ? String(mo.complaint_id).slice(0, 8) + '…' : '—'}</div>
+                        </td>
+                                <td style={{ padding: '12px' }}>
+                          <span className={statusBadgeClass(mo.status)}>{formatStatus(mo.status)}</span>
+                        </td>
+                                <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(mo.submitted_at)}</td>
+                                <td style={{ padding: '12px' }}>
+                          <div className="dash-row-actions">
+                            <a className="dash-btn" href={`/mission-order/review?id=${mo.id}`}>
+                              Review MO
+                            </a>
+                          </div>
+                        </td>
+                      </tr>
+                            ))}
+                </tbody>
+              </table>
+            </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           ) : (
             <div style={{ display: 'grid', gap: 20 }}>
               {filteredComplaints.length === 0 ? (
@@ -1323,7 +1482,7 @@ export default function DashboardDirector() {
                                   {tab === 'queue' ? (
                                     <>
                                       <td style={{ padding: '12px' }}>
-                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 700, fontSize: 13, padding: '6px 12px', borderRadius: 6, display: 'inline-block' }}>{c?.authenticity_level ?? '—'}</span>
+                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 700, fontSize: 13, padding: '6px 12px', borderRadius: 6, display: 'inline-block' }}>{getUrgencyText(c?.authenticity_level)}</span>
                                       </td>
                                       <td style={{ padding: '12px' }}>
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
