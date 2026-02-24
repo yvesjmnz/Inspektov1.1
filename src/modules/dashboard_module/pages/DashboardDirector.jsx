@@ -1045,13 +1045,10 @@ export default function DashboardDirector() {
                                 </>
                               ) : (
                                 <>
-                                  <th style={{ width: 90, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>ID</th>
+                                  <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Urgency</th>
                                   <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
-                                  <th style={{ width: 240, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
-                                  {tab === 'history' ? <th style={{ width: 280, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Decision</th> : null}
-                                  <th style={{ width: 180, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Authenticity Level</th>
+                                  <th style={{ width: 240, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaint Status</th>
                                   <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
-                                  <th style={{ width: 280, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Evidence</th>
                                 </>
                               )}
                             </tr>
@@ -1103,83 +1100,21 @@ export default function DashboardDirector() {
                                       </td>
                                       <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
                                     </>
-                                  ) : (
+                                  ) : tab === 'history' ? (
                                     <>
-                                      <td style={{ padding: '12px', color: '#0f172a', fontWeight: 700 }}>{c.id}</td>
+                                      <td style={{ padding: '12px' }}>
+                                        <span className="status-badge" style={{ ...getUrgencyStyle(c?.authenticity_level).badge, fontWeight: 700, fontSize: 13, padding: '6px 12px', borderRadius: 6, display: 'inline-block' }}>{c?.authenticity_level ?? '—'}</span>
+                                      </td>
                                       <td style={{ padding: '12px' }}>
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
                                         <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                        <div className="dash-cell-sub">{c.reporter_email || ''}</div>
                                       </td>
                                       <td style={{ padding: '12px' }}>
                                         <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
                                       </td>
-                                      {tab === 'history' ? (
-                                        <td style={{ padding: '12px' }}>
-                                          <div className="dash-cell-sub">
-                                            {(() => {
-                                              const s = String(c.status || '').toLowerCase();
-                                              if (s === 'approved') {
-                                                const approverLabel = c.approved_by ? String(c.approved_by).slice(0, 8) + '…' : '—';
-                                                return `Approved by ${approverLabel} on ${c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}`;
-                                              }
-                                              if (s === 'declined') {
-                                                const declinerLabel = c.declined_by ? String(c.declined_by).slice(0, 8) + '…' : '—';
-                                                return `Declined by ${declinerLabel} on ${c.declined_at ? new Date(c.declined_at).toLocaleString() : '—'}`;
-                                              }
-                                              return '—';
-                                            })()}
-                                          </div>
-                                          <div style={{ marginTop: 6 }}>
-                                            <button className="dash-link" type="button" onClick={() => setAuditComplaint(c)}>View audit</button>
-                                          </div>
-                                        </td>
-                                      ) : null}
-                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c?.authenticity_level ?? '—'}</td>
                                       <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
-                                      <td style={{ padding: '12px' }}>
-                                        <div style={{ display: 'grid', gap: 8 }}>
-                                          {c?.complaint_description ? (
-                                            <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap', fontSize: 13 }}>
-                                              {String(c.complaint_description).slice(0, 220)}
-                                              {String(c.complaint_description).length > 220 ? '…' : ''}
-                                            </div>
-                                          ) : (
-                                            <div style={{ color: '#64748b', fontWeight: 700 }}>No description</div>
-                                          )}
-
-                                          {Array.isArray(c?.image_urls) && c.image_urls.length > 0 ? (
-                                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                              {c.image_urls.slice(0, 3).map((url) => (
-                                                <img
-                                                  key={url}
-                                                  src={url}
-                                                  alt="Evidence"
-                                                  onClick={() => setPreviewImage(url)}
-                                                  style={{
-                                                    width: 68,
-                                                    height: 46,
-                                                    objectFit: 'cover',
-                                                    borderRadius: 10,
-                                                    border: '1px solid #e2e8f0',
-                                                    cursor: 'pointer',
-                                                  }}
-                                                  loading="lazy"
-                                                />
-                                              ))}
-                                              {c.image_urls.length > 3 ? (
-                                                <span style={{ color: '#64748b', fontWeight: 800, alignSelf: 'center' }}>
-                                                  +{c.image_urls.length - 3} more
-                                                </span>
-                                              ) : null}
-                                            </div>
-                                          ) : (
-                                            <div style={{ color: '#64748b', fontWeight: 700 }}>No images</div>
-                                          )}
-                                        </div>
-                                      </td>
                                     </>
-                                  )}
+                                  ) : null}
                                 </tr>
                               );
                             })}
