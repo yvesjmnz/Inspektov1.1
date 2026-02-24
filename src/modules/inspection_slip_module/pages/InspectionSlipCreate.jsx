@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
 import { supabase } from '../../../lib/supabase';
@@ -37,6 +37,8 @@ export default function InspectionSlipCreate() {
     email: '',
   });
 
+  const [autoFillMessage, setAutoFillMessage] = useState('');
+
   const [lineOfBusiness, setLineOfBusiness] = useState('');
 
   const [checklist, setChecklist] = useState({
@@ -44,6 +46,15 @@ export default function InspectionSlipCreate() {
     with_cctv: false,
     signage_2sqm: false,
   });
+
+  const inspectorCanvasRef = useRef(null);
+  const ownerCanvasRef = useRef(null);
+  const inspectorDrawing = useRef(false);
+  const ownerDrawing = useRef(false);
+  const inspectorLastPos = useRef({ x: 0, y: 0 });
+  const ownerLastPos = useRef({ x: 0, y: 0 });
+  const [inspectorSignature, setInspectorSignature] = useState('');
+  const [ownerSignature, setOwnerSignature] = useState('');
 
   useEffect(() => {
     if (!toast) return;
@@ -92,6 +103,54 @@ export default function InspectionSlipCreate() {
         }
 
         setMissionOrder(mo);
+
+        // Auto-detect complained business from linked complaint (if any).
+        if (mo?.complaint_id) {
+          const { data: complaint, error: complaintError } = await supabase
+            .from('complaints')
+            .select('id, business_name, business_address')
+            .eq('id', mo.complaint_id)
+            .single();
+
+          if (!complaintError && complaint) {
+            const name = (complaint.business_name || '').trim();
+            const addr = (complaint.business_address || '').trim();
+
+            if (name || addr) {
+              const orClauses = [];
+              if (name) orClauses.push(`business_name.ilike.%${name}%`);
+              if (addr) orClauses.push(`business_address.ilike.%${addr}%`);
+
+              if (orClauses.length > 0) {
+                const { data: bizMatches, error: bizError } = await supabase
+                  .from('businesses')
+                  .select('*')
+                  .or(orClauses.join(','))
+                  .limit(5);
+
+                if (!bizError && bizMatches && bizMatches.length > 0) {
+                  setBusinessResult({ matches: bizMatches });
+                  setBusinessSearch(name || addr || '');
+                  // Use the first match to pre-fill fields; inspector can override.
+                  handleUseBusiness(bizMatches[0]);
+                  setAutoFillMessage(
+                    'Autofilled from registered business based on the complained business. Click a result card to change.'
+                  );
+                } else {
+                  setAutoFillMessage(
+                    'No registered business found for this complaint. Please fill in the details manually or search by BIN / business name.'
+                  );
+                }
+              }
+            } else {
+              setAutoFillMessage(
+                'No registered business found for this complaint. Please fill in the details manually or search by BIN / business name.'
+              );
+            }
+          }
+        } else {
+          setAutoFillMessage('');
+        }
       } catch (e) {
         setMissionOrder(null);
         setError(e?.message || 'Failed to load mission order.');
@@ -102,6 +161,72 @@ export default function InspectionSlipCreate() {
 
     loadMissionOrder();
   }, [missionOrderId]);
+
+  const getCanvasContextAndState = (who) => {
+    const canvasRef = who === 'inspector' ? inspectorCanvasRef : ownerCanvasRef;
+    const drawingRef = who === 'inspector' ? inspectorDrawing : ownerDrawing;
+    const lastPosRef = who === 'inspector' ? inspectorLastPos : ownerLastPos;
+    const canvas = canvasRef.current;
+    if (!canvas) return {};
+    const ctx = canvas.getContext('2d');
+    return { canvas, ctx, drawingRef, lastPosRef };
+  };
+
+  const getEventPos = (event, canvas) => {
+    const rect = canvas.getBoundingClientRect();
+    const e = event.touches && event.touches.length ? event.touches[0] : event;
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
+  };
+
+  const handleSignatureStart = (who, event) => {
+    event.preventDefault();
+    const { canvas, ctx, drawingRef, lastPosRef } = getCanvasContextAndState(who);
+    if (!canvas || !ctx) return;
+    const pos = getEventPos(event, canvas);
+    drawingRef.current = true;
+    lastPosRef.current = pos;
+  };
+
+  const handleSignatureMove = (who, event) => {
+    const { canvas, ctx, drawingRef, lastPosRef } = getCanvasContextAndState(who);
+    if (!canvas || !ctx || !drawingRef.current) return;
+    event.preventDefault();
+    const pos = getEventPos(event, canvas);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    lastPosRef.current = pos;
+  };
+
+  const handleSignatureEnd = (who) => {
+    const { canvas, drawingRef } = getCanvasContextAndState(who);
+    if (!canvas) return;
+    drawingRef.current = false;
+    const dataUrl = canvas.toDataURL('image/png');
+    if (who === 'inspector') {
+      setInspectorSignature(dataUrl);
+    } else {
+      setOwnerSignature(dataUrl);
+    }
+  };
+
+  const handleSignatureClear = (who) => {
+    const { canvas, ctx } = getCanvasContextAndState(who);
+    if (!canvas || !ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (who === 'inspector') {
+      setInspectorSignature('');
+    } else {
+      setOwnerSignature('');
+    }
+  };
 
   const handleUseBusiness = (b) => {
     if (!b) return;
@@ -173,6 +298,14 @@ export default function InspectionSlipCreate() {
               <a className="mo-link" href="/dashboard/inspector">
                 Back
               </a>
+              <button
+                type="button"
+                className="mo-btn mo-btn-secondary"
+                onClick={() => window.print()}
+                style={{ marginLeft: 8 }}
+              >
+                Print
+              </button>
             </div>
           </div>
 
@@ -187,6 +320,11 @@ export default function InspectionSlipCreate() {
             <div className="mo-meta">Cannot create inspection slip.</div>
           ) : (
             <div style={{ display: 'grid', gap: 14, marginTop: 14 }}>
+              {autoFillMessage ? (
+                <div className="mo-meta" style={{ marginBottom: 4 }}>
+                  {autoFillMessage}
+                </div>
+              ) : null}
               <div>
                 <div className="mo-label">[SECTION 1 REQUIRED] Business Owner Details</div>
                 <div
@@ -601,6 +739,89 @@ export default function InspectionSlipCreate() {
                     />
                     2sqm Signage (Compliant)
                   </label>
+                </div>
+              </div>
+
+              <div>
+                <div className="mo-label">Signatures</div>
+                <div
+                  style={{
+                    marginTop: 10,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: 10,
+                  }}
+                >
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Inspector Signature
+                    </div>
+                    <div
+                      style={{
+                        border: '1px solid #cbd5e1',
+                        borderRadius: 10,
+                        background: '#ffffff',
+                        padding: 4,
+                      }}
+                    >
+                      <canvas
+                        ref={inspectorCanvasRef}
+                        width={400}
+                        height={120}
+                        style={{ width: '100%', height: 120, display: 'block' }}
+                        onMouseDown={(e) => handleSignatureStart('inspector', e)}
+                        onMouseMove={(e) => handleSignatureMove('inspector', e)}
+                        onMouseUp={() => handleSignatureEnd('inspector')}
+                        onMouseLeave={() => handleSignatureEnd('inspector')}
+                        onTouchStart={(e) => handleSignatureStart('inspector', e)}
+                        onTouchMove={(e) => handleSignatureMove('inspector', e)}
+                        onTouchEnd={() => handleSignatureEnd('inspector')}
+                      />
+                      <button
+                        type="button"
+                        className="mo-btn mo-btn-secondary"
+                        onClick={() => handleSignatureClear('inspector')}
+                        style={{ marginTop: 6 }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mo-meta" style={{ marginBottom: 4 }}>
+                      Business Owner Signature
+                    </div>
+                    <div
+                      style={{
+                        border: '1px solid #cbd5e1',
+                        borderRadius: 10,
+                        background: '#ffffff',
+                        padding: 4,
+                      }}
+                    >
+                      <canvas
+                        ref={ownerCanvasRef}
+                        width={400}
+                        height={120}
+                        style={{ width: '100%', height: 120, display: 'block' }}
+                        onMouseDown={(e) => handleSignatureStart('owner', e)}
+                        onMouseMove={(e) => handleSignatureMove('owner', e)}
+                        onMouseUp={() => handleSignatureEnd('owner')}
+                        onMouseLeave={() => handleSignatureEnd('owner')}
+                        onTouchStart={(e) => handleSignatureStart('owner', e)}
+                        onTouchMove={(e) => handleSignatureMove('owner', e)}
+                        onTouchEnd={() => handleSignatureEnd('owner')}
+                      />
+                      <button
+                        type="button"
+                        className="mo-btn mo-btn-secondary"
+                        onClick={() => handleSignatureClear('owner')}
+                        style={{ marginTop: 6 }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
