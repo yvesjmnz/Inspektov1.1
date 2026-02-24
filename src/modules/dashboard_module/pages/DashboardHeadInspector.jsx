@@ -716,97 +716,112 @@ export default function DashboardHeadInspector() {
               {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
               {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
-              <div className="dash-table-wrap">
-                <table className="dash-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 90 }}>ID</th>
-                      <th>Business</th>
-                      <th style={{ width: 160 }}>Mission Order</th>
-                      <th style={{ width: 200 }}>Approved</th>
-                      <th style={{ width: 200 }}>Submitted</th>
-                      <th style={{ width: 220 }}>Mission Order</th>
-                      <th style={{ width: 260 }}>Inspectors Assigned</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredComplaints.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
-                          {loading ? 'Loading…' : 'No records found for this tab.'}
-                        </td>
-                      </tr>
-                    ) : (
-                      complaintsByDay.sortedKeys.flatMap((dayKey) => {
-                        const rows = [];
-                        const label = complaintsByDay.groups[dayKey]?.label || dayKey;
+              <div style={{ display: 'grid', gap: 20 }}>
+                {filteredComplaints.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                    {loading ? 'Loading…' : 'No records found for this tab.'}
+                  </div>
+                ) : (
+                  complaintsByDay.sortedKeys.map((dayKey) => {
+                    const dayGroup = complaintsByDay.groups[dayKey];
+                    const label = dayGroup?.label || dayKey;
+                    const count = dayGroup?.items?.length || 0;
+                    if (count === 0) return null;
 
-                        // Day header row
-                        rows.push(
-                          <tr key={`day-${dayKey}`}>
-                            <td colSpan={7} style={{ fontWeight: 800, color: '#0f172a', background: '#f8fafc' }}>
-                              {label}
-                            </td>
-                          </tr>
-                        );
+                    return (
+                      <div
+                        key={`day-card-${dayKey}`}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 14,
+                          boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                          overflow: 'hidden',
+                          transition: 'box-shadow 0.2s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                        }}
+                      >
+                        {/* Day Header */}
+                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                            {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
+                          </h3>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
+                            <span>{count} {tab === 'todo' ? 'To Draft' : tab === 'issued' ? 'Issued' : tab === 'for-inspection' ? 'For Inspection' : 'For Revisions'}</span>
+                          </div>
+                        </div>
 
-                        complaintsByDay.groups[dayKey].items.forEach((c) => {
-                          rows.push(
-                            <tr key={c.complaint_id}>
-                              <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
-                              <td>
-                                <div className="dash-cell-title">{c.business_name || '—'}</div>
-                                <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                <div className="dash-cell-sub">{c.reporter_email || ''}</div>
-                              </td>
-                              <td>
-                                <span className={statusBadgeClass(c.mission_order_status)}>
-                                  {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
-                                </span>
-                              </td>
-                              <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
-                              <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="dash-btn"
-                                  onClick={() => createMissionOrder(c.complaint_id)}
-                                  disabled={creatingForId === c.complaint_id}
-                                >
-                                  {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
-                                </button>
-                              </td>
-                              <td>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
-                                  {(c.inspector_names || []).length === 0 ? (
-                                    <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
-                                  ) : (
-                                    (c.inspector_names || []).map((name, idx) => (
-                                      <span
-                                        key={`${c.complaint_id}-${idx}`}
-                                        style={{
-                                          padding: '6px 10px',
-                                          borderRadius: 999,
-                                          fontWeight: 800,
-                                          border: '1px solid #e2e8f0',
-                                          background: '#f8fafc',
-                                        }}
-                                      >
-                                        {name}
-                                      </span>
-                                    ))
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        });
-
-                        return rows;
-                      })
-                    )}
-                  </tbody>
-                </table>
+                        {/* Table for this day */}
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                <th style={{ width: 120 }}>Complaint ID</th>
+                                <th>Business & Address</th>
+                                <th style={{ width: 180 }}>MO Status</th>
+                                <th style={{ width: 220 }}>Approved</th>
+                                <th style={{ width: 220 }}>Submitted</th>
+                                <th style={{ width: 220 }}>Action</th>
+                                <th style={{ width: 260 }}>Inspectors</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dayGroup.items.map((c) => (
+                                <tr key={c.complaint_id}>
+                                  <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
+                                  <td>
+                                    <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                    <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                    <div className="dash-cell-sub">{c.reporter_email || ''}</div>
+                                  </td>
+                                  <td>
+                                    <span className={statusBadgeClass(c.mission_order_status)}>
+                                      {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                                    </span>
+                                  </td>
+                                  <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
+                                  <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                                  <td>
+                                    <button
+                                      type="button"
+                                      className="dash-btn"
+                                      onClick={() => createMissionOrder(c.complaint_id)}
+                                      disabled={creatingForId === c.complaint_id}
+                                    >
+                                      {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
+                                    </button>
+                                  </td>
+                                  <td>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
+                                      {(c.inspector_names || []).length === 0 ? (
+                                        <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                      ) : (
+                                        (c.inspector_names || []).map((name, idx) => (
+                                          <span
+                                            key={`${c.complaint_id}-${idx}`}
+                                            style={{ padding: '6px 10px', borderRadius: 999, fontWeight: 800, border: '1px solid #e2e8f0', background: '#f8fafc' }}
+                                          >
+                                            {name}
+                                          </span>
+                                        ))
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
 
               <div className="dash-note">
