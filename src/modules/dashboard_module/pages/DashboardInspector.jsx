@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import Header from '../../../components/Header';
-import Footer from '../../../components/Footer';
 import { supabase } from '../../../lib/supabase';
 import './Dashboard.css';
 
@@ -33,6 +31,7 @@ export default function DashboardInspector() {
 
   const [userLabel, setUserLabel] = useState('');
   const [assigned, setAssigned] = useState([]);
+  const [navCollapsed, setNavCollapsed] = useState(false);
 
   const handleLogout = async () => {
     setError('');
@@ -221,94 +220,207 @@ export default function DashboardInspector() {
 
   return (
     <div className="dash-container">
-      <Header />
       <main className="dash-main">
-        <section className="dash-card">
-          <div className="dash-header">
-            <div>
-              <h2 className="dash-title">Inspector Dashboard</h2>
-              <p className="dash-subtitle">{userLabel ? `Welcome ${userLabel}!` : 'Welcome!'} View your assigned inspections and open full inspection details.</p>
+        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
+          <aside
+            className="dash-side"
+            title="Menu"
+            style={{ width: navCollapsed ? 72 : 240, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+            onClick={(e) => {
+              const t = e.target;
+              if (t && typeof t.closest === 'function' && t.closest('.dash-nav-item')) return;
+              setNavCollapsed((v) => !v);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                const t = e.target;
+                if (t && typeof t.closest === 'function' && t.closest('.dash-nav-item')) return;
+                e.preventDefault();
+                setNavCollapsed((v) => !v);
+              }
+            }}
+          >
+            <div className="dash-side-brand" title="Menu">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                <img
+                  src="/logo.png"
+                  alt="City Hall Logo"
+                  style={{ width: 44, height: 44, objectFit: 'contain', borderRadius: '50%' }}
+                />
+              </div>
+              <div className="hamburger" aria-hidden="true">
+                <div className="hamburger-bar"></div>
+                <div className="hamburger-bar"></div>
+                <div className="hamburger-bar"></div>
+              </div>
             </div>
-            <div className="dash-actions">
-              <button className="dash-logout" type="button" onClick={handleLogout} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <img src="/ui_icons/logout.png" alt="" style={{ width: 18, height: 18, display: 'block', filter: 'brightness(0) invert(1)' }} />
+            <ul className="dash-nav" style={{ flex: 1 }}>
+              <li>
+                <button
+                  type="button"
+                  className="dash-nav-item active"
+                >
+                  <span
+                    className="dash-nav-ico"
+                    aria-hidden="true"
+                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <img
+                      src="/ui_icons/menu.png"
+                      alt=""
+                      style={{
+                        width: 22,
+                        height: 22,
+                        objectFit: 'contain',
+                        display: 'block',
+                        filter:
+                          'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)',
+                      }}
+                    />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>
+                    Assigned Inspections
+                  </span>
+                </button>
+              </li>
+            </ul>
+            <button
+              type="button"
+              className="dash-nav-item"
+              onClick={handleLogout}
+              style={{
+                marginTop: 'auto',
+                border: 'none',
+                background: 'transparent',
+                color: '#ef4444',
+                fontWeight: 800,
+                textAlign: 'left',
+                padding: '10px 12px',
+                borderRadius: 10,
+                cursor: 'pointer',
+                display: 'grid',
+                gridTemplateColumns: '24px 1fr',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <span
+                className="dash-nav-ico"
+                aria-hidden="true"
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <img
+                  src="/ui_icons/logout.png"
+                  alt=""
+                  style={{
+                    width: 22,
+                    height: 22,
+                    objectFit: 'contain',
+                    display: 'block',
+                    filter:
+                      'brightness(0) saturate(100%) invert(21%) sepia(97%) saturate(4396%) hue-rotate(346deg) brightness(95%) contrast(101%)',
+                  }}
+                />
+              </span>
+              <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>
                 Logout
-              </button>
-            </div>
-          </div>
-
-          <div className="dash-toolbar">
-            <input
-              className="dash-input"
-              type="text"
-              placeholder="Search by business name/address, complaint ID, or mission order ID..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <button className="dash-btn" type="button" onClick={loadAssigned} disabled={loading}>
-              {loading ? 'Refreshing…' : 'Refresh'}
+              </span>
             </button>
-          </div>
+          </aside>
+          <div className="dash-maincol">
+            <div className="dash-card">
+              <div className="dash-header">
+                <div>
+                  <h2 className="dash-title">Inspector Dashboard</h2>
+                  <p className="dash-subtitle">
+                    {userLabel ? `Welcome ${userLabel}!` : 'Welcome!'} View your assigned inspections and open full
+                    inspection details.
+                  </p>
+                </div>
+                <div className="dash-actions"></div>
+              </div>
 
-          {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
+              <div className="dash-toolbar">
+                <input
+                  className="dash-input"
+                  type="text"
+                  placeholder="Search by business name/address, complaint ID, or mission order ID..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                <button className="dash-btn" type="button" onClick={loadAssigned} disabled={loading}>
+                  {loading ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
 
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 110 }}>MO ID</th>
-                  <th>Business</th>
-                  <th style={{ width: 160 }}>MO Status</th>
-                  <th style={{ width: 200 }}>Assigned</th>
-                  <th style={{ width: 200 }}>Updated</th>
-                  <th style={{ width: 180 }}>Details</th>
-                  <th style={{ width: 190 }}>Inspection Slip</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredAssigned.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
-                      {loading ? 'Loading…' : 'No assigned inspections found.'}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredAssigned.map((r) => (
-                    <tr key={r.mission_order_id}>
-                      <td title={r.mission_order_id}>{String(r.mission_order_id).slice(0, 8)}…</td>
-                      <td>
-                        <div className="dash-cell-title">{r.business_name || '—'}</div>
-                        <div className="dash-cell-sub">{r.business_address || ''}</div>
-                        <div className="dash-cell-sub">Complaint: {r.complaint_id ? String(r.complaint_id).slice(0, 8) + '…' : '—'}</div>
-                      </td>
-                      <td>
-                        <span className={statusBadgeClass(r.mission_order_status)}>{formatStatus(r.mission_order_status)}</span>
-                      </td>
-                      <td>{r.assigned_at ? new Date(r.assigned_at).toLocaleString() : '—'}</td>
-                      <td>{r.mission_order_updated_at ? new Date(r.mission_order_updated_at).toLocaleString() : '—'}</td>
-                      <td>
-                      <a className="dash-link" href={`/dashboard/inspector/inspection?id=${r.mission_order_id}`}>
-                      Open
-                      </a>
-                      </td>
-                      <td>
-                      <a className="dash-link" href={`/inspection-slip/create?missionOrderId=${r.mission_order_id}`}>
-                      Start Inspection
-                      </a>
-                      </td>
+              {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
+
+              <div className="dash-table-wrap">
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 110 }}>MO ID</th>
+                      <th>Business</th>
+                      <th style={{ width: 160 }}>MO Status</th>
+                      <th style={{ width: 200 }}>Assigned</th>
+                      <th style={{ width: 200 }}>Updated</th>
+                      <th style={{ width: 180 }}>Details</th>
+                      <th style={{ width: 190 }}>Inspection Slip</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {filteredAssigned.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
+                          {loading ? 'Loading…' : 'No assigned inspections found.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredAssigned.map((r) => (
+                        <tr key={r.mission_order_id}>
+                          <td title={r.mission_order_id}>{String(r.mission_order_id).slice(0, 8)}…</td>
+                          <td>
+                            <div className="dash-cell-title">{r.business_name || '—'}</div>
+                            <div className="dash-cell-sub">{r.business_address || ''}</div>
+                            <div className="dash-cell-sub">
+                              Complaint: {r.complaint_id ? String(r.complaint_id).slice(0, 8) + '…' : '—'}
+                            </div>
+                          </td>
+                          <td>
+                            <span className={statusBadgeClass(r.mission_order_status)}>
+                              {formatStatus(r.mission_order_status)}
+                            </span>
+                          </td>
+                          <td>{r.assigned_at ? new Date(r.assigned_at).toLocaleString() : '—'}</td>
+                          <td>{r.mission_order_updated_at ? new Date(r.mission_order_updated_at).toLocaleString() : '—'}</td>
+                          <td>
+                            <a className="dash-link" href={`/dashboard/inspector/inspection?id=${r.mission_order_id}`}>
+                              Open
+                            </a>
+                          </td>
+                          <td>
+                            <a
+                              className="dash-link"
+                              href={`/inspection-slip/create?missionOrderId=${r.mission_order_id}`}
+                            >
+                              Start Inspection
+                            </a>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-          <div className="dash-note">
-            “Open” shows the mission order (read-only), business details, and a map preview based on the business address.
+              <div className="dash-note">
+                “Open” shows the mission order (read-only), business details, and a map preview based on the business
+                address.
+              </div>
+            </div>
           </div>
         </section>
       </main>
-      <Footer />
     </div>
   );
 }
