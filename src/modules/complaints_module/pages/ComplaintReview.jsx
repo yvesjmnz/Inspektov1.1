@@ -58,10 +58,12 @@ export default function ComplaintReview() {
   const [copiedId, setCopiedId] = useState(false);
 
   // Determine which tab the user came from (queue or history)
+  const [source, setSource] = useState('queue');
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const source = params.get('source') || 'queue'; // default to queue
-    sessionStorage.setItem('complaintReviewSource', source);
+    const sourceParam = params.get('source') || 'queue'; // default to queue
+    setSource(sourceParam);
+    sessionStorage.setItem('complaintReviewSource', sourceParam);
   }, []);
 
   const handleCopyId = () => {
@@ -286,7 +288,7 @@ export default function ComplaintReview() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
                 {/* Back Button - Top Left */}
                 <a
-                  href="/dashboard/director?tab=queue"
+                  href={source === 'history' ? '/dashboard/director?tab=history' : '/dashboard/director?tab=queue'}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -314,32 +316,34 @@ export default function ComplaintReview() {
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
                     <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  Back to Review Complaints
+                  Back to {source === 'history' ? 'Complaint History' : 'Review Complaints'}
                 </a>
 
-                {/* Action Buttons - Top Right */}
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button
-                    type="button"
-                    className="dash-btn"
-                    onClick={handleApprove}
-                    disabled={loading || savingDecision || !complaint || !requireReviewableState()}
-                    title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Approve this complaint.'}
-                    style={{ background: '#22c55e', color: '#fff', padding: '8px 16px', fontSize: 14, fontWeight: 700 }}
-                  >
-                    {savingDecision ? 'Saving…' : 'Approve'}
-                  </button>
-                  <button
-                    type="button"
-                    className="dash-btn"
-                    onClick={handleReject}
-                    disabled={loading || savingDecision || !complaint || !requireReviewableState()}
-                    title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Decline this complaint.'}
-                    style={{ background: '#dc2626', color: '#fff', padding: '8px 16px', fontSize: 14, fontWeight: 700 }}
-                  >
-                    {savingDecision ? 'Saving…' : 'Decline'}
-                  </button>
-                </div>
+                {/* Action Buttons - Top Right (Only show if from queue tab) */}
+                {source !== 'history' && (
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                      type="button"
+                      className="dash-btn"
+                      onClick={handleApprove}
+                      disabled={loading || savingDecision || !complaint || !requireReviewableState()}
+                      title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Approve this complaint.'}
+                      style={{ background: '#22c55e', color: '#fff', padding: '8px 16px', fontSize: 14, fontWeight: 700 }}
+                    >
+                      {savingDecision ? 'Saving…' : 'Approve'}
+                    </button>
+                    <button
+                      type="button"
+                      className="dash-btn"
+                      onClick={handleReject}
+                      disabled={loading || savingDecision || !complaint || !requireReviewableState()}
+                      title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Decline this complaint.'}
+                      style={{ background: '#dc2626', color: '#fff', padding: '8px 16px', fontSize: 14, fontWeight: 700 }}
+                    >
+                      {savingDecision ? 'Saving…' : 'Decline'}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
