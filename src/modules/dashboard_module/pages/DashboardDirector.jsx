@@ -94,6 +94,16 @@ export default function DashboardDirector() {
   const [missionOrders, setMissionOrders] = useState([]);
   const [search, setSearch] = useState('');
   const [auditComplaint, setAuditComplaint] = useState(null);
+  // Advanced filters for history tab
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    businessName: '',
+    address: '',
+    reporterEmail: '',
+    complaintId: '',
+    dateMonth: null,
+    dateDay: null,
+  });
   // Full complaint sidebar state (for history tab audit view)
   const [fullViewId, setFullViewId] = useState(null);
   const [fullViewLoading, setFullViewLoading] = useState(false);
@@ -277,6 +287,38 @@ export default function DashboardDirector() {
         // General or other: no status filter (fetch recent mix for KPIs)
       }
 
+      // Apply field filters (only one can be active at a time)
+      if (tab === 'history') {
+        const searchVal = search.trim();
+        if (filters.businessName && searchVal) {
+          query = query.ilike('business_name', `%${searchVal}%`);
+        } else if (filters.address && searchVal) {
+          query = query.ilike('business_address', `%${searchVal}%`);
+        } else if (filters.reporterEmail && searchVal) {
+          query = query.ilike('reporter_email', `%${searchVal}%`);
+        } else if (filters.complaintId && searchVal) {
+          query = query.ilike('id', `%${searchVal}%`);
+        }
+
+        // Apply date filters
+        if (filters.dateMonth) {
+          const year = filters.dateMonth.getFullYear();
+          const month = filters.dateMonth.getMonth();
+          
+          if (filters.dateDay) {
+            // Specific day
+            const dayStart = new Date(year, month, filters.dateDay);
+            const dayEnd = new Date(year, month, filters.dateDay + 1);
+            query = query.gte('created_at', dayStart.toISOString()).lt('created_at', dayEnd.toISOString());
+          } else {
+            // Entire month
+            const monthStart = new Date(year, month, 1);
+            const monthEnd = new Date(year, month + 1, 1);
+            query = query.gte('created_at', monthStart.toISOString()).lt('created_at', monthEnd.toISOString());
+          }
+        }
+      }
+
       const searchVal = search.trim();
       if (searchVal) {
         // Basic search across common columns. If a column doesn't exist, Supabase will error.
@@ -344,13 +386,13 @@ export default function DashboardDirector() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // Reload history when applied date range changes
+  // Reload history when applied date range changes or filters change
   useEffect(() => {
     if (tab === 'history') {
       loadComplaints();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedRange.start, appliedRange.end]);
+  }, [appliedRange.start, appliedRange.end, filters.businessName, filters.address, filters.reporterEmail, filters.complaintId, filters.dateMonth, filters.dateDay, search]);
 
   // Resolve approver/decliner labels (email/name) for audit drawer
   useEffect(() => {
@@ -405,6 +447,12 @@ export default function DashboardDirector() {
   }, [auditComplaint]);
 
   const filteredComplaints = useMemo(() => {
+    // If a field filter is active, don't apply client-side filtering (backend already filtered)
+    const hasFieldFilter = filters.businessName || filters.address || filters.reporterEmail || filters.complaintId;
+    if (hasFieldFilter) {
+      return complaints;
+    }
+
     // Additional client-side filtering by ID (since server-side OR is limited to text columns).
     const q = search.trim().toLowerCase();
     if (!q) return complaints;
@@ -413,7 +461,7 @@ export default function DashboardDirector() {
       const idStr = String(c?.id ?? '').toLowerCase();
       return idStr.includes(q);
     });
-  }, [complaints, search]);
+  }, [complaints, search, filters]);
 
   const filteredMissionOrders = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -833,72 +881,231 @@ export default function DashboardDirector() {
             <div className="dash-actions"></div>
           </div>
 
-          {null}
+          {tab === 'history' && (
+            <div style={{ marginBottom: 20, display: 'grid', gap: 12 }}>
+              {/* Search Bar */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <input
+                    type="text"
+                    placeholder="Search complaints..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 16px',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 500,
+                      outline: 'none',
+                      transition: 'border-color 0.2s'
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = '#2563eb'}
+                    onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFilterOpen(!filterOpen)}
+                  style={{
+                    padding: '10px 16px',
+                    background: filterOpen ? '#2563eb' : '#ffffff',
+                    color: filterOpen ? '#ffffff' : '#0f172a',
+                    border: `1px solid ${filterOpen ? '#2563eb' : '#e2e8f0'}`,
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    fontSize: 14,
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  ⚙️ Filters
+                </button>
+              </div>
 
-          {tab === 'history' ? (
-            <div className="date-filter">
-              <button
-                type="button"
-                className="dash-select date-filter-btn"
-                onClick={() => {
-                  if (!datePopoverOpen) {
-                    if (appliedRange.start && appliedRange.end) {
-                      setPendingRange({ start: appliedRange.start, end: appliedRange.end });
-                      setDatePreset('custom');
-                      setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
-                    } else {
-                      setCurrentWeekPending();
-                    }
-                  }
-                  setDatePopoverOpen((v) => !v);
-                }}
-                aria-haspopup="dialog"
-                aria-expanded={datePopoverOpen}
-              >
-                {rangeLabel}
-              </button>
-              {datePopoverOpen ? (
-                <div className="date-popover" role="dialog" aria-modal="true">
-                  <div className="date-presets">
-                    <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
-                    <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
-                    <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
-                    <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
-                    <div className="date-apply">
-                      <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
+              {/* Advanced Filters Panel */}
+              {filterOpen && (
+                <div style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 12,
+                  padding: 16,
+                  display: 'grid',
+                  gap: 16
+                }}>
+                  {/* Field Filters Section */}
+                  <div>
+                    <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 800, color: '#0f172a' }}>Filter By Field</h4>
+                    <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 12px 0' }}>Select a field to filter by. Use the search bar above to enter your search term.</p>
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {/* Business Name Checkbox */}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={filters.businessName !== ''}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFilters({ businessName: 'active', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                            } else {
+                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                            }
+                          }}
+                          style={{ width: 16, height: 16, cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Business Name</span>
+                      </label>
+
+                      {/* Address Checkbox */}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={filters.address !== ''}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFilters({ businessName: '', address: 'active', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                            } else {
+                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                            }
+                          }}
+                          style={{ width: 16, height: 16, cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Address</span>
+                      </label>
+
+                      {/* Reporter Email Checkbox */}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={filters.reporterEmail !== ''}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFilters({ businessName: '', address: '', reporterEmail: 'active', complaintId: '', dateMonth: null, dateDay: null });
+                            } else {
+                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                            }
+                          }}
+                          style={{ width: 16, height: 16, cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Reporter Email</span>
+                      </label>
+
+                      {/* Complaint ID Checkbox */}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={filters.complaintId !== ''}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: 'active', dateMonth: null, dateDay: null });
+                            } else {
+                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                            }
+                          }}
+                          style={{ width: 16, height: 16, cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Complaint ID</span>
+                      </label>
                     </div>
                   </div>
-                  <div className="cal-wrap">
-                    <div className="cal-header">
-                      <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
-                      <div className="cal-nav">
-                        <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
-                        <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
+
+                  {/* Date Filters Section */}
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
+                    <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 800, color: '#0f172a' }}>Filter By Date</h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+                      {/* Month */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#64748b', marginBottom: 6 }}>Month</label>
+                        <select
+                          value={filters.dateMonth ? filters.dateMonth.toISOString().slice(0, 7) : ''}
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              const [year, month] = e.target.value.split('-');
+                              setFilters({ ...filters, dateMonth: new Date(year, parseInt(month) - 1, 1) });
+                            } else {
+                              setFilters({ ...filters, dateMonth: null });
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 6,
+                            fontSize: 13,
+                            outline: 'none'
+                          }}
+                        >
+                          <option value="">All Months</option>
+                          {Array.from({ length: 12 }, (_, i) => {
+                            const d = new Date(new Date().getFullYear(), i, 1);
+                            return (
+                              <option key={i} value={d.toISOString().slice(0, 7)}>
+                                {d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      {/* Day */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#64748b', marginBottom: 6 }}>Day</label>
+                        <select
+                          value={filters.dateDay || ''}
+                          onChange={(e) => setFilters({ ...filters, dateDay: e.target.value ? parseInt(e.target.value) : null })}
+                          disabled={!filters.dateMonth}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 6,
+                            fontSize: 13,
+                            outline: 'none',
+                            opacity: !filters.dateMonth ? 0.5 : 1,
+                            cursor: !filters.dateMonth ? 'not-allowed' : 'pointer'
+                          }}
+                        >
+                          <option value="">All Days</option>
+                          {filters.dateMonth && Array.from({ length: new Date(filters.dateMonth.getFullYear(), filters.dateMonth.getMonth() + 1, 0).getDate() }, (_, i) => (
+                            <option key={i + 1} value={i + 1}>{i + 1}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
-                    <div className="cal-grid">
-                      {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
-                        <div key={`h-${d}`} className="cal-dow">{d}</div>
-                      ))}
-                      {calendarGrid(viewMonth).map((d) => {
-                        const inMonth = d.getMonth() === viewMonth.getMonth();
-                        const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
-                        const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
-                        const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
-                        const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
-                        return (
-                          <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
-                        );
-                      })}
-                    </div>
-                    <div className="range-summary">
-                      {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end).replace('Date: ', '') : 'Select a start and end date'}
-                    </div>
                   </div>
+
+                  {/* Clear Filters Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilters({
+                        businessName: '',
+                        address: '',
+                        reporterEmail: '',
+                        complaintId: '',
+                        dateMonth: null,
+                        dateDay: null,
+                      });
+                      setSearch('');
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      background: '#ffffff',
+                      color: '#ef4444',
+                      border: '1px solid #fecaca',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      fontSize: 13,
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    Clear All Filters
+                  </button>
                 </div>
-              ) : null}
+              )}
             </div>
-          ) : null}
+          )}
 
           {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
@@ -1028,7 +1235,7 @@ export default function DashboardDirector() {
                         </h3>
                         {tab === 'history' ? (
                           // Statistics for history tab
-                          <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
                             {/* Total */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span>Total</span>
@@ -1071,6 +1278,7 @@ export default function DashboardDirector() {
                                 <>
                                   <th style={{ width: 180, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaint Status</th>
                                   <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                                  <th style={{ width: 220, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Reporter Email</th>
                                   <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
                                 </>
                               )}
@@ -1132,6 +1340,7 @@ export default function DashboardDirector() {
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
                                         <div className="dash-cell-sub">{c.business_address || ''}</div>
                                       </td>
+                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c.reporter_email || '—'}</td>
                                       <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
                                     </>
                                   ) : null}
