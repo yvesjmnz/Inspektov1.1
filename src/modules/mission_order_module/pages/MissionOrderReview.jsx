@@ -160,15 +160,65 @@ export default function MissionOrderReview() {
       if (previewRef.current) {
         let contentToDisplay = mo?.content || '';
         
-        // If mission order is approved and has a signature, inject it above the director's name
+        // If mission order is approved and has a signature, inject it above the director's name.
+        // Use an absolutely-positioned overlay so it doesn't push the name down.
         if (mo?.director_signature_url && String(mo?.status || '').toLowerCase() === 'for inspection') {
-          // Insert signature image directly above "LEVI C. FACUNDO" line
-          const signatureImg = `<img src="${mo.director_signature_url}" alt="Director Signature" style="max-width: 120px; height: auto; display: block; margin: 0 auto 2px auto; padding: 0;" />`;
-          
-          // Match the exact pattern: <p style="margin: 0; font-weight: 800;">LEVI C. FACUNDO</p>
+          // Create a reserved signature lane so the director name stays aligned with the other column,
+          // while still showing the signature on top of that reserved space.
+          // This avoids reflow/pushing the name down.
+          const signatureBlock = `
+            <div style="position: relative; height: 48px; width: 100%; margin: 0; padding: 0;">
+              <img
+                src="${mo.director_signature_url}"
+                alt="Director Signature"
+                style="
+                  position: absolute;
+                  left: 50%;
+                  transform: translateX(calc(-50% - 64px));
+                  bottom: -22px;
+                  max-width: 130px;
+                  height: auto;
+                  display: block;
+                  margin: 0;
+                  padding: 0;
+                  pointer-events: none;
+                "
+              />
+            </div>
+          `.trim();
+
+          // Insert signature lane right above the director name.
           contentToDisplay = contentToDisplay.replace(
             /(<p style="margin: 0; font-weight: 800;">LEVI C\. FACUNDO<\/p>)/i,
-            signatureImg + '$1'
+            signatureBlock + '$1'
+          );
+
+          // Remove the pre-existing signature blank lines on the LEFT column only,
+          // so adding the director signature doesn't create extra vertical gap.
+          // Keep the RIGHT column (Approved by) spacing intact.
+          // Handle these variants:
+          // - <br/><br/>
+          // - <br/><br/> (with whitespace)
+          // - <br/><br/> as a single literal string
+          // - <br><br>
+          // - <p><br></p> (some editors generate empty paragraphs)
+
+          // 1) remove up to 2 <br> tags after the label
+          contentToDisplay = contentToDisplay.replace(
+            /(<p style="margin: 0;">Recommending approval:<\/p>)((?:\s*<br\s*\/?>\s*){1,2})/i,
+            '$1'
+          );
+
+          // 2) remove up to 2 empty <p> lines after the label (e.g. <p><br></p>)
+          contentToDisplay = contentToDisplay.replace(
+            /(<p style="margin: 0;">Recommending approval:<\/p>)((?:\s*<p[^>]*>\s*(?:<br\s*\/?>)?\s*<\/p>\s*){1,2})/i,
+            '$1'
+          );
+
+          // 3) editor template exact string (in case it survived formatting)
+          contentToDisplay = contentToDisplay.replace(
+            /(<p style="margin: 0;">Recommending approval:<\/p>)\s*<br\s*\/?>\s*<br\s*\/?>/i,
+            '$1'
           );
         }
         
@@ -234,6 +284,13 @@ export default function MissionOrderReview() {
     return ['issued'].includes(s);
   };
 
+  const decisionStatus = useMemo(() => {
+    const s = String(missionOrder?.status || '').toLowerCase();
+    if (s === 'for inspection') return 'approved';
+    if (s === 'cancelled') return 'rejected';
+    return '';
+  }, [missionOrder?.status]);
+
   const updateMissionOrderDecision = async (nextStatus) => {
     if (!missionOrderId) return;
 
@@ -261,11 +318,14 @@ export default function MissionOrderReview() {
 
       // Add director's e-signature URL only on approval
       if (nextStatus === 'for inspection') {
-        patch.director_signature_url = 'https://nxmenhwpxtknrgvarioe.supabase.co/storage/v1/object/sign/e-signature%20bucket/634074338_937186158874457_7418890435965105244_n-removebg-preview.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV80MGY2ZWI5OS1iM2FjLTRmYzMtYjRlMS1kMTUyMTFjOTg5ODgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJlLXNpZ25hdHVyZSBidWNrZXQvNjM0MDc0MzM4XzkzNzE4NjE1ODg3NDQ1N183NDE4ODkwNDM1OTY1MTA1MjQ0X24tcmVtb3ZlYmctcHJldmlldy5wbmciLCJpYXQiOjE3NzE5NDMxNjIsImV4cCI6MTkyOTYyMzE2Mn0.h6eRnX-BS0hCB2-47DUnGDTAhHhg8k1DWqUO62qwxUY';
+        patch.director_signature_url = 'https://nxmenhwpxtknrgvarioe.supabase.co/storage/v1/object/sign/e-signature%20bucket/634074338_937186158874457_7418890435965105244_n-removebg-preview.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV80MGY2ZWI5OS1iM2FjLTRmYzMtYjRlMS1kMTUyMTFjOTg5ODgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJlLXNpZ25hdHVyZSBidWNrZXQvNjM0MDc0MzM4XzkzNzE4NjE1ODg3NDQ1N183NDE4ODkwNDM1OTY1MTA1MjQ0X24tcmVtb3ZlYmctcHJldmlldy5wbmciLCJpYXQiOjE3NzE5OTEwOTYsImV4cCI6MTg1ODM5MTA5Nn0.OYxeyhCyBwhZBpHjkO5KQGdPYUVxhXLr4-AwW7lnuOg';
       }
 
       const { error: updateError } = await supabase.from('mission_orders').update(patch).eq('id', missionOrderId);
       if (updateError) throw updateError;
+
+      // Update local UI immediately so buttons are replaced without requiring a refresh.
+      setMissionOrder((prev) => ({ ...(prev || {}), ...patch }));
 
       setToast(nextStatus === 'for inspection' ? 'Mission order approved.' : 'Mission order rejected.');
       await load();
@@ -325,25 +385,52 @@ export default function MissionOrderReview() {
               <a className="mo-link" href="/dashboard/director">
                 Back
               </a>
-              <button
-                type="button"
-                className="mo-btn mo-btn-primary"
-                onClick={handleApprove}
-                disabled={loading || savingDecision || !missionOrder || !requireReviewableState()}
-                title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Approve this mission order.'}
-              >
-                {savingDecision ? 'Saving…' : 'Approve'}
-              </button>
-              <button
-                type="button"
-                className="mo-btn"
-                onClick={handleReject}
-                disabled={loading || savingDecision || !missionOrder || !requireReviewableState()}
-                title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Reject this mission order.'}
-                style={{ background: '#dc2626' }}
-              >
-                {savingDecision ? 'Saving…' : 'Reject'}
-              </button>
+
+              {decisionStatus ? (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 12px',
+                    borderRadius: 999,
+                    border: '1px solid #e2e8f0',
+                    background: decisionStatus === 'approved' ? '#ecfdf5' : '#fef2f2',
+                    color: decisionStatus === 'approved' ? '#065f46' : '#7f1d1d',
+                    fontWeight: 900,
+                    fontSize: 13,
+                  }}
+                  title={
+                    decisionStatus === 'approved'
+                      ? 'This mission order is approved (For Inspection).'
+                      : 'This mission order is rejected (Cancelled).'
+                  }
+                >
+                  {decisionStatus === 'approved' ? 'Approved' : 'Rejected'}
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="mo-btn mo-btn-primary"
+                    onClick={handleApprove}
+                    disabled={loading || savingDecision || !missionOrder || !requireReviewableState()}
+                    title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Approve this mission order.'}
+                  >
+                    {savingDecision ? 'Saving…' : 'Approve'}
+                  </button>
+                  <button
+                    type="button"
+                    className="mo-btn"
+                    onClick={handleReject}
+                    disabled={loading || savingDecision || !missionOrder || !requireReviewableState()}
+                    title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Reject this mission order.'}
+                    style={{ background: '#dc2626' }}
+                  >
+                    {savingDecision ? 'Saving…' : 'Reject'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
 

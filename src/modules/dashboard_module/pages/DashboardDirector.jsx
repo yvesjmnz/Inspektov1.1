@@ -318,23 +318,7 @@ export default function DashboardDirector() {
           query = query.ilike('id', `%${searchVal}%`);
         }
 
-        // Apply date filters
-        if (filters.dateMonth) {
-          const year = filters.dateMonth.getFullYear();
-          const month = filters.dateMonth.getMonth();
-          
-          if (filters.dateDay) {
-            // Specific day
-            const dayStart = new Date(year, month, filters.dateDay);
-            const dayEnd = new Date(year, month, filters.dateDay + 1);
-            query = query.gte('created_at', dayStart.toISOString()).lt('created_at', dayEnd.toISOString());
-          } else {
-            // Entire month
-            const monthStart = new Date(year, month, 1);
-            const monthEnd = new Date(year, month + 1, 1);
-            query = query.gte('created_at', monthStart.toISOString()).lt('created_at', monthEnd.toISOString());
-          }
-        }
+        // Date filtering is handled by the calendar date range picker (appliedRange)
       }
 
       const searchVal = search.trim();
@@ -373,7 +357,16 @@ export default function DashboardDirector() {
       if (tab === 'mission-orders') {
         query = query.eq('status', 'issued');
       } else if (tab === 'mission-orders-history') {
-        query = query.eq('status', 'for inspection');
+        // Only show mission orders that are approved/actionable
+        // Support both string variants commonly used in DB constraints
+        query = query.in('status', ['for inspection', 'for_inspection']);
+
+        // Apply submitted_at date range for Mission Order History using the calendar date range picker
+        if (appliedRange?.start && appliedRange?.end) {
+          const start = new Date(appliedRange.start.getFullYear(), appliedRange.start.getMonth(), appliedRange.start.getDate());
+          const endExclusive = new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), appliedRange.end.getDate() + 1);
+          query = query.gte('submitted_at', start.toISOString()).lt('submitted_at', endExclusive.toISOString());
+        }
       }
 
       const searchVal = search.trim();
@@ -404,7 +397,7 @@ export default function DashboardDirector() {
       loadComplaints();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [tab, appliedRange.start, appliedRange.end]);
 
   // Reload history when applied date range changes or filters change
   useEffect(() => {
@@ -412,7 +405,7 @@ export default function DashboardDirector() {
       loadComplaints();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedRange.start, appliedRange.end, filters.businessName, filters.address, filters.reporterEmail, filters.complaintId, filters.dateMonth, filters.dateDay, search]);
+  }, [appliedRange.start, appliedRange.end, filters.businessName, filters.address, filters.reporterEmail, filters.complaintId, search]);
 
   // Resolve approver/decliner labels (email/name) for audit drawer
   useEffect(() => {
@@ -703,27 +696,143 @@ export default function DashboardDirector() {
       return t >= startOfDay.getTime() && t < endOfDay.getTime();
     };
 
-    const newToday = (complaints || []).filter(c => inReview.includes(sLower(c.status)) && isToday(c.created_at)).length;
-    const pendingReview = (complaints || []).filter(c => inReview.includes(sLower(c.status))).length;
-    const approvedToday = (complaints || []).filter(c => sLower(c.status) === 'approved' && isToday(c.approved_at)).length;
-    const declinedToday = (complaints || []).filter(c => sLower(c.status) === 'declined' && isToday(c.declined_at)).length;
+    const newToday = (complaints || []).filter((c) => inReview.includes(sLower(c.status)) && isToday(c.created_at)).length;
+    const pendingReview = (complaints || []).filter((c) => inReview.includes(sLower(c.status))).length;
+    const approvedToday = (complaints || []).filter((c) => sLower(c.status) === 'approved' && isToday(c.approved_at)).length;
+    const declinedToday = (complaints || []).filter((c) => sLower(c.status) === 'declined' && isToday(c.declined_at)).length;
 
-    const moIssued = (missionOrders || []).filter(m => sLower(m.status) === 'issued').length;
+    const moIssued = (missionOrders || []).filter((m) => sLower(m.status) === 'issued').length;
 
-    const days = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
-      const next = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i + 1);
-      const cnt = (complaints || []).filter(c => {
-        const t = c.created_at ? new Date(c.created_at).getTime() : null;
-        return t && t >= d.getTime() && t < next.getTime();
-      }).length;
-      days.push({ label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), count: cnt });
+    // Complaints submitted bar chart (date range)
+    const rangeStart = appliedRange?.start ? startOfDayLocal(appliedRange.start) : null;
+    const rangeEnd = appliedRange?.end ? startOfDayLocal(appliedRange.end) : null;
+
+    // Default to last 7 days if no range selected
+    const defaultStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6);
+    const defaultEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    const start = rangeStart || defaultStart;
+    const end = rangeEnd || defaultEnd;
+
+    // Ensure start <= end
+    const startSafe = start <= end ? start : end;
+    const endSafe = start <= end ? end : start;
+
+    const dayCount = Math.floor((startOfDayLocal(endSafe).getTime() - startOfDayLocal(startSafe).getTime()) / 86400000) + 1;
+
+    // Decide grouping
+    // - <= 14 days: by date
+    // - 15–60 days: by week
+    // - > 60 days: by month
+    const groupMode = dayCount <= 14 ? 'day' : dayCount <= 60 ? 'week' : 'month';
+
+    // Helpers for grouping
+    const ymdKey = (d) => d.toISOString().slice(0, 10);
+    const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const monthLabel = (d) => d.toLocaleDateString(undefined, { month: 'long' });
+
+    // Monday-based week start
+    const startOfWeekMon = (d) => {
+      const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const dow = x.getDay(); // 0 Sun..6 Sat
+      const offset = (dow + 6) % 7; // 0 for Mon
+      return new Date(x.getFullYear(), x.getMonth(), x.getDate() - offset);
+    };
+
+    const groups = new Map();
+
+    // Pre-create buckets so we show empty periods too
+    if (groupMode === 'day') {
+      for (let d = new Date(startSafe.getFullYear(), startSafe.getMonth(), startSafe.getDate()); d <= endSafe; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+        const key = ymdKey(d);
+        groups.set(key, {
+          key,
+          label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+          count: 0,
+        });
+      }
+    } else if (groupMode === 'week') {
+      let ws = startOfWeekMon(startSafe);
+      const endDay = new Date(endSafe.getFullYear(), endSafe.getMonth(), endSafe.getDate());
+      while (ws <= endDay) {
+        const we = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + 6);
+        const key = `${ymdKey(ws)}_W`;
+        const label = `${ws.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${we.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+        groups.set(key, { key, label, count: 0, rangeStart: ws, rangeEnd: we });
+        ws = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + 7);
+      }
+    } else {
+      // month
+      let m = new Date(startSafe.getFullYear(), startSafe.getMonth(), 1);
+      const endMonth = new Date(endSafe.getFullYear(), endSafe.getMonth(), 1);
+      while (m <= endMonth) {
+        const key = monthKey(m);
+        groups.set(key, { key, label: monthLabel(m), count: 0, monthIndex: m.getMonth(), year: m.getFullYear() });
+        m = new Date(m.getFullYear(), m.getMonth() + 1, 1);
+      }
     }
-    const max = days.reduce((m, x) => Math.max(m, x.count), 0) || 1;
 
-    return { newToday, pendingReview, approvedToday, declinedToday, moIssued, days, max };
-  }, [complaints, missionOrders]);
+    // Aggregate complaints into buckets
+    (complaints || []).forEach((c) => {
+      const t = c.created_at ? new Date(c.created_at) : null;
+      if (!t) return;
+      const td = startOfDayLocal(t);
+      if (td < startSafe || td > endSafe) return;
+
+      if (groupMode === 'day') {
+        const key = ymdKey(td);
+        const g = groups.get(key);
+        if (g) g.count += 1;
+      } else if (groupMode === 'week') {
+        const ws = startOfWeekMon(td);
+        const key = `${ymdKey(ws)}_W`;
+        const g = groups.get(key);
+        if (g) g.count += 1;
+      } else {
+        const key = monthKey(td);
+        const g = groups.get(key);
+        if (g) g.count += 1;
+      }
+    });
+
+    const rows = Array.from(groups.values());
+
+    // Sort chronologically
+    if (groupMode === 'day') {
+      rows.sort((a, b) => (a.key < b.key ? -1 : 1));
+    } else if (groupMode === 'week') {
+      rows.sort((a, b) => (a.key < b.key ? -1 : 1));
+    } else {
+      rows.sort((a, b) => {
+        const ay = a.year ?? 0;
+        const by = b.year ?? 0;
+        if (ay !== by) return ay - by;
+        return (a.monthIndex ?? 0) - (b.monthIndex ?? 0);
+      });
+    }
+
+    const max = rows.reduce((m, x) => Math.max(m, x.count), 0) || 1;
+
+    // Title timeframe
+    const fmt = (dt) => dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const timeframeLabel = appliedRange?.start && appliedRange?.end
+      ? `Custom (${fmt(startSafe)} — ${fmt(endSafe)})`
+      : 'Last 7 Days';
+
+    return {
+      newToday,
+      pendingReview,
+      approvedToday,
+      declinedToday,
+      moIssued,
+      days: rows,
+      max,
+      rangeStart: startSafe,
+      rangeEnd: endSafe,
+      groupMode,
+      timeframeLabel,
+    };
+  }, [complaints, missionOrders, appliedRange.start, appliedRange.end]);
 
   const updateComplaintStatus = async (complaintId, newStatus) => {
     setError('');
@@ -934,14 +1043,14 @@ export default function DashboardDirector() {
             <div className="dash-actions"></div>
           </div>
 
-          {tab === 'history' && (
+          {(tab === 'history' || tab === 'mission-orders-history') && (
             <div style={{ marginBottom: 20, display: 'grid', gap: 12 }}>
               {/* Search Bar */}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <div style={{ flex: 1, position: 'relative' }}>
                   <input
                     type="text"
-                    placeholder="Search complaints..."
+                    placeholder={tab === 'mission-orders-history' ? 'Search mission orders...' : 'Search complaints...'}
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     style={{
@@ -978,7 +1087,7 @@ export default function DashboardDirector() {
               </div>
 
               {/* Advanced Filters Panel */}
-              {filterOpen && (
+              {tab === 'history' && filterOpen && (
                 <div style={{
                   background: '#f8fafc',
                   border: '1px solid #e2e8f0',
@@ -1065,65 +1174,67 @@ export default function DashboardDirector() {
                   {/* Date Filters Section */}
                   <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
                     <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 800, color: '#0f172a' }}>Filter By Date</h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-                      {/* Month */}
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#64748b', marginBottom: 6 }}>Month</label>
-                        <select
-                          value={filters.dateMonth ? filters.dateMonth.toISOString().slice(0, 7) : ''}
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              const [year, month] = e.target.value.split('-');
-                              setFilters({ ...filters, dateMonth: new Date(year, parseInt(month) - 1, 1) });
+                    <div className="date-filter" style={{ justifySelf: 'start' }}>
+                      <button
+                        type="button"
+                        className="dash-select date-filter-btn"
+                        onClick={() => {
+                          if (!datePopoverOpen) {
+                            if (appliedRange.start && appliedRange.end) {
+                              setPendingRange({ start: appliedRange.start, end: appliedRange.end });
+                              setDatePreset('custom');
+                              setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
                             } else {
-                              setFilters({ ...filters, dateMonth: null });
+                              setCurrentWeekPending();
                             }
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            border: '1px solid #e2e8f0',
-                            borderRadius: 6,
-                            fontSize: 13,
-                            outline: 'none'
-                          }}
-                        >
-                          <option value="">All Months</option>
-                          {Array.from({ length: 12 }, (_, i) => {
-                            const d = new Date(new Date().getFullYear(), i, 1);
-                            return (
-                              <option key={i} value={d.toISOString().slice(0, 7)}>
-                                {d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-
-                      {/* Day */}
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#64748b', marginBottom: 6 }}>Day</label>
-                        <select
-                          value={filters.dateDay || ''}
-                          onChange={(e) => setFilters({ ...filters, dateDay: e.target.value ? parseInt(e.target.value) : null })}
-                          disabled={!filters.dateMonth}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            border: '1px solid #e2e8f0',
-                            borderRadius: 6,
-                            fontSize: 13,
-                            outline: 'none',
-                            opacity: !filters.dateMonth ? 0.5 : 1,
-                            cursor: !filters.dateMonth ? 'not-allowed' : 'pointer'
-                          }}
-                        >
-                          <option value="">All Days</option>
-                          {filters.dateMonth && Array.from({ length: new Date(filters.dateMonth.getFullYear(), filters.dateMonth.getMonth() + 1, 0).getDate() }, (_, i) => (
-                            <option key={i + 1} value={i + 1}>{i + 1}</option>
-                          ))}
-                        </select>
-                      </div>
+                          }
+                          setDatePopoverOpen((v) => !v);
+                        }}
+                        aria-haspopup="dialog"
+                        aria-expanded={datePopoverOpen}
+                      >
+                        {rangeLabel}
+                      </button>
+                      {datePopoverOpen ? (
+                        <div className="date-popover" role="dialog" aria-modal="true">
+                          <div className="date-presets">
+                            <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
+                            <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
+                            <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
+                            <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
+                            <div className="date-apply">
+                              <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
+                            </div>
+                          </div>
+                          <div className="cal-wrap">
+                            <div className="cal-header">
+                              <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
+                              <div className="cal-nav">
+                                <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
+                                <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
+                              </div>
+                            </div>
+                            <div className="cal-grid">
+                              {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
+                                <div key={`h-${d}`} className="cal-dow">{d}</div>
+                              ))}
+                              {calendarGrid(viewMonth).map((d) => {
+                                const inMonth = d.getMonth() === viewMonth.getMonth();
+                                const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
+                                const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
+                                const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
+                                const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
+                                return (
+                                  <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
+                                );
+                              })}
+                            </div>
+                            <div className="range-summary">
+                              {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end).replace('Date: ', '') : 'Select a start and end date'}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -1140,6 +1251,9 @@ export default function DashboardDirector() {
                         dateDay: null,
                       });
                       setSearch('');
+                      setAppliedRange({ start: null, end: null });
+                      setPendingRange({ start: null, end: null });
+                      setDatePreset('custom');
                     }}
                     style={{
                       padding: '8px 16px',
@@ -1190,10 +1304,78 @@ export default function DashboardDirector() {
                 <div className="dash-cell-sub">Awaiting Director review</div>
               </div>
               <div className="dash-tile" style={{ gridColumn: 'span 3' }}>
-                <h3 style={{ marginBottom: 10 }}>Complaints Submitted – Last 7 Days</h3>
+                <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+                  <h3 style={{ margin: 0 }}>Complaints Submitted – {generalSummary.timeframeLabel}</h3>
+
+                  {/* Custom date range filter (calendar picker) */}
+                  <div className="date-filter" style={{ marginLeft: 0 }}>
+                    <button
+                      type="button"
+                      className="dash-select date-filter-btn"
+                      onClick={() => {
+                        if (!datePopoverOpen) {
+                          if (appliedRange.start && appliedRange.end) {
+                            setPendingRange({ start: appliedRange.start, end: appliedRange.end });
+                            setDatePreset('custom');
+                            setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
+                          } else {
+                            setCurrentWeekPending();
+                          }
+                        }
+                        setDatePopoverOpen((v) => !v);
+                      }}
+                      aria-haspopup="dialog"
+                      aria-expanded={datePopoverOpen}
+                      title="Filter complaints submitted by date range"
+                    >
+                      {rangeLabel}
+                    </button>
+                    {datePopoverOpen ? (
+                      <div className="date-popover" role="dialog" aria-modal="true">
+                        <div className="date-presets">
+                          <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
+                          <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
+                          <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
+                          <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
+                          <div className="date-apply">
+                            <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
+                          </div>
+                        </div>
+                        <div className="cal-wrap">
+                          <div className="cal-header">
+                            <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
+                            <div className="cal-nav">
+                              <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
+                              <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
+                            </div>
+                          </div>
+                          <div className="cal-grid">
+                            {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
+                              <div key={`h-${d}`} className="cal-dow">{d}</div>
+                            ))}
+                            {calendarGrid(viewMonth).map((d) => {
+                              const inMonth = d.getMonth() === viewMonth.getMonth();
+                              const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
+                              const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
+                              const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
+                              const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
+                              return (
+                                <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
+                              );
+                            })}
+                          </div>
+                          <div className="range-summary">
+                            {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end).replace('Date: ', '') : 'Select a start and end date'}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
                 <div style={{ display: 'grid', gap: 8 }}>
                   {generalSummary.days.map((d) => (
-                    <div key={d.label} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 40px', alignItems: 'center', gap: 10 }}>
+                    <div key={d.key || d.label} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 40px', alignItems: 'center', gap: 10 }}>
                       <div className="dash-cell-sub" style={{ fontWeight: 800 }}>{d.label}</div>
                       <div style={{ background: '#e2e8f0', borderRadius: 999, height: 12, position: 'relative' }}>
                         <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${Math.round((d.count / (generalSummary.max || 1)) * 100)}%`, background: '#2563eb', borderRadius: 999 }}></div>

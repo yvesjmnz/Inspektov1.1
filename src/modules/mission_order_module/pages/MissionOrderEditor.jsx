@@ -117,7 +117,8 @@ export default function MissionOrderEditor() {
   const [reviewedAt, setReviewedAt] = useState(null);
   const [createdAt, setCreatedAt] = useState(null);
   const isApproved = String(missionOrderStatus || '').toLowerCase() === 'for inspection';
-  const isReadOnly = isApproved;
+  const isSubmitted = String(missionOrderStatus || '').toLowerCase() === 'issued';
+  const isReadOnly = isApproved || isSubmitted;
 
   // Sidebar nav state (reused from dashboard)
   const [navCollapsed, setNavCollapsed] = useState(false);
@@ -570,6 +571,9 @@ export default function MissionOrderEditor() {
         .update({ status: 'issued', submitted_by: userId, submitted_at: nowIso, updated_at: nowIso })
         .eq('id', missionOrderId);
       if (submitError) throw submitError;
+
+      // Update local UI immediately so the submit button is replaced without requiring a refresh.
+      setMissionOrderStatus('issued');
       baselineRef.current = { title: title || '', content: editorRef.current?.innerHTML ?? '' };
       setIsDirty(false);
       setToast('Submitted to Director for review.');
@@ -965,6 +969,24 @@ export default function MissionOrderEditor() {
                           <button className="mo-btn" type="button" onClick={() => window.print()} disabled={loading} title="Print this approved mission order." style={{ background: 'transparent', border: '1px solid #0f172a', color: '#0f172a' }}>
                             Print
                           </button>
+                        ) : isSubmitted ? (
+                          <div
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              padding: '8px 12px',
+                              borderRadius: 999,
+                              border: '1px solid #e2e8f0',
+                              background: '#f8fafc',
+                              color: '#0f172a',
+                              fontWeight: 900,
+                              fontSize: 13,
+                            }}
+                            title="This mission order has been submitted to the Director and is awaiting review."
+                          >
+                            Submitted
+                          </div>
                         ) : (
                           <>
                             <button className="mo-btn" type="button" onClick={handleSave} disabled={saving || loading} title="Save changes">
@@ -981,6 +1003,8 @@ export default function MissionOrderEditor() {
                     <div className="mo-note" style={{ marginTop: 10 }}>
                       {isApproved ? (
                         <>This mission order is <strong>approved</strong> and locked (read-only). You can print it.</>
+                      ) : isSubmitted ? (
+                        <>This mission order is <strong>submitted</strong> and locked (read-only) while awaiting Director review.</>
                       ) : (
                         <>Save your edits, assign inspectors, then click <strong>Submit to Director</strong> to forward the mission order for review.</>
                       )}
