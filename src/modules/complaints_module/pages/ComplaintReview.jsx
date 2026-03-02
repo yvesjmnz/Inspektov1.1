@@ -218,7 +218,8 @@ export default function ComplaintReview() {
         patch.approved_at = nowIso;
         patch.declined_by = null;
         patch.declined_at = null;
-        patch.decline_comment = null;
+        // Save comments even when approving (optional comments)
+        patch.decline_comment = declineComment.trim() || null;
       } else if (status === 'declined') {
         patch.declined_by = user.id;
         patch.declined_at = nowIso;

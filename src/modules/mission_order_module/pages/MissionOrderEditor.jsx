@@ -168,6 +168,7 @@ export default function MissionOrderEditor() {
   const [complaintError, setComplaintError] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
 
   const editorRef = useRef(null);
 
@@ -676,39 +677,219 @@ export default function MissionOrderEditor() {
           <div className="dash-maincol">
             <div className="mo-main">
               <section className="mo-card" style={{ position: 'relative' }}>
-                {/* Back Button - Top Left */}
-                <a
-                  href="/dashboard/head-inspector#todo"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 12px',
-                    background: 'transparent',
-                    border: '1px solid #cbd5e1',
+                {/* Top Bar: Back Button (Left) and Action Buttons (Right) */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 24 }}>
+                  {/* Back Button - Top Left */}
+                  <a
+                    href="/dashboard/head-inspector#todo"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 12px',
+                      background: 'transparent',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 8,
+                      color: '#0f172a',
+                      fontWeight: 700,
+                      fontSize: 14,
+                      textDecoration: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#f1f5f9';
+                      e.currentTarget.style.borderColor = '#94a3b8';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.borderColor = '#cbd5e1';
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+                      <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Back to Drafts
+                  </a>
+
+                  {/* Action Buttons - Top Right */}
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    {isApproved ? (
+                      <button className="mo-btn" type="button" onClick={() => window.print()} disabled={loading} title="Print this approved mission order." style={{ background: 'transparent', border: '1px solid #0f172a', color: '#0f172a' }}>
+                        Print
+                      </button>
+                    ) : isSubmitted ? (
+                      <div
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '8px 12px',
+                          borderRadius: 999,
+                          border: '1px solid #e2e8f0',
+                          background: '#f8fafc',
+                          color: '#0f172a',
+                          fontWeight: 900,
+                          fontSize: 13,
+                        }}
+                        title="This mission order has been submitted to the Director and is awaiting review."
+                      >
+                        Submitted
+                      </div>
+                    ) : (
+                      <>
+                        <button className="mo-btn" type="button" onClick={handleSave} disabled={saving || loading} title="Save changes">
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button className="mo-btn mo-btn-primary" type="button" onClick={handleSubmitToDirector} disabled={loading || saving || submitting || assignedInspectorIds.length === 0} title={assignedInspectorIds.length === 0 ? 'Assign at least one inspector before submitting.' : 'Forward to Director for review.'}>
+                          {submitting ? 'Submitting…' : 'Submit to Director'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Director Comments - Top Section */}
+                {directorComment && directorComment.trim() ? (
+                  <div style={{
+                    background: '#fff',
+                    border: '1px solid #e2e8f0',
                     borderRadius: 8,
-                    color: '#0f172a',
-                    fontWeight: 700,
-                    fontSize: 14,
-                    textDecoration: 'none',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                    marginBottom: 48,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#f1f5f9';
-                    e.currentTarget.style.borderColor = '#94a3b8';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'transparent';
-                    e.currentTarget.style.borderColor = '#cbd5e1';
-                  }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
-                    <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Back to Drafts
-                </a>
+                    padding: 12,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    marginBottom: 24,
+                  }}>
+                    <div style={{ fontWeight: 900, fontSize: 12, color: '#0f172a', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Director Comments
+                    </div>
+                    
+                    <div style={{
+                      background: '#f8fafc',
+                      borderRadius: 6,
+                      padding: 10,
+                      borderLeft: '3px solid #dc2626',
+                    }}>
+                      <div style={{
+                        color: '#0f172a',
+                        fontSize: 12,
+                        lineHeight: 1.4,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        marginBottom: 6,
+                      }}>
+                        {directorComment}
+                      </div>
+                      
+                      <div style={{
+                        fontSize: 10,
+                        color: '#64748b',
+                        fontWeight: 600,
+                      }}>
+                        {reviewedAt ? reviewedAt.toLocaleString() : '—'}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Complaint Details & Director Comments - Two Section Layout */}
+                {complaint ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
+                    {/* Left: Complaint Details */}
+                    <div style={{
+                      background: '#fff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 12,
+                      padding: 24,
+                    }} aria-label="Complaint Details">
+                      <div style={{ fontWeight: 900, fontSize: 16, color: '#0f172a', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Complaint Details
+                      </div>
+                      {complaintLoading ? <div className="mo-meta">Loading complaint…</div> : null}
+                      {complaintError ? <div className="mo-alert mo-alert-error">{complaintError}</div> : null}
+                      {complaint ? (
+                        <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '24px 32px', alignItems: 'start' }}>
+                          {/* Business Name */}
+                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business</div>
+                          <div>
+                            <div style={{ fontWeight: 900, fontSize: 14, color: '#0f172a', marginBottom: 4 }}>{complaint.business_name || '—'}</div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#475569' }}>{complaint.business_address || '—'}</div>
+                          </div>
+
+                          {/* Reported By */}
+                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Reported By</div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>{complaint.reporter_email || '—'}</div>
+
+                          {/* Submitted */}
+                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
+                            {complaint?.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
+                          </div>
+
+                          {/* Description */}
+                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 8 }}>Description</div>
+                          <div style={{ whiteSpace: 'pre-wrap', color: '#0f172a', fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>{complaint.complaint_description || '—'}</div>
+
+                          {/* Evidence */}
+                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 8 }}>Evidence</div>
+                          <div>
+                            {Array.isArray(complaint.image_urls) && complaint.image_urls.length > 0 ? (
+                              <div style={{ position: 'relative', width: '100%', maxWidth: 200, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 120 }}>
+                                <img
+                                  src={complaint.image_urls[0]}
+                                  alt="Evidence"
+                                  onClick={() => setPreviewImage(complaint.image_urls[0])}
+                                  style={{ maxWidth: '100%', maxHeight: 100, objectFit: 'contain', cursor: 'pointer' }}
+                                  loading="lazy"
+                                />
+                                {complaint.image_urls.length > 1 && (
+                                  <div style={{ position: 'absolute', bottom: 4, right: 4, background: '#0f172a', color: '#fff', fontWeight: 800, padding: '2px 6px', borderRadius: 4, fontSize: 10 }}>
+                                    1 / {complaint.image_urls.length}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div style={{ color: '#64748b', fontWeight: 700, fontSize: 13 }}>No images</div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* Right: Director Comments */}
+                    <div style={{
+                      background: '#fff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 12,
+                      padding: 24,
+                    }} aria-label="Director Comments">
+                      <div style={{ fontWeight: 900, fontSize: 16, color: '#0f172a', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Director Comments
+                      </div>
+                      {directorComment && directorComment.trim() ? (
+                        <div style={{
+                          background: '#f8fafc',
+                          borderRadius: 8,
+                          padding: 16,
+                          borderLeft: '4px solid #dc2626',
+                          color: '#0f172a',
+                          fontSize: 13,
+                          lineHeight: 1.6,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}>
+                          <div style={{ marginBottom: 12 }}>{directorComment}</div>
+                          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, paddingTop: 12, borderTop: '1px solid #e2e8f0' }}>
+                            Reviewed: {reviewedAt ? reviewedAt.toLocaleString() : '—'}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ color: '#94a3b8', fontWeight: 700, fontSize: 13, textAlign: 'center', padding: '32px 16px' }}>
+                          No director comments yet
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
 
                 {/* 2-column layout: left editor panel, right preview */}
                 <div
@@ -841,77 +1022,6 @@ export default function MissionOrderEditor() {
                       ) : null}
                     </div>
 
-                    {/* Show complaint link */}
-                    <div style={{ marginTop: 14 }}>
-                      <button
-                        type="button"
-                        className="mo-link"
-                        onClick={() => setShowComplaintSideBySide((v) => !v)}
-                        disabled={loading}
-                        title="Toggle complaint details"
-                        style={{ border: 'none', background: 'transparent', padding: 0 }}
-                      >
-                        {showComplaintSideBySide ? 'Hide Complaint Details' : 'Show Complaint Details'}
-                      </button>
-                    </div>
-
-                    {/* Complaint panel */}
-                    {showComplaintSideBySide ? (
-                      <aside style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 12, marginTop: 10 }} aria-label="Complaint Details">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-                          <div style={{ fontWeight: 900, color: '#0f172a' }}>Complaint Details</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                            {complaint?.authenticity_level ? (
-                              <span style={{ padding: '4px 8px', borderRadius: 999, fontSize: 12, fontWeight: 900, border: '1px solid #e2e8f0', background: String(complaint.authenticity_level).toLowerCase() === 'urgent' ? '#fee2e2' : '#e0f2fe', color: String(complaint.authenticity_level).toLowerCase() === 'urgent' ? '#991b1b' : '#075985' }} title="Urgency">
-                                {complaint.authenticity_level}
-                              </span>
-                            ) : null}
-                            <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>
-                              {complaint?.id ? `ID: ${complaint.id}` : ''}
-                            </div>
-                          </div>
-                        </div>
-                        <div style={{ height: 1, background: '#f1f5f9', margin: '10px 0' }} />
-                        {complaintLoading ? <div className="mo-meta">Loading complaint…</div> : null}
-                        {complaintError ? <div className="mo-alert mo-alert-error">{complaintError}</div> : null}
-                        {!complaint && !complaintLoading ? (
-                          <div className="mo-meta">No complaint record found.</div>
-                        ) : complaint ? (
-                          <div style={{ display: 'grid', gap: 10 }}>
-                            <div>
-                              <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Business</div>
-                              <div style={{ fontWeight: 900, color: '#0f172a' }}>{complaint.business_name || '—'}</div>
-                              <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>{complaint.business_address || '—'}</div>
-                            </div>
-                            <div>
-                              <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Description</div>
-                              <div style={{ whiteSpace: 'pre-wrap', color: '#0f172a', fontWeight: 700, fontSize: 13 }}>{complaint.complaint_description || '—'}</div>
-                            </div>
-                            <div style={{ display: 'grid', gap: 6 }}>
-                              <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Evidence</div>
-                              {Array.isArray(complaint.image_urls) && complaint.image_urls.length > 0 ? (
-                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                  {complaint.image_urls.slice(0, 6).map((url) => (
-                                    <a key={url} href={url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', height: 30, padding: '0 10px', borderRadius: 10, border: '1px solid #bfdbfe', background: '#eff6ff', color: '#1d4ed8', fontWeight: 900, textDecoration: 'none', fontSize: 12 }}>
-                                      View
-                                    </a>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div className="mo-meta">No images</div>
-                              )}
-                            </div>
-                            <div style={{ display: 'grid', gap: 6 }}>
-                              <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Submitted</div>
-                              <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 12 }}>
-                                {complaint?.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
-                              </div>
-                            </div>
-                          </div>
-                        ) : null}
-                      </aside>
-                    ) : null}
-
                     {/* Feedback */}
                     {toast ? <div className="mo-alert mo-alert-success" style={{ marginTop: 12 }}>{toast}</div> : null}
                     {error ? <div className="mo-alert mo-alert-error" style={{ marginTop: 12 }}>{error}</div> : null}
@@ -925,66 +1035,7 @@ export default function MissionOrderEditor() {
                       </div>
                     ) : null}
 
-                    {/* Bottom actions */}
-                    <div style={{ marginTop: 22, paddingTop: 10, borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                      <a
-                        className="mo-link"
-                        href="/dashboard/head-inspector"
-                        onClick={(e) => {
-                          if (!isDirty) return;
-                          e.preventDefault();
-                          setToast('You have made changes. Please click Save before leaving.');
-                        }}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                      >
-                        <span style={{ fontSize: 16 }}>←</span> Back
-                      </a>
-                      <div style={{ display: 'flex', gap: 10 }}>
-                        {isApproved ? (
-                          <button className="mo-btn" type="button" onClick={() => window.print()} disabled={loading} title="Print this approved mission order." style={{ background: 'transparent', border: '1px solid #0f172a', color: '#0f172a' }}>
-                            Print
-                          </button>
-                        ) : isSubmitted ? (
-                          <div
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 8,
-                              padding: '8px 12px',
-                              borderRadius: 999,
-                              border: '1px solid #e2e8f0',
-                              background: '#f8fafc',
-                              color: '#0f172a',
-                              fontWeight: 900,
-                              fontSize: 13,
-                            }}
-                            title="This mission order has been submitted to the Director and is awaiting review."
-                          >
-                            Submitted
-                          </div>
-                        ) : (
-                          <>
-                            <button className="mo-btn" type="button" onClick={handleSave} disabled={saving || loading} title="Save changes">
-                              {saving ? 'Saving…' : 'Save'}
-                            </button>
-                            <button className="mo-btn mo-btn-primary" type="button" onClick={handleSubmitToDirector} disabled={loading || saving || submitting || assignedInspectorIds.length === 0} title={assignedInspectorIds.length === 0 ? 'Assign at least one inspector before submitting.' : 'Forward to Director for review.'}>
-                              {submitting ? 'Submitting…' : 'Submit to Director'}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mo-note" style={{ marginTop: 10 }}>
-                      {isApproved ? (
-                        <>This mission order is <strong>approved</strong> and locked (read-only). You can print it.</>
-                      ) : isSubmitted ? (
-                        <>This mission order is <strong>submitted</strong> and locked (read-only) while awaiting Director review.</>
-                      ) : (
-                        <>Save your edits, assign inspectors, then click <strong>Submit to Director</strong> to forward the mission order for review.</>
-                      )}
-                    </div>
-                  </div>
+                                      </div>
 
                   <div style={{ background: '#e2e8f0', width: 1, alignSelf: 'stretch', marginTop: -28, marginBottom: -28 }} />
 
@@ -1048,6 +1099,71 @@ export default function MissionOrderEditor() {
           </div>
         </section>
       </main>
+
+      {/* Image Preview Overlay */}
+      {previewImage ? (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            cursor: 'pointer',
+          }}
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            style={{
+              position: 'relative',
+              maxWidth: '90vw',
+              maxHeight: '90vh',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setPreviewImage(null)}
+              style={{
+                position: 'absolute',
+                top: -40,
+                right: 0,
+                background: 'transparent',
+                border: 'none',
+                color: '#fff',
+                fontSize: 32,
+                cursor: 'pointer',
+                fontWeight: 300,
+                padding: 0,
+                width: 40,
+                height: 40,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              title="Close"
+            >
+              ×
+            </button>
+            <img
+              src={previewImage}
+              alt="Evidence Preview"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                objectFit: 'contain',
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
