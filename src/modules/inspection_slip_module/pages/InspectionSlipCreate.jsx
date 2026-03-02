@@ -17,6 +17,8 @@ export default function InspectionSlipCreate() {
   const [toast, setToast] = useState('');
 
   const [missionOrder, setMissionOrder] = useState(null);
+  const [complaint, setComplaint] = useState(null);
+
   const [businessSearch, setBusinessSearch] = useState('');
   const [businessResult, setBusinessResult] = useState(null);
   const [checkingBusiness, setCheckingBusiness] = useState(false);
@@ -42,6 +44,9 @@ export default function InspectionSlipCreate() {
   const [ownerType, setOwnerType] = useState('sole'); // 'sole' | 'corp'
 
   const [autoFillMessage, setAutoFillMessage] = useState('');
+
+  // Tabs: order required by UX
+  const [activeTab, setActiveTab] = useState('inspection_details'); // 'inspection_details' | 'inspection' | 'summary'
 
   // Businesses can have multiple line(s) of business. We store it as an editable list.
   const [lineOfBusinessList, setLineOfBusinessList] = useState(['']);
@@ -115,7 +120,7 @@ export default function InspectionSlipCreate() {
 
         const { data: mo, error: moError } = await supabase
           .from('mission_orders')
-          .select('id, title, status, complaint_id, created_at')
+          .select('id, title, content, status, complaint_id, created_at, updated_at, submitted_at')
           .eq('id', missionOrderId)
           .single();
 
@@ -143,17 +148,30 @@ export default function InspectionSlipCreate() {
 
         setMissionOrder(mo);
 
-        // Auto-detect complained business from linked complaint (if any).
+        // Load linked complaint (if any).
         if (mo?.complaint_id) {
-          const { data: complaint, error: complaintError } = await supabase
+          const { data: c, error: complaintError } = await supabase
             .from('complaints')
-            .select('id, business_name, business_address')
+            .select(
+              [
+                'id',
+                'business_name',
+                'business_address',
+                'complaint_description',
+                'reporter_email',
+                'created_at',
+                'status',
+              ].join(', ')
+            )
             .eq('id', mo.complaint_id)
             .single();
 
-          if (!complaintError && complaint) {
-            const name = (complaint.business_name || '').trim();
-            const addr = (complaint.business_address || '').trim();
+          if (!complaintError && c) {
+            setComplaint(c);
+
+            // Auto-detect complained business from linked complaint (if any).
+            const name = (c.business_name || '').trim();
+            const addr = (c.business_address || '').trim();
 
             if (name || addr) {
               const orClauses = [];
@@ -171,6 +189,7 @@ export default function InspectionSlipCreate() {
                   setBusinessResult({ matches: bizMatches });
                   setBusinessSearch(name || addr || '');
                   // Use the first match to pre-fill fields; inspector can override.
+                  // eslint-disable-next-line no-use-before-define
                   handleUseBusiness(bizMatches[0]);
                   setAutoFillMessage(
                     'Autofilled from registered business based on the complained business. Click a result card to change.'
@@ -188,10 +207,12 @@ export default function InspectionSlipCreate() {
             }
           }
         } else {
+          setComplaint(null);
           setAutoFillMessage('');
         }
       } catch (e) {
         setMissionOrder(null);
+        setComplaint(null);
         setError(e?.message || 'Failed to load mission order.');
       } finally {
         setLoading(false);
@@ -199,6 +220,7 @@ export default function InspectionSlipCreate() {
     };
 
     loadMissionOrder();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missionOrderId]);
 
   const getCanvasContextAndState = (who) => {
@@ -229,7 +251,6 @@ export default function InspectionSlipCreate() {
   };
 
   const handleSignatureStart = (who, event) => {
-    // Prevent page scroll while signing (mobile) and stop browser gestures.
     event.preventDefault();
 
     const { canvas, ctx, drawingRef, lastPosRef } = getCanvasContextAndState(who);
@@ -239,7 +260,6 @@ export default function InspectionSlipCreate() {
 
     const pointerIdRef = who === 'inspector' ? inspectorPointerIdRef : ownerPointerIdRef;
 
-    // Capture pointer so moves continue even if leaving the canvas bounds.
     if (event?.pointerId != null) {
       pointerIdRef.current = event.pointerId;
       try {
@@ -346,12 +366,6 @@ export default function InspectionSlipCreate() {
     }));
 
     // Pull multi-line LOB + total_employees from businesses_additional based on BIN.
-    // Your schema shows:
-    // - businesses.bin (text)
-    // - businesses_additional.bin (text, NOT NULL)
-    // - businesses_additional.line_of_business (text)
-    // - businesses_additional.total_employees (bigint)
-    // Auto-populate only when Sole Proprietor; still editable anytime.
     if (isSole) {
       try {
         const businessBin = String(b?.bin || '').trim();
@@ -365,7 +379,6 @@ export default function InspectionSlipCreate() {
         if (addErr) throw addErr;
         if (!addRows || addRows.length === 0) return;
 
-        // LOB can be multiple rows OR stored as a delimited string.
         const lobs = addRows
           .flatMap((r) => {
             const v = r?.line_of_business ?? '';
@@ -383,7 +396,6 @@ export default function InspectionSlipCreate() {
           setLineOfBusinessList(lobs);
         }
 
-        // total_employees appears per-row; prefer MAX to avoid overcounting.
         const maxEmployees = addRows
           .map((r) => Number(r?.total_employees || 0))
           .filter((n) => Number.isFinite(n) && n > 0)
@@ -396,10 +408,58 @@ export default function InspectionSlipCreate() {
           }));
         }
       } catch {
-        // Silent fail: do not block slip creation if businesses_additional is missing/not linked.
+        // Silent fail
       }
     }
   };
+
+  const formatStatus = (status) => {
+    if (!status) return 'Unknown';
+    const s = String(status || '').toLowerCase();
+    if (s === 'completed' || s === 'for_inspection' || s === 'for inspection') return 'For Inspection';
+    return String(status)
+      .replace(/_/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  const statusBadgeStyle = (status) => {
+    const s = String(status || '').toLowerCase();
+    let bg = '#e2e8f0';
+    let fg = '#0f172a';
+    if (['completed', 'approved'].includes(s)) {
+      bg = '#dcfce7';
+      fg = '#166534';
+    } else if (['cancelled', 'declined', 'rejected', 'invalid'].includes(s)) {
+      bg = '#fee2e2';
+      fg = '#991b1b';
+    } else if (['issued', 'submitted', 'pending', 'new'].includes(s)) {
+      bg = '#fef9c3';
+      fg = '#854d0e';
+    } else if (['on hold', 'on_hold', 'hold'].includes(s)) {
+      bg = '#dbeafe';
+      fg = '#1e40af';
+    }
+
+    return {
+      display: 'inline-flex',
+      alignItems: 'center',
+      padding: '3px 10px',
+      borderRadius: 999,
+      background: bg,
+      color: fg,
+      fontWeight: 900,
+      fontSize: 12,
+      border: '1px solid rgba(15, 23, 42, 0.08)',
+    };
+  };
+
+  const mapUrl = useMemo(() => {
+    const address = complaint?.business_address || '';
+    if (!address) return null;
+    return `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`;
+  }, [complaint?.business_address]);
 
   const handleCheckBusiness = async () => {
     if (!businessSearch.trim()) {
@@ -412,9 +472,6 @@ export default function InspectionSlipCreate() {
     setCheckingBusiness(true);
 
     try {
-      // Spec 1.3.5: validate business permit exists and is valid.
-      // We do a best-effort query based on the existing "businesses" table
-      // referenced elsewhere in the codebase.
       const q = businessSearch.trim();
       const { data, error: qError } = await supabase
         .from('businesses')
@@ -475,388 +532,749 @@ export default function InspectionSlipCreate() {
             <div className="mo-meta">Cannot create inspection slip.</div>
           ) : (
             <div style={{ display: 'grid', gap: 14, marginTop: 14 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div className="is-seg" role="tablist" aria-label="Inspection slip tabs">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === 'inspection_details'}
+                    className={activeTab === 'inspection_details' ? 'active' : ''}
+                    onClick={() => setActiveTab('inspection_details')}
+                  >
+                    Inspection Details
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === 'inspection'}
+                    className={activeTab === 'inspection' ? 'active' : ''}
+                    onClick={() => setActiveTab('inspection')}
+                  >
+                    Inspection
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === 'summary'}
+                    className={activeTab === 'summary' ? 'active' : ''}
+                    onClick={() => setActiveTab('summary')}
+                  >
+                    Summary
+                  </button>
+                </div>
+
+                <div style={{ color: '#64748b', fontWeight: 700, fontSize: 12 }}>
+                  You can switch tabs anytime—your inputs are preserved.
+                </div>
+              </div>
+
               {autoFillMessage ? (
-                <div className={autoFillMessage.toLowerCase().includes('no registered business found') ? 'is-alert' : 'mo-meta'} style={{ marginBottom: 4 }}>
+                <div
+                  className={
+                    autoFillMessage.toLowerCase().includes('no registered business found')
+                      ? 'is-alert'
+                      : 'mo-meta'
+                  }
+                  style={{ marginBottom: 4 }}
+                >
                   {autoFillMessage}
                 </div>
               ) : null}
 
-              <div className="is-card">
-                <div className="is-section-head">
-                  <div>
-                    <p className="is-section-title">Step 1: Validate Business Permit</p>
-                    <p className="is-section-sub">Select owner type, then search a registered business to autofill.</p>
-                  </div>
-                </div>
-
-                <div className="is-check-row" style={{ marginBottom: 12 }}>
-                  <div className="is-check-title">Owner Type</div>
-                  <div className="is-seg" role="group" aria-label="Owner type">
-                    <button
-                      type="button"
-                      className={ownerType === 'sole' ? 'active' : ''}
-                      onClick={() => setOwnerType('sole')}
-                      aria-pressed={ownerType === 'sole'}
-                      title="Sole Proprietor will autofill owner name fields when available"
-                    >
-                      Sole Proprietor
-                    </button>
-                    <button
-                      type="button"
-                      className={ownerType === 'corp' ? 'active' : ''}
-                      onClick={() => setOwnerType('corp')}
-                      aria-pressed={ownerType === 'corp'}
-                      title="Corporation will not autofill owner name fields"
-                    >
-                      Corporation
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <input
-                    className="is-input"
-                    value={businessSearch}
-                    onChange={(e) => setBusinessSearch(e.target.value)}
-                    placeholder="Enter permit number or business name"
-                    disabled={checkingBusiness}
-                    style={{ flex: '1 1 260px' }}
-                  />
-                  <button
-                    type="button"
-                    className="mo-btn mo-btn-primary is-btn-primary"
-                    onClick={handleCheckBusiness}
-                    disabled={checkingBusiness}
-                  >
-                    {checkingBusiness ? 'Checking…' : 'Check'}
-                  </button>
-                </div>
-
-                {businessResult ? (
-                  <div style={{ marginTop: 12 }}>
-                    <div style={{ color: '#0f172a', fontWeight: 900, marginBottom: 8 }}>
-                      Matches ({businessResult.matches.length})
+              {activeTab === 'inspection_details' ? (
+                <>
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Inspection Details</p>
+                        <p className="is-section-sub">Mission order + complaint details for your assigned inspection.</p>
+                      </div>
                     </div>
-                    {businessResult.matches.length === 0 ? (
-                      <div className="mo-meta">No matches.</div>
+
+                    <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+                      <div className="is-field">
+                        <label>Mission Order ID</label>
+                        <div style={{ fontWeight: 900, color: '#0f172a' }}>
+                          {missionOrderId ? `${String(missionOrderId).slice(0, 8)}…` : '—'}
+                        </div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Status</label>
+                        <div style={statusBadgeStyle(missionOrder?.status)}>{formatStatus(missionOrder?.status)}</div>
+                      </div>
+
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Title</label>
+                        <div style={{ fontWeight: 900, color: '#0f172a' }}>{missionOrder?.title || '—'}</div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Submitted</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                          {missionOrder?.submitted_at ? new Date(missionOrder.submitted_at).toLocaleString() : '—'}
+                        </div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Updated</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                          {missionOrder?.updated_at ? new Date(missionOrder.updated_at).toLocaleString() : '—'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mo-meta" style={{ marginTop: 12 }}>
+                      Mission order preview is read-only for inspectors.
+                    </div>
+
+                    <div
+                      className="mo-editor-wrap"
+                      aria-label="Mission Order Preview"
+                      style={{ marginTop: 12, background: '#fff' }}
+                    >
+                      <div
+                        className="mo-editor-preview"
+                        dangerouslySetInnerHTML={{
+                          __html: missionOrder?.content || '<p style="color:#64748b;">No content.</p>',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Business / Complaint Details</p>
+                        <p className="is-section-sub">Details pulled from the linked complaint (if any).</p>
+                      </div>
+                    </div>
+
+                    <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Business Name</label>
+                        <div style={{ fontWeight: 900, color: '#0f172a' }}>{complaint?.business_name || '—'}</div>
+                      </div>
+
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Address</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{complaint?.business_address || '—'}</div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Reporter Email</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{complaint?.reporter_email || '—'}</div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Complaint Status</label>
+                        <div style={statusBadgeStyle(complaint?.status)}>{formatStatus(complaint?.status)}</div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Submitted</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                          {complaint?.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
+                        </div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Complaint ID</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                          {complaint?.id ? `${String(complaint.id).slice(0, 8)}…` : '—'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="is-field" style={{ marginTop: 12 }}>
+                      <label>Complaint Description</label>
+                      <div
+                        style={{
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 10,
+                          padding: 12,
+                          background: '#f8fafc',
+                          whiteSpace: 'pre-wrap',
+                          color: '#0f172a',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {complaint?.complaint_description || '—'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Map Preview</p>
+                        <p className="is-section-sub">Uses the complaint business address.</p>
+                      </div>
+                    </div>
+
+                    {!mapUrl ? (
+                      <div className="mo-meta">No address available for map preview.</div>
                     ) : (
-                      <div style={{ display: 'grid', gap: 10 }}>
-                        {businessResult.matches.map((b) => (
-                          <div
-                            key={b.id || `${b.business_name}-${b.permit_number}`}
-                            className="is-match-card"
-                            onClick={() => handleUseBusiness(b)}
-                          >
-                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{b.business_name || '—'}</div>
-                            <div style={{ color: '#475569', fontWeight: 600, fontSize: 12 }}>
-                              Permit: {b.epermit_no || '—'}
-                            </div>
-                            {b.address || b.business_address || b.full_address ? (
-                              <div style={{ color: '#475569', fontWeight: 600, fontSize: 12 }}>
-                                Address: {b.address || b.business_address || b.full_address}
-                              </div>
-                            ) : null}
-                            {b.permit_status ? (
-                              <div style={{ color: '#475569', fontWeight: 600, fontSize: 12 }}>
-                                Status: {b.permit_status}
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
+                      <div
+                        style={{
+                          borderRadius: 12,
+                          overflow: 'hidden',
+                          border: '1px solid #e2e8f0',
+                          background: '#fff',
+                        }}
+                      >
+                        <iframe
+                          title="Business Location"
+                          src={mapUrl}
+                          width="100%"
+                          height="320"
+                          style={{ border: 0 }}
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                        />
                       </div>
                     )}
                   </div>
-                ) : null}
-              </div>
+                </>
+              ) : activeTab === 'inspection' ? (
+                <>
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Step 1: Validate Business Permit</p>
+                        <p className="is-section-sub">Select owner type, then search a registered business to autofill.</p>
+                      </div>
+                    </div>
 
-              <div className="is-card">
-                <div className="is-section-head">
-                  <div>
-                    <p className="is-section-title">Step 2: Line of Business</p>
-                    <p className="is-section-sub">Can be multiple lines. Autofilled for Sole Proprietor when available; editable anytime.</p>
-                  </div>
-                  <div>
-                    <button
-                      type="button"
-                      className="mo-btn mo-btn-secondary"
-                      onClick={() => setLineOfBusinessList((p) => [...p, ''])}
-                      title="Add another line of business"
-                    >
-                      + Add Line
-                    </button>
-                  </div>
-                </div>
+                    <div className="is-check-row" style={{ marginBottom: 12 }}>
+                      <div className="is-check-title">Owner Type</div>
+                      <div className="is-seg" role="group" aria-label="Owner type">
+                        <button
+                          type="button"
+                          className={ownerType === 'sole' ? 'active' : ''}
+                          onClick={() => setOwnerType('sole')}
+                          aria-pressed={ownerType === 'sole'}
+                          title="Sole Proprietor will autofill owner name fields when available"
+                        >
+                          Sole Proprietor
+                        </button>
+                        <button
+                          type="button"
+                          className={ownerType === 'corp' ? 'active' : ''}
+                          onClick={() => setOwnerType('corp')}
+                          aria-pressed={ownerType === 'corp'}
+                          title="Corporation will not autofill owner name fields"
+                        >
+                          Corporation
+                        </button>
+                      </div>
+                    </div>
 
-                <div style={{ display: 'grid', gap: 10 }}>
-                  {lineOfBusinessList.map((lob, idx) => (
-                    <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <input
                         className="is-input"
-                        value={lob}
-                        onChange={(e) =>
-                          setLineOfBusinessList((prev) => {
-                            const next = [...prev];
-                            next[idx] = e.target.value;
-                            return next;
-                          })
-                        }
-                        placeholder={`Line of business #${idx + 1}`}
-                        style={{ flex: '1 1 auto' }}
+                        value={businessSearch}
+                        onChange={(e) => setBusinessSearch(e.target.value)}
+                        placeholder="Enter permit number or business name"
+                        disabled={checkingBusiness}
+                        style={{ flex: '1 1 260px' }}
                       />
-                      {lineOfBusinessList.length > 1 ? (
+                      <button
+                        type="button"
+                        className="mo-btn mo-btn-primary is-btn-primary"
+                        onClick={handleCheckBusiness}
+                        disabled={checkingBusiness}
+                      >
+                        {checkingBusiness ? 'Checking…' : 'Check'}
+                      </button>
+                    </div>
+
+                    {businessResult ? (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ color: '#0f172a', fontWeight: 900, marginBottom: 8 }}>
+                          Matches ({businessResult.matches.length})
+                        </div>
+                        {businessResult.matches.length === 0 ? (
+                          <div className="mo-meta">No matches.</div>
+                        ) : (
+                          <div style={{ display: 'grid', gap: 10 }}>
+                            {businessResult.matches.map((b) => (
+                              <div
+                                key={b.id || `${b.business_name}-${b.permit_number}`}
+                                className="is-match-card"
+                                onClick={() => handleUseBusiness(b)}
+                              >
+                                <div style={{ fontWeight: 800, color: '#0f172a' }}>{b.business_name || '—'}</div>
+                                <div style={{ color: '#475569', fontWeight: 600, fontSize: 12 }}>
+                                  Permit: {b.epermit_no || '—'}
+                                </div>
+                                {b.address || b.business_address || b.full_address ? (
+                                  <div style={{ color: '#475569', fontWeight: 600, fontSize: 12 }}>
+                                    Address: {b.address || b.business_address || b.full_address}
+                                  </div>
+                                ) : null}
+                                {b.permit_status ? (
+                                  <div style={{ color: '#475569', fontWeight: 600, fontSize: 12 }}>
+                                    Status: {b.permit_status}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Step 2: Line of Business</p>
+                        <p className="is-section-sub">
+                          Can be multiple lines. Autofilled for Sole Proprietor when available; editable anytime.
+                        </p>
+                      </div>
+                      <div>
                         <button
                           type="button"
                           className="mo-btn mo-btn-secondary"
-                          onClick={() =>
-                            setLineOfBusinessList((prev) => prev.filter((_, i) => i !== idx))
-                          }
-                          title="Remove this line"
+                          onClick={() => setLineOfBusinessList((p) => [...p, ''])}
+                          title="Add another line of business"
                         >
-                          Remove
+                          + Add Line
                         </button>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="is-card">
-                <div className="is-section-head">
-                  <div>
-                    <p className="is-section-title">Step 3: Business Owner Details</p>
-                    <p className="is-section-sub">Owner identity and business name.</p>
-                  </div>
-                </div>
-
-                <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-                  <div className="is-field">
-                    <label>Last Name</label>
-                    <input
-                      className="is-input"
-                      value={ownerDetails.lastName}
-                      onChange={(e) => setOwnerDetails((prev) => ({ ...prev, lastName: e.target.value }))}
-                      placeholder="Enter last name"
-                    />
-                  </div>
-
-                  <div className="is-field">
-                    <label>First Name</label>
-                    <input
-                      className="is-input"
-                      value={ownerDetails.firstName}
-                      onChange={(e) => setOwnerDetails((prev) => ({ ...prev, firstName: e.target.value }))}
-                      placeholder="Enter first name"
-                    />
-                  </div>
-
-                  <div className="is-field">
-                    <label>Middle Name</label>
-                    <input
-                      className="is-input"
-                      value={ownerDetails.middleName}
-                      onChange={(e) => setOwnerDetails((prev) => ({ ...prev, middleName: e.target.value }))}
-                      placeholder="Enter middle name"
-                    />
-                  </div>
-
-                  <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                    <label>Business Name</label>
-                    <input
-                      className="is-input"
-                      value={ownerDetails.businessName}
-                      onChange={(e) => setOwnerDetails((prev) => ({ ...prev, businessName: e.target.value }))}
-                      placeholder="Enter business name"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="is-card">
-                <div className="is-section-head">
-                  <div>
-                    <p className="is-section-title">Step 4: Business Details</p>
-                    <p className="is-section-sub">Key information needed for validation and inspection.</p>
-                  </div>
-                </div>
-
-                <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-                  <div className="is-field">
-                    <label>BIN #</label>
-                    <input
-                      className="is-input"
-                      value={businessDetails.bin}
-                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, bin: e.target.value }))}
-                      placeholder="Enter BIN #"
-                    />
-                  </div>
-
-                  <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                    <label>Address</label>
-                    <input
-                      className="is-input"
-                      value={businessDetails.address}
-                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, address: e.target.value }))}
-                      placeholder="Address (autofilled when selecting a business, editable)"
-                    />
-                  </div>
-
-                  <div className="is-field">
-                    <label>Estimated Area (SQM)</label>
-                    <input
-                      className="is-input"
-                      type="number"
-                      min="0"
-                      value={businessDetails.estimatedAreaSqm}
-                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, estimatedAreaSqm: e.target.value }))}
-                      placeholder="Enter estimated area"
-                    />
-                  </div>
-
-                  <div className="is-field">
-                    <label>No. of Employees</label>
-                    <input
-                      className="is-input"
-                      type="number"
-                      min="0"
-                      value={businessDetails.numberOfEmployees}
-                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, numberOfEmployees: e.target.value }))}
-                      placeholder="Enter number of employees"
-                    />
-                  </div>
-
-                  <div className="is-field">
-                    <label>Landline #</label>
-                    <input
-                      className="is-input"
-                      value={businessDetails.landline}
-                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, landline: e.target.value }))}
-                      placeholder="Enter landline #"
-                    />
-                  </div>
-
-                  <div className="is-field">
-                    <label>Cellphone #</label>
-                    <input
-                      className="is-input"
-                      value={businessDetails.cellphone}
-                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, cellphone: e.target.value }))}
-                      placeholder="Enter cellphone #"
-                    />
-                  </div>
-
-                  <div className="is-field">
-                    <label>Email Address</label>
-                    <input
-                      className="is-input"
-                      type="email"
-                      value={businessDetails.email}
-                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, email: e.target.value }))}
-                      placeholder="Enter email address"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="is-card">
-                <div className="is-section-head">
-                  <div>
-                    <p className="is-section-title">Step 5: Compliance Checklist</p>
-                    <p className="is-section-sub">Use Compliant / Non-Compliant / N/A per item.</p>
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gap: 10 }}>
-                  {[
-                    { key: 'business_permit', label: 'Business Permit (Presented)' },
-                    { key: 'with_cctv', label: 'With CCTV' },
-                    { key: 'signage_2sqm', label: '2sqm Signage' },
-                  ].map((item) => (
-                    <div key={item.key} className="is-check-row">
-                      <div className="is-check-title">{item.label}</div>
-                      <div className="is-seg" role="group" aria-label={`${item.label} status`}>
-                        {[
-                          { v: 'compliant', t: 'Compliant' },
-                          { v: 'non_compliant', t: 'Non-Compliant' },
-                          { v: 'na', t: 'N/A' },
-                        ].map((opt) => (
-                          <button
-                            key={opt.v}
-                            type="button"
-                            className={checklist[item.key] === opt.v ? 'active' : ''}
-                            onClick={() => setChecklist((p) => ({ ...p, [item.key]: opt.v }))}
-                            aria-pressed={checklist[item.key] === opt.v}
-                          >
-                            {opt.t}
-                          </button>
-                        ))}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
 
-              <div className="is-card">
-                <div className="is-section-head">
-                  <div>
-                    <p className="is-section-title">Signatures</p>
-                    <p className="is-section-sub">Sign inside the box. Use Clear only if needed.</p>
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-                  <div className="is-field">
-                    <label>Inspector Signature</label>
-                    <div className="is-sign-wrap">
-                      <canvas
-                        ref={inspectorCanvasRef}
-                        width={400}
-                        height={120}
-                        style={{ width: '100%', height: 120, display: 'block', background: 'transparent', touchAction: 'none' }}
-                        onPointerDown={(e) => handleSignatureStart('inspector', e)}
-                        onPointerMove={(e) => handleSignatureMove('inspector', e)}
-                        onPointerUp={(e) => handleSignatureEnd('inspector', e)}
-                        onPointerCancel={(e) => handleSignatureEnd('inspector', e)}
-                        onPointerLeave={(e) => handleSignatureEnd('inspector', e)}
-                      />
-                      {!inspectorSignature ? <div className="is-sign-hint">Sign here</div> : null}
-                      <button
-                        type="button"
-                        className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
-                        onClick={() => handleSignatureClear('inspector')}
-                        title="Clear signature"
-                      >
-                        Clear
-                      </button>
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {lineOfBusinessList.map((lob, idx) => (
+                        <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <input
+                            className="is-input"
+                            value={lob}
+                            onChange={(e) =>
+                              setLineOfBusinessList((prev) => {
+                                const next = [...prev];
+                                next[idx] = e.target.value;
+                                return next;
+                              })
+                            }
+                            placeholder={`Line of business #${idx + 1}`}
+                            style={{ flex: '1 1 auto' }}
+                          />
+                          {lineOfBusinessList.length > 1 ? (
+                            <button
+                              type="button"
+                              className="mo-btn mo-btn-secondary"
+                              onClick={() => setLineOfBusinessList((prev) => prev.filter((_, i) => i !== idx))}
+                              title="Remove this line"
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
                     </div>
                   </div>
 
-                  <div className="is-field">
-                    <label>Business Owner Signature</label>
-                    <div className="is-sign-wrap">
-                      <canvas
-                        ref={ownerCanvasRef}
-                        width={400}
-                        height={120}
-                        style={{ width: '100%', height: 120, display: 'block', background: 'transparent', touchAction: 'none' }}
-                        onPointerDown={(e) => handleSignatureStart('owner', e)}
-                        onPointerMove={(e) => handleSignatureMove('owner', e)}
-                        onPointerUp={(e) => handleSignatureEnd('owner', e)}
-                        onPointerCancel={(e) => handleSignatureEnd('owner', e)}
-                        onPointerLeave={(e) => handleSignatureEnd('owner', e)}
-                      />
-                      {!ownerSignature ? <div className="is-sign-hint">Sign here</div> : null}
-                      <button
-                        type="button"
-                        className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
-                        onClick={() => handleSignatureClear('owner')}
-                        title="Clear signature"
-                      >
-                        Clear
-                      </button>
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Step 3: Business Owner Details</p>
+                        <p className="is-section-sub">Owner identity and business name.</p>
+                      </div>
+                    </div>
+
+                    <div
+                      className="is-grid"
+                      style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
+                    >
+                      <div className="is-field">
+                        <label>Last Name</label>
+                        <input
+                          className="is-input"
+                          value={ownerDetails.lastName}
+                          onChange={(e) => setOwnerDetails((prev) => ({ ...prev, lastName: e.target.value }))}
+                          placeholder="Enter last name"
+                        />
+                      </div>
+
+                      <div className="is-field">
+                        <label>First Name</label>
+                        <input
+                          className="is-input"
+                          value={ownerDetails.firstName}
+                          onChange={(e) => setOwnerDetails((prev) => ({ ...prev, firstName: e.target.value }))}
+                          placeholder="Enter first name"
+                        />
+                      </div>
+
+                      <div className="is-field">
+                        <label>Middle Name</label>
+                        <input
+                          className="is-input"
+                          value={ownerDetails.middleName}
+                          onChange={(e) => setOwnerDetails((prev) => ({ ...prev, middleName: e.target.value }))}
+                          placeholder="Enter middle name"
+                        />
+                      </div>
+
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Business Name</label>
+                        <input
+                          className="is-input"
+                          value={ownerDetails.businessName}
+                          onChange={(e) =>
+                            setOwnerDetails((prev) => ({ ...prev, businessName: e.target.value }))
+                          }
+                          placeholder="Enter business name"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Step 4: Business Details</p>
+                        <p className="is-section-sub">Key information needed for validation and inspection.</p>
+                      </div>
+                    </div>
+
+                    <div
+                      className="is-grid"
+                      style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
+                    >
+                      <div className="is-field">
+                        <label>BIN #</label>
+                        <input
+                          className="is-input"
+                          value={businessDetails.bin}
+                          onChange={(e) => setBusinessDetails((prev) => ({ ...prev, bin: e.target.value }))}
+                          placeholder="Enter BIN #"
+                        />
+                      </div>
+
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Address</label>
+                        <input
+                          className="is-input"
+                          value={businessDetails.address}
+                          onChange={(e) =>
+                            setBusinessDetails((prev) => ({ ...prev, address: e.target.value }))
+                          }
+                          placeholder="Address (autofilled when selecting a business, editable)"
+                        />
+                      </div>
+
+                      <div className="is-field">
+                        <label>Estimated Area (SQM)</label>
+                        <input
+                          className="is-input"
+                          type="number"
+                          min="0"
+                          value={businessDetails.estimatedAreaSqm}
+                          onChange={(e) =>
+                            setBusinessDetails((prev) => ({ ...prev, estimatedAreaSqm: e.target.value }))
+                          }
+                          placeholder="Enter estimated area"
+                        />
+                      </div>
+
+                      <div className="is-field">
+                        <label>No. of Employees</label>
+                        <input
+                          className="is-input"
+                          type="number"
+                          min="0"
+                          value={businessDetails.numberOfEmployees}
+                          onChange={(e) =>
+                            setBusinessDetails((prev) => ({ ...prev, numberOfEmployees: e.target.value }))
+                          }
+                          placeholder="Enter number of employees"
+                        />
+                      </div>
+
+                      <div className="is-field">
+                        <label>Landline #</label>
+                        <input
+                          className="is-input"
+                          value={businessDetails.landline}
+                          onChange={(e) =>
+                            setBusinessDetails((prev) => ({ ...prev, landline: e.target.value }))
+                          }
+                          placeholder="Enter landline #"
+                        />
+                      </div>
+
+                      <div className="is-field">
+                        <label>Cellphone #</label>
+                        <input
+                          className="is-input"
+                          value={businessDetails.cellphone}
+                          onChange={(e) =>
+                            setBusinessDetails((prev) => ({ ...prev, cellphone: e.target.value }))
+                          }
+                          placeholder="Enter cellphone #"
+                        />
+                      </div>
+
+                      <div className="is-field">
+                        <label>Email Address</label>
+                        <input
+                          className="is-input"
+                          type="email"
+                          value={businessDetails.email}
+                          onChange={(e) => setBusinessDetails((prev) => ({ ...prev, email: e.target.value }))}
+                          placeholder="Enter email address"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Step 5: Compliance Checklist</p>
+                        <p className="is-section-sub">Use Compliant / Non-Compliant / N/A per item.</p>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {[
+                        { key: 'business_permit', label: 'Business Permit (Presented)' },
+                        { key: 'with_cctv', label: 'With CCTV' },
+                        { key: 'signage_2sqm', label: '2sqm Signage' },
+                      ].map((item) => (
+                        <div key={item.key} className="is-check-row">
+                          <div className="is-check-title">{item.label}</div>
+                          <div className="is-seg" role="group" aria-label={`${item.label} status`}>
+                            {[
+                              { v: 'compliant', t: 'Compliant' },
+                              { v: 'non_compliant', t: 'Non-Compliant' },
+                              { v: 'na', t: 'N/A' },
+                            ].map((opt) => (
+                              <button
+                                key={opt.v}
+                                type="button"
+                                className={checklist[item.key] === opt.v ? 'active' : ''}
+                                onClick={() => setChecklist((p) => ({ ...p, [item.key]: opt.v }))}
+                                aria-pressed={checklist[item.key] === opt.v}
+                              >
+                                {opt.t}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                                  </>
+              ) : (
+                <>
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Summary</p>
+                        <p className="is-section-sub">Review key details below. Switch back to Inspection to edit anything.</p>
+                      </div>
+                    </div>
+
+                    <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+                      <div className="is-field">
+                        <label>Owner Type</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                          {ownerType === 'sole' ? 'Sole Proprietor' : 'Corporation'}
+                        </div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>BIN #</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.bin || '—'}</div>
+                      </div>
+
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Business Name</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{ownerDetails.businessName || '—'}</div>
+                      </div>
+
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Business Address</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.address || '—'}</div>
+                      </div>
+
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Owner Name</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                          {`${ownerDetails.lastName || ''}${
+                            ownerDetails.lastName && (ownerDetails.firstName || ownerDetails.middleName) ? ', ' : ''
+                          }${ownerDetails.firstName || ''}${ownerDetails.middleName ? ` ${ownerDetails.middleName}` : ''}`.trim() ||
+                            '—'}
+                        </div>
+                      </div>
+
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Line(s) of Business</label>
+                        <div style={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                          {lineOfBusinessList.filter(Boolean).length
+                            ? lineOfBusinessList
+                                .filter(Boolean)
+                                .map((x) => `• ${x}`)
+                                .join('\n')
+                            : '—'}
+                        </div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Estimated Area (SQM)</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.estimatedAreaSqm || '—'}</div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>No. of Employees</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.numberOfEmployees || '—'}</div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Landline</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.landline || '—'}</div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Cellphone</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.cellphone || '—'}</div>
+                      </div>
+
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Email</label>
+                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.email || '—'}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Compliance Checklist</p>
+                        <p className="is-section-sub">Summary of the inspector’s selections.</p>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {[
+                        { key: 'business_permit', label: 'Business Permit (Presented)' },
+                        { key: 'with_cctv', label: 'With CCTV' },
+                        { key: 'signage_2sqm', label: '2sqm Signage' },
+                      ].map((item) => {
+                        const v = checklist[item.key];
+                        const text =
+                          v === 'compliant'
+                            ? 'Compliant'
+                            : v === 'non_compliant'
+                              ? 'Non-Compliant'
+                              : 'N/A';
+
+                        return (
+                          <div key={item.key} className="is-check-row">
+                            <div className="is-check-title">{item.label}</div>
+                            <div style={{ fontWeight: 900, color: '#0f172a' }}>{text}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Signatures</p>
+                        <p className="is-section-sub">Capture signatures after the inspection if needed.</p>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                        gap: 12,
+                      }}
+                    >
+                      <div className="is-field">
+                        <label>Inspector Signature</label>
+                        <div className="is-sign-wrap">
+                          <canvas
+                            ref={inspectorCanvasRef}
+                            width={400}
+                            height={120}
+                            style={{
+                              width: '100%',
+                              height: 120,
+                              display: 'block',
+                              background: 'transparent',
+                              touchAction: 'none',
+                            }}
+                            onPointerDown={(e) => handleSignatureStart('inspector', e)}
+                            onPointerMove={(e) => handleSignatureMove('inspector', e)}
+                            onPointerUp={(e) => handleSignatureEnd('inspector', e)}
+                            onPointerCancel={(e) => handleSignatureEnd('inspector', e)}
+                            onPointerLeave={(e) => handleSignatureEnd('inspector', e)}
+                          />
+                          {!inspectorSignature ? <div className="is-sign-hint">Sign here</div> : null}
+                          <button
+                            type="button"
+                            className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
+                            onClick={() => handleSignatureClear('inspector')}
+                            title="Clear signature"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="is-field">
+                        <label>Business Owner Signature</label>
+                        <div className="is-sign-wrap">
+                          <canvas
+                            ref={ownerCanvasRef}
+                            width={400}
+                            height={120}
+                            style={{
+                              width: '100%',
+                              height: 120,
+                              display: 'block',
+                              background: 'transparent',
+                              touchAction: 'none',
+                            }}
+                            onPointerDown={(e) => handleSignatureStart('owner', e)}
+                            onPointerMove={(e) => handleSignatureMove('owner', e)}
+                            onPointerUp={(e) => handleSignatureEnd('owner', e)}
+                            onPointerCancel={(e) => handleSignatureEnd('owner', e)}
+                            onPointerLeave={(e) => handleSignatureEnd('owner', e)}
+                          />
+                          {!ownerSignature ? <div className="is-sign-hint">Sign here</div> : null}
+                          <button
+                            type="button"
+                            className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
+                            onClick={() => handleSignatureClear('owner')}
+                            title="Clear signature"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </section>

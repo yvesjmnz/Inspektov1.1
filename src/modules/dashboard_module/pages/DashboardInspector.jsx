@@ -415,7 +415,6 @@ export default function DashboardInspector() {
                             <th style={{ width: 160 }}>MO Status</th>
                             <th style={{ width: 200 }}>Assigned</th>
                             <th style={{ width: 200 }}>Updated</th>
-                            <th style={{ width: 180 }}>Details</th>
                             <th style={{ width: 190 }}>Inspection Slip</th>
                           </tr>
                         </thead>
@@ -456,11 +455,6 @@ export default function DashboardInspector() {
                                 {r.mission_order_updated_at ? new Date(r.mission_order_updated_at).toLocaleString() : '—'}
                               </td>
                               <td style={{ padding: '12px' }}>
-                                <a className="dash-btn" href={`/dashboard/inspector/inspection?id=${r.mission_order_id}`}>
-                                  Open
-                                </a>
-                              </td>
-                              <td style={{ padding: '12px' }}>
                                 <a className="dash-btn" href={`/inspection-slip/create?missionOrderId=${r.mission_order_id}`}>
                                   Start Inspection
                                 </a>
@@ -475,8 +469,7 @@ export default function DashboardInspector() {
               </div>
 
               <div className="dash-note">
-                “Open” shows the mission order (read-only), business details, and a map preview based on the business
-                address.
+                Use “Start Inspection” to open the inspection slip (includes inspection details, checklist, and signatures).
               </div>
             </div>
           </div>

@@ -167,9 +167,6 @@ export default function InspectorInspectionDetails() {
               <p className="dash-subtitle">Mission order + business details for your assigned inspection.</p>
             </div>
             <div className="dash-actions">
-              <a className="dash-link" href="/dashboard/inspector">
-                Back to Assigned Inspections
-              </a>
               <button className="dash-logout" type="button" onClick={handleLogout}>
                 Logout
               </button>
