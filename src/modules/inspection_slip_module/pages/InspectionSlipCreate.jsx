@@ -55,12 +55,45 @@ export default function InspectionSlipCreate() {
 
   const inspectorCanvasRef = useRef(null);
   const ownerCanvasRef = useRef(null);
+
+  // Track drawing state + last point for each canvas.
   const inspectorDrawing = useRef(false);
   const ownerDrawing = useRef(false);
   const inspectorLastPos = useRef({ x: 0, y: 0 });
   const ownerLastPos = useRef({ x: 0, y: 0 });
+
+  // Pointer id tracking helps avoid stray moves when a different finger touches the screen.
+  const inspectorPointerIdRef = useRef(null);
+  const ownerPointerIdRef = useRef(null);
+
   const [inspectorSignature, setInspectorSignature] = useState('');
   const [ownerSignature, setOwnerSignature] = useState('');
+
+  const configureCanvas = (canvas) => {
+    if (!canvas) return;
+
+    // Fix cursor/ink mismatch on desktop by matching the canvas internal pixel size
+    // to its rendered size, then scaling by devicePixelRatio.
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+
+    const nextWidth = Math.max(1, Math.round(rect.width * dpr));
+    const nextHeight = Math.max(1, Math.round(rect.height * dpr));
+
+    // Only resize when needed (resizing clears the canvas).
+    if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
+      canvas.width = nextWidth;
+      canvas.height = nextHeight;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw using CSS pixel coordinates
+    }
+
+    // Prevent touch gestures (scroll/pinch) from interfering with signing on mobile.
+    canvas.style.touchAction = 'none';
+  };
 
   useEffect(() => {
     if (!toast) return;
@@ -180,17 +213,42 @@ export default function InspectionSlipCreate() {
 
   const getEventPos = (event, canvas) => {
     const rect = canvas.getBoundingClientRect();
-    const e = event.touches && event.touches.length ? event.touches[0] : event;
+
+    // Normalize coordinates across mouse/touch/pointer events.
+    const point =
+      event?.touches && event.touches.length
+        ? event.touches[0]
+        : event?.changedTouches && event.changedTouches.length
+          ? event.changedTouches[0]
+          : event;
+
     return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+      x: (point?.clientX ?? 0) - rect.left,
+      y: (point?.clientY ?? 0) - rect.top,
     };
   };
 
   const handleSignatureStart = (who, event) => {
+    // Prevent page scroll while signing (mobile) and stop browser gestures.
     event.preventDefault();
+
     const { canvas, ctx, drawingRef, lastPosRef } = getCanvasContextAndState(who);
     if (!canvas || !ctx) return;
+
+    configureCanvas(canvas);
+
+    const pointerIdRef = who === 'inspector' ? inspectorPointerIdRef : ownerPointerIdRef;
+
+    // Capture pointer so moves continue even if leaving the canvas bounds.
+    if (event?.pointerId != null) {
+      pointerIdRef.current = event.pointerId;
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch {
+        // Ignore capture errors (older browsers).
+      }
+    }
+
     const pos = getEventPos(event, canvas);
     drawingRef.current = true;
     lastPosRef.current = pos;
@@ -199,7 +257,14 @@ export default function InspectionSlipCreate() {
   const handleSignatureMove = (who, event) => {
     const { canvas, ctx, drawingRef, lastPosRef } = getCanvasContextAndState(who);
     if (!canvas || !ctx || !drawingRef.current) return;
+
+    const pointerIdRef = who === 'inspector' ? inspectorPointerIdRef : ownerPointerIdRef;
+    if (event?.pointerId != null && pointerIdRef.current != null && event.pointerId !== pointerIdRef.current) {
+      return;
+    }
+
     event.preventDefault();
+
     const pos = getEventPos(event, canvas);
     ctx.strokeStyle = '#0f172a';
     ctx.lineWidth = 2;
@@ -211,10 +276,18 @@ export default function InspectionSlipCreate() {
     lastPosRef.current = pos;
   };
 
-  const handleSignatureEnd = (who) => {
+  const handleSignatureEnd = (who, event) => {
     const { canvas, drawingRef } = getCanvasContextAndState(who);
     if (!canvas) return;
+
+    const pointerIdRef = who === 'inspector' ? inspectorPointerIdRef : ownerPointerIdRef;
+    if (event?.pointerId != null && pointerIdRef.current != null && event.pointerId !== pointerIdRef.current) {
+      return;
+    }
+
     drawingRef.current = false;
+    pointerIdRef.current = null;
+
     const dataUrl = canvas.toDataURL('image/png');
     if (who === 'inspector') {
       setInspectorSignature(dataUrl);
@@ -738,14 +811,12 @@ export default function InspectionSlipCreate() {
                         ref={inspectorCanvasRef}
                         width={400}
                         height={120}
-                        style={{ width: '100%', height: 120, display: 'block', background: 'transparent' }}
-                        onMouseDown={(e) => handleSignatureStart('inspector', e)}
-                        onMouseMove={(e) => handleSignatureMove('inspector', e)}
-                        onMouseUp={() => handleSignatureEnd('inspector')}
-                        onMouseLeave={() => handleSignatureEnd('inspector')}
-                        onTouchStart={(e) => handleSignatureStart('inspector', e)}
-                        onTouchMove={(e) => handleSignatureMove('inspector', e)}
-                        onTouchEnd={() => handleSignatureEnd('inspector')}
+                        style={{ width: '100%', height: 120, display: 'block', background: 'transparent', touchAction: 'none' }}
+                        onPointerDown={(e) => handleSignatureStart('inspector', e)}
+                        onPointerMove={(e) => handleSignatureMove('inspector', e)}
+                        onPointerUp={(e) => handleSignatureEnd('inspector', e)}
+                        onPointerCancel={(e) => handleSignatureEnd('inspector', e)}
+                        onPointerLeave={(e) => handleSignatureEnd('inspector', e)}
                       />
                       {!inspectorSignature ? <div className="is-sign-hint">Sign here</div> : null}
                       <button
@@ -766,14 +837,12 @@ export default function InspectionSlipCreate() {
                         ref={ownerCanvasRef}
                         width={400}
                         height={120}
-                        style={{ width: '100%', height: 120, display: 'block', background: 'transparent' }}
-                        onMouseDown={(e) => handleSignatureStart('owner', e)}
-                        onMouseMove={(e) => handleSignatureMove('owner', e)}
-                        onMouseUp={() => handleSignatureEnd('owner')}
-                        onMouseLeave={() => handleSignatureEnd('owner')}
-                        onTouchStart={(e) => handleSignatureStart('owner', e)}
-                        onTouchMove={(e) => handleSignatureMove('owner', e)}
-                        onTouchEnd={() => handleSignatureEnd('owner')}
+                        style={{ width: '100%', height: 120, display: 'block', background: 'transparent', touchAction: 'none' }}
+                        onPointerDown={(e) => handleSignatureStart('owner', e)}
+                        onPointerMove={(e) => handleSignatureMove('owner', e)}
+                        onPointerUp={(e) => handleSignatureEnd('owner', e)}
+                        onPointerCancel={(e) => handleSignatureEnd('owner', e)}
+                        onPointerLeave={(e) => handleSignatureEnd('owner', e)}
                       />
                       {!ownerSignature ? <div className="is-sign-hint">Sign here</div> : null}
                       <button
