@@ -628,7 +628,7 @@ export default function MissionOrderEditor() {
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img src="/ui_icons/menu.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>To Do</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Draft</span>
                 </a>
               </li>
               <li>
@@ -676,77 +676,52 @@ export default function MissionOrderEditor() {
           <div className="dash-maincol">
             <div className="mo-main">
               <section className="mo-card" style={{ position: 'relative' }}>
-                {/* 2-column layout: left preview, right editor panel */}
+                {/* Back Button - Top Left */}
+                <a
+                  href="/dashboard/head-inspector#todo"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 12px',
+                    background: 'transparent',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 8,
+                    color: '#0f172a',
+                    fontWeight: 700,
+                    fontSize: 14,
+                    textDecoration: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    marginBottom: 48,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#f1f5f9';
+                    e.currentTarget.style.borderColor = '#94a3b8';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.borderColor = '#cbd5e1';
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+                    <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Back to Drafts
+                </a>
+
+                {/* 2-column layout: left editor panel, right preview */}
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'minmax(0, 9fr) 1px minmax(0, 7fr)',
+                    gridTemplateColumns: 'minmax(0, 7fr) 1px minmax(0, 9fr)',
                     gap: 0,
                     alignItems: 'stretch',
                     marginTop: 0,
                   }}
                 >
-                  {/* Left: Preview */}
-                  <div style={{ paddingRight: 40 }}>
-                    {/* Preview header */}
-                    
-                    {/* Gray workspace with equal padding, paper centered */}
-                    <div className="mo-editor-wrap" style={{ marginTop: 0, padding: 40, boxSizing: 'border-box', display: 'flex', justifyContent: 'center' }}>
-                      <div
-                        ref={editorRef}
-                        className="mo-editor"
-                        contentEditable={!loading && !isReadOnly}
-                        suppressContentEditableWarning
-                        onMouseDown={(e) => {
-                          const locked = e.target?.closest?.('[data-mo-locked="true"]');
-                          if (!locked) return;
-                          e.preventDefault();
-                        }}
-                        onKeyDown={(e) => {
-                          const sel = window.getSelection?.();
-                          const node = sel?.anchorNode;
-                          const el = node?.nodeType === 1 ? node : node?.parentElement;
-                          const locked = el?.closest?.('[data-mo-locked="true"]');
-                          if (!locked) return;
-                          const allowed = new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Tab','Escape']);
-                          if (!allowed.has(e.key)) e.preventDefault();
-                        }}
-                        onBeforeInput={(e) => {
-                          const targetLocked = e.target?.closest?.('[data-mo-locked="true"]');
-                          const sel = window.getSelection?.();
-                          const node = sel?.anchorNode;
-                          const el = node?.nodeType === 1 ? node : node?.parentElement;
-                          const caretLocked = el?.closest?.('[data-mo-locked="true"]');
-                          if (targetLocked || caretLocked) e.preventDefault();
-                        }}
-                        onPaste={(e) => {
-                          const sel = window.getSelection?.();
-                          const node = sel?.anchorNode;
-                          const el = node?.nodeType === 1 ? node : node?.parentElement;
-                          const locked = el?.closest?.('[data-mo-locked="true"]') || e.target?.closest?.('[data-mo-locked="true"]');
-                          if (locked) e.preventDefault();
-                        }}
-                        onDrop={(e) => {
-                          const sel = window.getSelection?.();
-                          const node = sel?.anchorNode;
-                          const el = node?.nodeType === 1 ? node : node?.parentElement;
-                          const locked = el?.closest?.('[data-mo-locked="true"]') || e.target?.closest?.('[data-mo-locked="true"]');
-                          if (locked) e.preventDefault();
-                        }}
-                        onInput={() => {
-                          const next = editorRef.current?.innerHTML ?? '';
-                          setContent(next);
-                          markDirty(title, next);
-                          refreshFormatState();
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ background: '#e2e8f0', width: 1, alignSelf: 'stretch', marginTop: -28, marginBottom: -28 }} />
-
-                  {/* Right: Editor panel */}
-                  <div style={{ paddingLeft: 18 }}>
+                  {/* Left: Editor panel */}
+                  <div style={{ paddingRight: 18 }}>
                     {/* Compact toolbar aligned with paper */}
                     {!isApproved ? (
                       <div style={{ display: 'flex', justifyContent: 'center', marginTop: -28, marginBottom: 12, borderBottom: '1px solid #e2e8f0', paddingBottom: 8, marginLeft: -18, marginRight: -28, paddingLeft: 18, paddingRight: 28 }}>
@@ -1008,6 +983,63 @@ export default function MissionOrderEditor() {
                       ) : (
                         <>Save your edits, assign inspectors, then click <strong>Submit to Director</strong> to forward the mission order for review.</>
                       )}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#e2e8f0', width: 1, alignSelf: 'stretch', marginTop: -28, marginBottom: -28 }} />
+
+                  {/* Right: Preview */}
+                  <div style={{ paddingLeft: 40 }}>
+                    {/* Gray workspace with equal padding, paper centered */}
+                    <div className="mo-editor-wrap" style={{ marginTop: 0, padding: 40, boxSizing: 'border-box', display: 'flex', justifyContent: 'center' }}>
+                      <div
+                        ref={editorRef}
+                        className="mo-editor"
+                        contentEditable={!loading && !isReadOnly}
+                        suppressContentEditableWarning
+                        onMouseDown={(e) => {
+                          const locked = e.target?.closest?.('[data-mo-locked="true"]');
+                          if (!locked) return;
+                          e.preventDefault();
+                        }}
+                        onKeyDown={(e) => {
+                          const sel = window.getSelection?.();
+                          const node = sel?.anchorNode;
+                          const el = node?.nodeType === 1 ? node : node?.parentElement;
+                          const locked = el?.closest?.('[data-mo-locked="true"]');
+                          if (!locked) return;
+                          const allowed = new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Tab','Escape']);
+                          if (!allowed.has(e.key)) e.preventDefault();
+                        }}
+                        onBeforeInput={(e) => {
+                          const targetLocked = e.target?.closest?.('[data-mo-locked="true"]');
+                          const sel = window.getSelection?.();
+                          const node = sel?.anchorNode;
+                          const el = node?.nodeType === 1 ? node : node?.parentElement;
+                          const caretLocked = el?.closest?.('[data-mo-locked="true"]');
+                          if (targetLocked || caretLocked) e.preventDefault();
+                        }}
+                        onPaste={(e) => {
+                          const sel = window.getSelection?.();
+                          const node = sel?.anchorNode;
+                          const el = node?.nodeType === 1 ? node : node?.parentElement;
+                          const locked = el?.closest?.('[data-mo-locked="true"]') || e.target?.closest?.('[data-mo-locked="true"]');
+                          if (locked) e.preventDefault();
+                        }}
+                        onDrop={(e) => {
+                          const sel = window.getSelection?.();
+                          const node = sel?.anchorNode;
+                          const el = node?.nodeType === 1 ? node : node?.parentElement;
+                          const locked = el?.closest?.('[data-mo-locked="true"]') || e.target?.closest?.('[data-mo-locked="true"]');
+                          if (locked) e.preventDefault();
+                        }}
+                        onInput={() => {
+                          const next = editorRef.current?.innerHTML ?? '';
+                          setContent(next);
+                          markDirty(title, next);
+                          refreshFormatState();
+                        }}
+                      />
                     </div>
                   </div>
                 </div>

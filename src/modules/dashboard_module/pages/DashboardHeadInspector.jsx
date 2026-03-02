@@ -136,19 +136,19 @@ export default function DashboardHeadInspector() {
   const pageMeta = useMemo(() => {
     const meta = {
       todo: {
-        title: 'Mission Orders — To Do',
+        title: '(Drafts) Mission Order',
         subtitle: 'Review Director-approved complaints that still need a mission order draft.',
       },
       issued: {
-        title: 'Mission Orders — Issued',
+        title: '(Results) Mission Order',
         subtitle: 'Track mission orders issued and queued for Director review.',
       },
       'for-inspection': {
-        title: 'Mission Orders — For Inspection',
+        title: '(Submitted) Mission Order',
         subtitle: 'Mission orders approved and ready for field inspection.',
       },
       revisions: {
-        title: 'Mission Orders — For Revisions',
+        title: 'Mission Order History',
         subtitle: 'Review mission orders that were cancelled or returned for changes.',
       },
     };
@@ -370,7 +370,7 @@ export default function DashboardHeadInspector() {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
 
-  const createMissionOrder = async (complaintId) => {
+  const createMissionOrder = async (complaintId, currentTab = 'todo') => {
     setError('');
     setToast('');
     setCreatingForId(complaintId);
@@ -382,7 +382,7 @@ export default function DashboardHeadInspector() {
 
       // If there is already a mission order, just open it.
       if (row.mission_order_id) {
-        window.location.assign(`/mission-order?id=${row.mission_order_id}`);
+        window.location.assign(`/mission-order?id=${row.mission_order_id}#${currentTab}`);
         return;
       }
 
@@ -572,7 +572,7 @@ export default function DashboardHeadInspector() {
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img src="/ui_icons/menu.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>To Do</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Draft</span>
                 </button>
               </li>
               <li>
@@ -637,197 +637,209 @@ export default function DashboardHeadInspector() {
                 <div className="dash-actions"></div>
               </div>
 
-              <div className="dash-toolbar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                <div className="date-filter">
-                  <button
-                    type="button"
-                    className="dash-select date-filter-btn"
-                    onClick={() => {
-                      if (!datePopoverOpen) {
-                        if (appliedRange.start && appliedRange.end) {
-                          setPendingRange({ start: appliedRange.start, end: appliedRange.end });
-                          setDatePreset('custom');
-                          setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
-                        } else {
-                          setCurrentWeekPending();
-                        }
-                      }
-                      setDatePopoverOpen((v) => !v);
-                    }}
-                    aria-haspopup="dialog"
-                    aria-expanded={datePopoverOpen}
-                  >
-                    {rangeLabel}
-                  </button>
-                  {datePopoverOpen ? (
-                    <div className="date-popover" role="dialog" aria-modal="true">
-                      <div className="date-presets">
-                        <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
-                        <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
-                        <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
-                        <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
-                        <div className="date-apply">
-                          <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
-                        </div>
-                      </div>
-                      <div className="cal-wrap">
-                        <div className="cal-header">
-                          <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
-                          <div className="cal-nav">
-                            <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
-                            <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
-                          </div>
-                        </div>
-                        <div className="cal-grid">
-                          {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
-                            <div key={`h-${d}`} className="cal-dow">{d}</div>
-                          ))}
-                          {calendarGrid(viewMonth).map((d) => {
-                            const inMonth = d.getMonth() === viewMonth.getMonth();
-                            const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
-                            const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
-                            const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
-                            const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
-                            return (
-                              <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
-                            );
-                          })}
-                        </div>
-                        <div className="range-summary">
-                          {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end).replace('Date: ', '') : 'Select a start and end date'}
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-                <input
-                  className="dash-input"
-                  type="text"
-                  placeholder="Search by business name/address, reporter email, complaint ID, or MO ID..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  style={{ flex: 1, minWidth: 260 }}
-                />
-                <button className="dash-btn" type="button" onClick={loadApprovedComplaints} disabled={loading}>
-                  {loading ? 'Refreshing…' : 'Refresh'}
-                </button>
-              </div>
-
+              
               {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
               {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
-              <div style={{ display: 'grid', gap: 20 }}>
-                {filteredComplaints.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                    {loading ? 'Loading…' : 'No records found for this tab.'}
-                  </div>
-                ) : (
-                  complaintsByDay.sortedKeys.map((dayKey) => {
-                    const dayGroup = complaintsByDay.groups[dayKey];
-                    const label = dayGroup?.label || dayKey;
-                    const count = dayGroup?.items?.length || 0;
-                    if (count === 0) return null;
+              {tab === 'todo' ? (
+                <div style={{ display: 'grid', gap: 20 }}>
+                  {filteredComplaints.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                      {loading ? 'Loading…' : 'No records found for this tab.'}
+                    </div>
+                  ) : (
+                    complaintsByDay.sortedKeys.map((dayKey) => {
+                      const dayGroup = complaintsByDay.groups[dayKey];
+                      const label = dayGroup?.label || dayKey;
+                      const count = dayGroup?.items?.length || 0;
+                      if (count === 0) return null;
 
-                    return (
-                      <div
-                        key={`day-card-${dayKey}`}
-                        style={{
-                          background: '#ffffff',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: 14,
-                          boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
-                          overflow: 'hidden',
-                          transition: 'box-shadow 0.2s ease',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
-                        }}
-                      >
-                        {/* Day Header */}
-                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
-                          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
-                            {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
-                          </h3>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
-                            <span>{count} {tab === 'todo' ? 'To Draft' : tab === 'issued' ? 'Issued' : tab === 'for-inspection' ? 'For Inspection' : 'For Revisions'}</span>
+                      return (
+                        <div
+                          key={`day-card-${dayKey}`}
+                          style={{
+                            background: '#ffffff',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 14,
+                            boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                            overflow: 'hidden',
+                            transition: 'box-shadow 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                          }}
+                        >
+                          {/* Day Header */}
+                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                              {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
+                            </h3>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
+                              <span>{count} Pending Mission Order{count !== 1 ? 's' : ''}</span>
+                            </div>
+                          </div>
+
+                          {/* Table for this day */}
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                                  <th style={{ width: 220, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Approved</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {dayGroup.items.map((c) => (
+                                  <tr
+                                    key={c.complaint_id}
+                                    style={{
+                                      cursor: 'pointer',
+                                      borderBottom: '1px solid #e2e8f0',
+                                      transition: 'background-color 0.2s ease',
+                                      position: 'relative',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.background = '#f8fafc';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.background = '#ffffff';
+                                    }}
+                                    onClick={() => createMissionOrder(c.complaint_id, tab)}
+                                  >
+                                    <td>
+                                      <span className={statusBadgeClass(c.mission_order_status)}>
+                                        {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                      <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                    </td>
+                                    <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
+                      );
+                    })
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 20 }}>
+                  {filteredComplaints.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                      {loading ? 'Loading…' : 'No records found for this tab.'}
+                    </div>
+                  ) : (
+                    complaintsByDay.sortedKeys.map((dayKey) => {
+                      const dayGroup = complaintsByDay.groups[dayKey];
+                      const label = dayGroup?.label || dayKey;
+                      const count = dayGroup?.items?.length || 0;
+                      if (count === 0) return null;
 
-                        {/* Table for this day */}
-                        <div style={{ overflowX: 'auto' }}>
-                          <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                            <thead>
-                              <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                                <th style={{ width: 120 }}>Complaint ID</th>
-                                <th>Business & Address</th>
-                                <th style={{ width: 180 }}>MO Status</th>
-                                <th style={{ width: 220 }}>Approved</th>
-                                <th style={{ width: 220 }}>Submitted</th>
-                                <th style={{ width: 220 }}>Action</th>
-                                <th style={{ width: 260 }}>Inspectors</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {dayGroup.items.map((c) => (
-                                <tr key={c.complaint_id}>
-                                  <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
-                                  <td>
-                                    <div className="dash-cell-title">{c.business_name || '—'}</div>
-                                    <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                    <div className="dash-cell-sub">{c.reporter_email || ''}</div>
-                                  </td>
-                                  <td>
-                                    <span className={statusBadgeClass(c.mission_order_status)}>
-                                      {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
-                                    </span>
-                                  </td>
-                                  <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
-                                  <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
-                                  <td>
-                                    <button
-                                      type="button"
-                                      className="dash-btn"
-                                      onClick={() => createMissionOrder(c.complaint_id)}
-                                      disabled={creatingForId === c.complaint_id}
-                                    >
-                                      {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
-                                    </button>
-                                  </td>
-                                  <td>
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
-                                      {(c.inspector_names || []).length === 0 ? (
-                                        <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
-                                      ) : (
-                                        (c.inspector_names || []).map((name, idx) => (
-                                          <span
-                                            key={`${c.complaint_id}-${idx}`}
-                                            style={{ padding: '6px 10px', borderRadius: 999, fontWeight: 800, border: '1px solid #e2e8f0', background: '#f8fafc' }}
-                                          >
-                                            {name}
-                                          </span>
-                                        ))
-                                      )}
-                                    </div>
-                                  </td>
+                      return (
+                        <div
+                          key={`day-card-${dayKey}`}
+                          style={{
+                            background: '#ffffff',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 14,
+                            boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                            overflow: 'hidden',
+                            transition: 'box-shadow 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                          }}
+                        >
+                          {/* Day Header */}
+                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                              {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
+                            </h3>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
+                              <span>{count} {tab === 'issued' ? 'Issued' : tab === 'for-inspection' ? 'For Inspection' : 'For Revisions'}</span>
+                            </div>
+                          </div>
+
+                          {/* Table for this day */}
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                  <th style={{ width: 120 }}>Complaint ID</th>
+                                  <th>Business & Address</th>
+                                  <th style={{ width: 180 }}>MO Status</th>
+                                  <th style={{ width: 220 }}>Approved</th>
+                                  <th style={{ width: 220 }}>Submitted</th>
+                                  <th style={{ width: 220 }}>Action</th>
+                                  <th style={{ width: 260 }}>Inspectors</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {dayGroup.items.map((c) => (
+                                  <tr key={c.complaint_id}>
+                                    <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
+                                    <td>
+                                      <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                      <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                      <div className="dash-cell-sub">{c.reporter_email || ''}</div>
+                                    </td>
+                                    <td>
+                                      <span className={statusBadgeClass(c.mission_order_status)}>
+                                        {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                                      </span>
+                                    </td>
+                                    <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
+                                    <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                                    <td>
+                                      <button
+                                        type="button"
+                                        className="dash-btn"
+                                        onClick={() => createMissionOrder(c.complaint_id)}
+                                        disabled={creatingForId === c.complaint_id}
+                                      >
+                                        {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
+                                      </button>
+                                    </td>
+                                    <td>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
+                                        {(c.inspector_names || []).length === 0 ? (
+                                          <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                        ) : (
+                                          (c.inspector_names || []).map((name, idx) => (
+                                            <span
+                                              key={`${c.complaint_id}-${idx}`}
+                                              style={{ padding: '6px 10px', borderRadius: 999, fontWeight: 800, border: '1px solid #e2e8f0', background: '#f8fafc' }}
+                                            >
+                                              {name}
+                                            </span>
+                                          ))
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              <div className="dash-note">
-                Step 2: “Create MO” will create a draft record in <code>mission_orders</code> for the selected complaint.
-                Duplicate mission orders for the same complaint are prevented.
-              </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </section>

@@ -233,9 +233,19 @@ export default function DashboardDirector() {
   };
 
   const formatRangeLabel = (start, end) => {
-    if (!start || !end) return 'Date: All time';
-    const fmt = (dt) => dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    return `Date: ${fmt(start)} — ${fmt(end)}`;
+    if (!start || !end) return 'All time';
+    const fmt = (dt) => dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const fmtYear = (dt) => dt.getFullYear();
+    const startYear = fmtYear(start);
+    const endYear = fmtYear(end);
+    const startStr = fmt(start);
+    const endStr = fmt(end);
+    // If same year, only show year once at the end
+    if (startYear === endYear) {
+      return `${startStr} – ${endStr}, ${startYear}`;
+    }
+    // Different years, show both
+    return `${startStr}, ${startYear} – ${endStr}, ${endYear}`;
   };
 
   const rangeLabel = useMemo(() => formatRangeLabel(appliedRange.start, appliedRange.end), [appliedRange]);
@@ -1091,15 +1101,17 @@ export default function DashboardDirector() {
 
               {/* Advanced Filters Panel - Shows when search is focused */}
               {tab === 'history' && searchFocused && (
-                <div style={{
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 12,
-                  padding: 16,
-                  display: 'grid',
-                  gap: 16,
-                  animation: 'fadeIn 0.2s ease-in-out'
-                }}>
+                <div 
+                  onMouseDown={(e) => e.preventDefault()}
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 12,
+                    padding: 16,
+                    display: 'grid',
+                    gap: 16,
+                    animation: 'fadeIn 0.2s ease-in-out'
+                  }}>
                   <style>{`
                     @keyframes fadeIn {
                       from {
@@ -1116,7 +1128,7 @@ export default function DashboardDirector() {
                   {/* Field Filters Section - Pill Style */}
                   <div>
                     <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 12px 0', fontWeight: 600 }}>Narrow down your search</p>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', position: 'relative' }}>
                       {/* Business Name Pill */}
                       <button
                         type="button"
@@ -1272,108 +1284,98 @@ export default function DashboardDirector() {
                       >
                         Complaint ID
                       </button>
-                    </div>
-                  </div>
 
-                  {/* Date Filters Section */}
-                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
-                    <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 800, color: '#0f172a' }}>Filter By Date</h4>
-                    <div className="date-filter" style={{ justifySelf: 'start' }}>
-                      <button
-                        type="button"
-                        className="dash-select date-filter-btn"
-                        onClick={() => {
-                          if (!datePopoverOpen) {
-                            if (appliedRange.start && appliedRange.end) {
-                              setPendingRange({ start: appliedRange.start, end: appliedRange.end });
-                              setDatePreset('custom');
-                              setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
-                            } else {
-                              setCurrentWeekPending();
+                      {/* Date Filter Pill with Popup */}
+                      <div className="date-filter" style={{ position: 'relative' }}>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            if (!datePopoverOpen) {
+                              if (appliedRange.start && appliedRange.end) {
+                                setPendingRange({ start: appliedRange.start, end: appliedRange.end });
+                                setDatePreset('custom');
+                                setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
+                              } else {
+                                setCurrentWeekPending();
+                              }
                             }
-                          }
-                          setDatePopoverOpen((v) => !v);
-                        }}
-                        aria-haspopup="dialog"
-                        aria-expanded={datePopoverOpen}
-                      >
-                        {rangeLabel}
-                      </button>
-                      {datePopoverOpen ? (
-                        <div className="date-popover" role="dialog" aria-modal="true">
-                          <div className="date-presets">
-                            <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
-                            <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
-                            <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
-                            <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
-                            <div className="date-apply">
-                              <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
-                            </div>
-                          </div>
-                          <div className="cal-wrap">
-                            <div className="cal-header">
-                              <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
-                              <div className="cal-nav">
-                                <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
-                                <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
+                            setDatePopoverOpen((v) => !v);
+                          }}
+                          aria-haspopup="dialog"
+                          aria-expanded={datePopoverOpen}
+                          style={{
+                            padding: '6px 14px',
+                            background: datePopoverOpen || (appliedRange.start && appliedRange.end) ? '#2563eb' : '#ffffff',
+                            color: datePopoverOpen || (appliedRange.start && appliedRange.end) ? '#ffffff' : '#0f172a',
+                            border: `1px solid ${datePopoverOpen || (appliedRange.start && appliedRange.end) ? '#2563eb' : '#cbd5e1'}`,
+                            borderRadius: 999,
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: 13,
+                            transition: 'all 0.2s ease',
+                            whiteSpace: 'nowrap'
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!datePopoverOpen && (!appliedRange.start || !appliedRange.end)) {
+                              e.currentTarget.style.borderColor = '#2563eb';
+                              e.currentTarget.style.color = '#2563eb';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!datePopoverOpen && (!appliedRange.start || !appliedRange.end)) {
+                              e.currentTarget.style.borderColor = '#cbd5e1';
+                              e.currentTarget.style.color = '#0f172a';
+                            }
+                          }}
+                        >
+                          Date
+                        </button>
+                        {datePopoverOpen ? (
+                          <div className="date-popover" role="dialog" aria-modal="true">
+                            <div className="date-presets">
+                              <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
+                              <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
+                              <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
+                              <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
+                              <div className="date-apply">
+                                <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
                               </div>
                             </div>
-                            <div className="cal-grid">
-                              {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
-                                <div key={`h-${d}`} className="cal-dow">{d}</div>
-                              ))}
-                              {calendarGrid(viewMonth).map((d) => {
-                                const inMonth = d.getMonth() === viewMonth.getMonth();
-                                const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
-                                const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
-                                const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
-                                const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
-                                return (
-                                  <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
-                                );
-                              })}
-                            </div>
-                            <div className="range-summary">
-                              {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end).replace('Date: ', '') : 'Select a start and end date'}
+                            <div className="cal-wrap">
+                              <div className="cal-header">
+                                <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
+                                <div className="cal-nav">
+                                  <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
+                                  <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
+                                </div>
+                              </div>
+                              <div className="cal-grid">
+                                {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
+                                  <div key={`h-${d}`} className="cal-dow">{d}</div>
+                                ))}
+                                {calendarGrid(viewMonth).map((d) => {
+                                  const inMonth = d.getMonth() === viewMonth.getMonth();
+                                  const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
+                                  const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
+                                  const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
+                                  const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
+                                  return (
+                                    <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
+                                  );
+                                })}
+                              </div>
+                              <div className="range-summary">
+                                {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end) : 'Select a start and end date'}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Clear Filters Button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFilters({
-                        businessName: '',
-                        address: '',
-                        reporterEmail: '',
-                        complaintId: '',
-                        dateMonth: null,
-                        dateDay: null,
-                      });
-                      setSearch('');
-                      setAppliedRange({ start: null, end: null });
-                      setPendingRange({ start: null, end: null });
-                      setDatePreset('custom');
-                    }}
-                    style={{
-                      padding: '8px 16px',
-                      background: '#ffffff',
-                      color: '#ef4444',
-                      border: '1px solid #fecaca',
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: 13,
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    Clear All Filters
-                  </button>
-                </div>
+                                  </div>
               )}
             </div>
           )}
