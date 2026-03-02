@@ -23,13 +23,13 @@ function statusBadgeClass(status) {
 function getUrgencyText(authenticityLevel) {
   const u = Number(authenticityLevel);
   if (u < 50) {
-    return 'For monitoring and records only';
+    return 'Monitoring and Records';
   }
   if (u === 50) {
-    return 'Schedule Inspection';
+    return 'Scheduled Inspection';
   }
   if (u > 50) {
-    return 'For Immediate Inspection';
+    return 'Immediate Inspection';
   }
   return '—';
 }
@@ -111,6 +111,7 @@ export default function DashboardDirector() {
   const [complaints, setComplaints] = useState([]);
   const [missionOrders, setMissionOrders] = useState([]);
   const [search, setSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const [auditComplaint, setAuditComplaint] = useState(null);
   // Advanced filters for history tab
   const [filterOpen, setFilterOpen] = useState(false);
@@ -466,13 +467,21 @@ export default function DashboardDirector() {
       return complaints;
     }
 
-    // Additional client-side filtering by ID (since server-side OR is limited to text columns).
+    // Broad client-side filtering across common fields when no specific field filter is active.
     const q = search.trim().toLowerCase();
     if (!q) return complaints;
 
     return complaints.filter((c) => {
       const idStr = String(c?.id ?? '').toLowerCase();
-      return idStr.includes(q);
+      const nameStr = String(c?.business_name ?? '').toLowerCase();
+      const addrStr = String(c?.business_address ?? '').toLowerCase();
+      const emailStr = String(c?.reporter_email ?? '').toLowerCase();
+      return (
+        idStr.includes(q) ||
+        nameStr.includes(q) ||
+        addrStr.includes(q) ||
+        emailStr.includes(q)
+      );
     });
   }, [complaints, search, filters]);
 
@@ -1055,119 +1064,214 @@ export default function DashboardDirector() {
                     onChange={(e) => setSearch(e.target.value)}
                     style={{
                       width: '100%',
-                      padding: '10px 16px',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 8,
+                      padding: '12px 16px',
+                      background: '#ffffff',
+                      color: '#0f172a',
+                      border: '2px solid #cbd5e1',
+                      borderRadius: 10,
                       fontSize: 14,
                       fontWeight: 500,
                       outline: 'none',
-                      transition: 'border-color 0.2s'
+                      transition: 'all 0.2s ease',
+                      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.04)'
                     }}
-                    onFocus={(e) => e.target.style.borderColor = '#2563eb'}
-                    onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#2563eb';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.1), 0 2px 8px rgba(0, 0, 0, 0.08)';
+                      setSearchFocused(true);
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#cbd5e1';
+                      e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.04)';
+                      setSearchFocused(false);
+                    }}
                   />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setFilterOpen(!filterOpen)}
-                  style={{
-                    padding: '10px 16px',
-                    background: filterOpen ? '#2563eb' : '#ffffff',
-                    color: filterOpen ? '#ffffff' : '#0f172a',
-                    border: `1px solid ${filterOpen ? '#2563eb' : '#e2e8f0'}`,
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: 14,
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  ⚙️ Filters
-                </button>
               </div>
 
-              {/* Advanced Filters Panel */}
-              {tab === 'history' && filterOpen && (
+              {/* Advanced Filters Panel - Shows when search is focused */}
+              {tab === 'history' && searchFocused && (
                 <div style={{
                   background: '#f8fafc',
                   border: '1px solid #e2e8f0',
                   borderRadius: 12,
                   padding: 16,
                   display: 'grid',
-                  gap: 16
+                  gap: 16,
+                  animation: 'fadeIn 0.2s ease-in-out'
                 }}>
-                  {/* Field Filters Section */}
+                  <style>{`
+                    @keyframes fadeIn {
+                      from {
+                        opacity: 0;
+                        transform: translateY(-8px);
+                      }
+                      to {
+                        opacity: 1;
+                        transform: translateY(0);
+                      }
+                    }
+                  `}</style>
+
+                  {/* Field Filters Section - Pill Style */}
                   <div>
-                    <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 800, color: '#0f172a' }}>Filter By Field</h4>
-                    <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 12px 0' }}>Select a field to filter by. Use the search bar above to enter your search term.</p>
-                    <div style={{ display: 'grid', gap: 10 }}>
-                      {/* Business Name Checkbox */}
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={filters.businessName !== ''}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setFilters({ businessName: 'active', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                            } else {
-                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                            }
-                          }}
-                          style={{ width: 16, height: 16, cursor: 'pointer' }}
-                        />
-                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Business Name</span>
-                      </label>
+                    <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 12px 0', fontWeight: 600 }}>Narrow down your search</p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {/* Business Name Pill */}
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (filters.businessName !== '') {
+                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                          } else {
+                            setFilters({ businessName: 'active', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                          }
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          background: filters.businessName !== '' ? '#2563eb' : '#ffffff',
+                          color: filters.businessName !== '' ? '#ffffff' : '#0f172a',
+                          border: `1px solid ${filters.businessName !== '' ? '#2563eb' : '#cbd5e1'}`,
+                          borderRadius: 999,
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: 13,
+                          transition: 'all 0.2s ease',
+                          whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (filters.businessName === '') {
+                            e.currentTarget.style.borderColor = '#2563eb';
+                            e.currentTarget.style.color = '#2563eb';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (filters.businessName === '') {
+                            e.currentTarget.style.borderColor = '#cbd5e1';
+                            e.currentTarget.style.color = '#0f172a';
+                          }
+                        }}
+                      >
+                        Business Name
+                      </button>
 
-                      {/* Address Checkbox */}
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={filters.address !== ''}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setFilters({ businessName: '', address: 'active', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                            } else {
-                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                            }
-                          }}
-                          style={{ width: 16, height: 16, cursor: 'pointer' }}
-                        />
-                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Address</span>
-                      </label>
+                      {/* Address Pill */}
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (filters.address !== '') {
+                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                          } else {
+                            setFilters({ businessName: '', address: 'active', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                          }
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          background: filters.address !== '' ? '#2563eb' : '#ffffff',
+                          color: filters.address !== '' ? '#ffffff' : '#0f172a',
+                          border: `1px solid ${filters.address !== '' ? '#2563eb' : '#cbd5e1'}`,
+                          borderRadius: 999,
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: 13,
+                          transition: 'all 0.2s ease',
+                          whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (filters.address === '') {
+                            e.currentTarget.style.borderColor = '#2563eb';
+                            e.currentTarget.style.color = '#2563eb';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (filters.address === '') {
+                            e.currentTarget.style.borderColor = '#cbd5e1';
+                            e.currentTarget.style.color = '#0f172a';
+                          }
+                        }}
+                      >
+                        Address
+                      </button>
 
-                      {/* Reporter Email Checkbox */}
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={filters.reporterEmail !== ''}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setFilters({ businessName: '', address: '', reporterEmail: 'active', complaintId: '', dateMonth: null, dateDay: null });
-                            } else {
-                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                            }
-                          }}
-                          style={{ width: 16, height: 16, cursor: 'pointer' }}
-                        />
-                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Reporter Email</span>
-                      </label>
+                      {/* Reporter Email Pill */}
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (filters.reporterEmail !== '') {
+                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                          } else {
+                            setFilters({ businessName: '', address: '', reporterEmail: 'active', complaintId: '', dateMonth: null, dateDay: null });
+                          }
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          background: filters.reporterEmail !== '' ? '#2563eb' : '#ffffff',
+                          color: filters.reporterEmail !== '' ? '#ffffff' : '#0f172a',
+                          border: `1px solid ${filters.reporterEmail !== '' ? '#2563eb' : '#cbd5e1'}`,
+                          borderRadius: 999,
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: 13,
+                          transition: 'all 0.2s ease',
+                          whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (filters.reporterEmail === '') {
+                            e.currentTarget.style.borderColor = '#2563eb';
+                            e.currentTarget.style.color = '#2563eb';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (filters.reporterEmail === '') {
+                            e.currentTarget.style.borderColor = '#cbd5e1';
+                            e.currentTarget.style.color = '#0f172a';
+                          }
+                        }}
+                      >
+                        Reporter Email
+                      </button>
 
-                      {/* Complaint ID Checkbox */}
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={filters.complaintId !== ''}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: 'active', dateMonth: null, dateDay: null });
-                            } else {
-                              setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                            }
-                          }}
-                          style={{ width: 16, height: 16, cursor: 'pointer' }}
-                        />
-                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Complaint ID</span>
-                      </label>
+                      {/* Complaint ID Pill */}
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (filters.complaintId !== '') {
+                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
+                          } else {
+                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: 'active', dateMonth: null, dateDay: null });
+                          }
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          background: filters.complaintId !== '' ? '#2563eb' : '#ffffff',
+                          color: filters.complaintId !== '' ? '#ffffff' : '#0f172a',
+                          border: `1px solid ${filters.complaintId !== '' ? '#2563eb' : '#cbd5e1'}`,
+                          borderRadius: 999,
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: 13,
+                          transition: 'all 0.2s ease',
+                          whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (filters.complaintId === '') {
+                            e.currentTarget.style.borderColor = '#2563eb';
+                            e.currentTarget.style.color = '#2563eb';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (filters.complaintId === '') {
+                            e.currentTarget.style.borderColor = '#cbd5e1';
+                            e.currentTarget.style.color = '#0f172a';
+                          }
+                        }}
+                      >
+                        Complaint ID
+                      </button>
                     </div>
                   </div>
 
@@ -1705,7 +1809,7 @@ export default function DashboardDirector() {
                                   {tab === 'queue' ? (
                                     <>
                                       <td style={{ padding: '12px' }}>
-                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 700, fontSize: 13, padding: '6px 12px', borderRadius: 6, display: 'inline-block' }}>{getUrgencyText(c?.authenticity_level)}</span>
+                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 800, fontSize: 12, padding: '6px 10px', borderRadius: 999, display: 'inline-block', whiteSpace: 'nowrap', border: '1px solid rgba(0,0,0,0.08)' }}>{getUrgencyText(c?.authenticity_level)}</span>
                                       </td>
                                       <td style={{ padding: '12px' }}>
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
