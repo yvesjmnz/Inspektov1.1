@@ -1387,48 +1387,89 @@ export default function DashboardDirector() {
               </div>
                           </div>
           ) : tab === 'mission-orders' ? (
-            <div className="dash-table-wrap">
-              <table className="dash-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 120 }}>MO ID</th>
-                    <th>Title</th>
-                    <th style={{ width: 180 }}>Status</th>
-                    <th style={{ width: 220 }}>Submitted</th>
-                    <th style={{ width: 220 }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredMissionOrders.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', padding: 18, color: '#475569' }}>
-                        {loading ? 'Loading…' : 'No mission orders found.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredMissionOrders.map((mo) => (
-                      <tr key={mo.id}>
-                        <td title={mo.id}>{String(mo.id).slice(0, 8)}…</td>
-                        <td>
-                          <div className="dash-cell-title">{mo.title || 'Mission Order'}</div>
-                          <div className="dash-cell-sub">Complaint: {mo.complaint_id ? String(mo.complaint_id).slice(0, 8) + '…' : '—'}</div>
-                        </td>
-                        <td>
-                          <span className={statusBadgeClass(mo.status)}>{formatStatus(mo.status)}</span>
-                        </td>
-                        <td>{formatDateNoSeconds(mo.submitted_at)}</td>
-                        <td>
-                          <div className="dash-row-actions">
-                            <a className="dash-btn" href={`/mission-order/review?id=${mo.id}`}>
-                              Review MO
-                            </a>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+            <div style={{ display: 'grid', gap: 20 }}>
+              {filteredMissionOrders.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                  {loading ? 'Loading…' : 'No mission orders found.'}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 14,
+                    boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                    overflow: 'hidden',
+                    transition: 'box-shadow 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                  }}
+                >
+                  {/* Header */}
+                  <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Review Pending Mission Orders</h3>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
+                      <span>{filteredMissionOrders.length} {filteredMissionOrders.length === 1 ? 'Record' : 'Records'}</span>
+                    </div>
+                  </div>
+
+                  {/* Table */}
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                          <th style={{ width: 120 }}>MO ID</th>
+                          <th>Title</th>
+                          <th style={{ width: 180 }}>Status</th>
+                          <th style={{ width: 220 }}>Submitted</th>
+                          <th style={{ width: 220 }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredMissionOrders.map((mo) => (
+                          <tr
+                            key={mo.id}
+                            style={{
+                              cursor: 'pointer',
+                              borderBottom: '1px solid #e2e8f0',
+                              transition: 'background-color 0.2s ease',
+                              position: 'relative',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = '#f8fafc';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = '#ffffff';
+                            }}
+                          >
+                            <td style={{ padding: '12px' }} title={mo.id}>{String(mo.id).slice(0, 8)}…</td>
+                            <td style={{ padding: '12px' }}>
+                              <div className="dash-cell-title">{mo.title || 'Mission Order'}</div>
+                              <div className="dash-cell-sub">Complaint: {mo.complaint_id ? String(mo.complaint_id).slice(0, 8) + '…' : '—'}</div>
+                            </td>
+                            <td style={{ padding: '12px' }}>
+                              <span className={statusBadgeClass(mo.status)}>{formatStatus(mo.status)}</span>
+                            </td>
+                            <td style={{ padding: '12px' }}>{formatDateNoSeconds(mo.submitted_at)}</td>
+                            <td style={{ padding: '12px' }}>
+                              <div className="dash-row-actions">
+                                <a className="dash-btn" href={`/mission-order/review?id=${mo.id}`}>
+                                  Review MO
+                                </a>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           ) : tab === 'mission-orders-history' ? (
             <div style={{ display: 'grid', gap: 20 }}>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
 import { supabase } from '../../../lib/supabase';
+import './InspectionSlipCreate.css';
 
 function getMissionOrderIdFromQuery() {
   const params = new URLSearchParams(window.location.search);
@@ -37,14 +38,18 @@ export default function InspectionSlipCreate() {
     email: '',
   });
 
+  // Owner type affects autofill behavior for owner name fields
+  const [ownerType, setOwnerType] = useState('sole'); // 'sole' | 'corp'
+
   const [autoFillMessage, setAutoFillMessage] = useState('');
 
   const [lineOfBusiness, setLineOfBusiness] = useState('');
 
+  // Checklist with tri-state: compliant | non_compliant | na
   const [checklist, setChecklist] = useState({
-    business_permit: false,
-    with_cctv: false,
-    signage_2sqm: false,
+    business_permit: 'na',
+    with_cctv: 'na',
+    signage_2sqm: 'na',
   });
 
   const inspectorCanvasRef = useRef(null);
@@ -230,10 +235,27 @@ export default function InspectionSlipCreate() {
 
   const handleUseBusiness = (b) => {
     if (!b) return;
+
+    // Always fill business name
     setOwnerDetails((prev) => ({
       ...prev,
       businessName: b.business_name || prev.businessName,
     }));
+
+    // Only autofill owner personal name fields for Sole Proprietor
+    if (ownerType === 'sole') {
+      const lastName = b.owner_last_name || b.last_name || b.lastname || '';
+      const firstName = b.owner_first_name || b.first_name || b.firstname || '';
+      const middleName = b.owner_middle_name || b.middle_name || b.middlename || '';
+
+      setOwnerDetails((prev) => ({
+        ...prev,
+        lastName: lastName || prev.lastName,
+        firstName: firstName || prev.firstName,
+        middleName: middleName || prev.middleName,
+      }));
+    }
+
     setBusinessDetails((prev) => ({
       ...prev,
       bin: b.epermit_no || b.permit_number || prev.bin,
@@ -244,6 +266,14 @@ export default function InspectionSlipCreate() {
         b.business_address1 ||
         prev.address,
     }));
+
+    // Progressive disclosure: highlight that Line of Business can be pulled/updated.
+    // (If the businesses table has a line_of_business column, use it; otherwise keep manual entry.)
+    const lob = b.line_of_business || b.lineOfBusiness || '';
+    if (lob) {
+      setLineOfBusiness(lob);
+      setToast('Line of business autofilled from registered business.');
+    }
   };
 
   const handleCheckBusiness = async () => {
@@ -279,7 +309,7 @@ export default function InspectionSlipCreate() {
   };
 
   return (
-    <div className="mo-container">
+    <div className="mo-container is-root">
       <Header />
       <main className="mo-main">
         <section className="mo-card">
@@ -321,287 +351,55 @@ export default function InspectionSlipCreate() {
           ) : (
             <div style={{ display: 'grid', gap: 14, marginTop: 14 }}>
               {autoFillMessage ? (
-                <div className="mo-meta" style={{ marginBottom: 4 }}>
+                <div className={autoFillMessage.toLowerCase().includes('no registered business found') ? 'is-alert' : 'mo-meta'} style={{ marginBottom: 4 }}>
                   {autoFillMessage}
                 </div>
               ) : null}
-              <div>
-                <div className="mo-label">[SECTION 1 REQUIRED] Business Owner Details</div>
-                <div
-                  style={{
-                    marginTop: 10,
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                    gap: 10,
-                  }}
-                >
+
+              <div className="is-card">
+                <div className="is-section-head">
                   <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Last Name
-                    </div>
-                    <input
-                      value={ownerDetails.lastName}
-                      onChange={(e) =>
-                        setOwnerDetails((prev) => ({ ...prev, lastName: e.target.value }))
-                      }
-                      placeholder="Enter last name"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      First Name
-                    </div>
-                    <input
-                      value={ownerDetails.firstName}
-                      onChange={(e) =>
-                        setOwnerDetails((prev) => ({ ...prev, firstName: e.target.value }))
-                      }
-                      placeholder="Enter first name"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Middle Name
-                    </div>
-                    <input
-                      value={ownerDetails.middleName}
-                      onChange={(e) =>
-                        setOwnerDetails((prev) => ({ ...prev, middleName: e.target.value }))
-                      }
-                      placeholder="Enter middle name"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Business Name
-                    </div>
-                    <input
-                      value={ownerDetails.businessName}
-                      onChange={(e) =>
-                        setOwnerDetails((prev) => ({ ...prev, businessName: e.target.value }))
-                      }
-                      placeholder="Enter business name"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
+                    <p className="is-section-title">Step 1: Validate Business Permit</p>
+                    <p className="is-section-sub">Select owner type, then search a registered business to autofill.</p>
                   </div>
                 </div>
-              </div>
 
-              <div>
-                <div className="mo-label">[SECTION 2 REQUIRED] Business Details</div>
-                <div
-                  style={{
-                    marginTop: 10,
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                    gap: 10,
-                  }}
-                >
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      BIN #
-                    </div>
-                    <input
-                      value={businessDetails.bin}
-                      onChange={(e) =>
-                        setBusinessDetails((prev) => ({ ...prev, bin: e.target.value }))
-                      }
-                      placeholder="Enter BIN #"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Address
-                    </div>
-                    <input
-                      value={businessDetails.address}
-                      onChange={(e) =>
-                        setBusinessDetails((prev) => ({ ...prev, address: e.target.value }))
-                      }
-                      placeholder="Address (autofilled when selecting a business, editable)"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Estimated Area (in SQM)
-                    </div>
-                    <input
-                      type="number"
-                      min="0"
-                      value={businessDetails.estimatedAreaSqm}
-                      onChange={(e) =>
-                        setBusinessDetails((prev) => ({
-                          ...prev,
-                          estimatedAreaSqm: e.target.value,
-                        }))
-                      }
-                      placeholder="Enter estimated area"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      No. of Employees
-                    </div>
-                    <input
-                      type="number"
-                      min="0"
-                      value={businessDetails.numberOfEmployees}
-                      onChange={(e) =>
-                        setBusinessDetails((prev) => ({
-                          ...prev,
-                          numberOfEmployees: e.target.value,
-                        }))
-                      }
-                      placeholder="Enter number of employees"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Landline #
-                    </div>
-                    <input
-                      value={businessDetails.landline}
-                      onChange={(e) =>
-                        setBusinessDetails((prev) => ({ ...prev, landline: e.target.value }))
-                      }
-                      placeholder="Enter landline #"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Cellphone #
-                    </div>
-                    <input
-                      value={businessDetails.cellphone}
-                      onChange={(e) =>
-                        setBusinessDetails((prev) => ({ ...prev, cellphone: e.target.value }))
-                      }
-                      placeholder="Enter cellphone #"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Email Address
-                    </div>
-                    <input
-                      type="email"
-                      value={businessDetails.email}
-                      onChange={(e) =>
-                        setBusinessDetails((prev) => ({ ...prev, email: e.target.value }))
-                      }
-                      placeholder="Enter email address"
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        borderRadius: 10,
-                        border: '1px solid #cbd5e1',
-                        padding: '0 12px',
-                        fontWeight: 700,
-                      }}
-                    />
+                <div className="is-check-row" style={{ marginBottom: 12 }}>
+                  <div className="is-check-title">Owner Type</div>
+                  <div className="is-seg" role="group" aria-label="Owner type">
+                    <button
+                      type="button"
+                      className={ownerType === 'sole' ? 'active' : ''}
+                      onClick={() => setOwnerType('sole')}
+                      aria-pressed={ownerType === 'sole'}
+                      title="Sole Proprietor will autofill owner name fields when available"
+                    >
+                      Sole Proprietor
+                    </button>
+                    <button
+                      type="button"
+                      className={ownerType === 'corp' ? 'active' : ''}
+                      onClick={() => setOwnerType('corp')}
+                      aria-pressed={ownerType === 'corp'}
+                      title="Corporation will not autofill owner name fields"
+                    >
+                      Corporation
+                    </button>
                   </div>
                 </div>
-              </div>
 
-              <div>
-                <div className="mo-label">Step 3: Validate Business Permit</div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <input
+                    className="is-input"
                     value={businessSearch}
                     onChange={(e) => setBusinessSearch(e.target.value)}
                     placeholder="Enter permit number or business name"
                     disabled={checkingBusiness}
-                    style={{
-                      flex: '1 1 260px',
-                      height: 40,
-                      borderRadius: 10,
-                      border: '1px solid #cbd5e1',
-                      padding: '0 12px',
-                      fontWeight: 700,
-                    }}
+                    style={{ flex: '1 1 260px' }}
                   />
                   <button
                     type="button"
-                    className="mo-btn mo-btn-primary"
+                    className="mo-btn mo-btn-primary is-btn-primary"
                     onClick={handleCheckBusiness}
                     disabled={checkingBusiness}
                   >
@@ -610,37 +408,31 @@ export default function InspectionSlipCreate() {
                 </div>
 
                 {businessResult ? (
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ color: '#0f172a', fontWeight: 900, marginBottom: 6 }}>
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ color: '#0f172a', fontWeight: 900, marginBottom: 8 }}>
                       Matches ({businessResult.matches.length})
                     </div>
                     {businessResult.matches.length === 0 ? (
                       <div className="mo-meta">No matches.</div>
                     ) : (
-                      <div style={{ display: 'grid', gap: 8 }}>
+                      <div style={{ display: 'grid', gap: 10 }}>
                         {businessResult.matches.map((b) => (
                           <div
                             key={b.id || `${b.business_name}-${b.permit_number}`}
-                            style={{
-                              border: '1px solid #e2e8f0',
-                              borderRadius: 12,
-                              padding: 10,
-                              background: '#fff',
-                              cursor: 'pointer',
-                            }}
+                            className="is-match-card"
                             onClick={() => handleUseBusiness(b)}
                           >
-                            <div style={{ fontWeight: 900, color: '#0f172a' }}>{b.business_name || '—'}</div>
-                            <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{b.business_name || '—'}</div>
+                            <div style={{ color: '#475569', fontWeight: 600, fontSize: 12 }}>
                               Permit: {b.epermit_no || '—'}
                             </div>
                             {b.address || b.business_address || b.full_address ? (
-                              <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
+                              <div style={{ color: '#475569', fontWeight: 600, fontSize: 12 }}>
                                 Address: {b.address || b.business_address || b.full_address}
                               </div>
                             ) : null}
                             {b.permit_status ? (
-                              <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
+                              <div style={{ color: '#475569', fontWeight: 600, fontSize: 12 }}>
                                 Status: {b.permit_status}
                               </div>
                             ) : null}
@@ -652,123 +444,214 @@ export default function InspectionSlipCreate() {
                 ) : null}
               </div>
 
-              <div>
-                <div className="mo-label">Step 4: Line of Business</div>
+              <div className="is-card">
+                <div className="is-section-head">
+                  <div>
+                    <p className="is-section-title">Step 2: Line of Business</p>
+                    <p className="is-section-sub">Autofilled when available; editable anytime.</p>
+                  </div>
+                </div>
+
                 <input
+                  className="is-input"
                   value={lineOfBusiness}
                   onChange={(e) => setLineOfBusiness(e.target.value)}
-                  placeholder="Enter line of business (used to generate checklist next)"
-                  style={{
-                    width: '100%',
-                    height: 40,
-                    borderRadius: 10,
-                    border: '1px solid #cbd5e1',
-                    padding: '0 12px',
-                    fontWeight: 700,
-                    marginTop: 8,
-                  }}
+                  placeholder="Enter line of business"
                 />
               </div>
 
-              <div>
-                <div className="mo-label">Step 5: Compliance Checklist</div>
-                <div className="mo-meta" style={{ marginTop: 6 }}>
-                  Mark items as compliant/non-compliant during the inspection.
+              <div className="is-card">
+                <div className="is-section-head">
+                  <div>
+                    <p className="is-section-title">Step 3: Business Owner Details</p>
+                    <p className="is-section-sub">Owner identity and business name.</p>
+                  </div>
                 </div>
 
-                <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
-                  <label
-                    style={{
-                      display: 'flex',
-                      gap: 10,
-                      alignItems: 'center',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 12,
-                      padding: 10,
-                      background: '#fff',
-                      fontWeight: 900,
-                      color: '#0f172a',
-                    }}
-                  >
+                <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                  <div className="is-field">
+                    <label>Last Name</label>
                     <input
-                      type="checkbox"
-                      checked={Boolean(checklist.business_permit)}
-                      onChange={(e) => setChecklist((p) => ({ ...p, business_permit: e.target.checked }))}
+                      className="is-input"
+                      value={ownerDetails.lastName}
+                      onChange={(e) => setOwnerDetails((prev) => ({ ...prev, lastName: e.target.value }))}
+                      placeholder="Enter last name"
                     />
-                    Business Permit (Presented)
-                  </label>
+                  </div>
 
-                  <label
-                    style={{
-                      display: 'flex',
-                      gap: 10,
-                      alignItems: 'center',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 12,
-                      padding: 10,
-                      background: '#fff',
-                      fontWeight: 900,
-                      color: '#0f172a',
-                    }}
-                  >
+                  <div className="is-field">
+                    <label>First Name</label>
                     <input
-                      type="checkbox"
-                      checked={Boolean(checklist.with_cctv)}
-                      onChange={(e) => setChecklist((p) => ({ ...p, with_cctv: e.target.checked }))}
+                      className="is-input"
+                      value={ownerDetails.firstName}
+                      onChange={(e) => setOwnerDetails((prev) => ({ ...prev, firstName: e.target.value }))}
+                      placeholder="Enter first name"
                     />
-                    With CCTV
-                  </label>
+                  </div>
 
-                  <label
-                    style={{
-                      display: 'flex',
-                      gap: 10,
-                      alignItems: 'center',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 12,
-                      padding: 10,
-                      background: '#fff',
-                      fontWeight: 900,
-                      color: '#0f172a',
-                    }}
-                  >
+                  <div className="is-field">
+                    <label>Middle Name</label>
                     <input
-                      type="checkbox"
-                      checked={Boolean(checklist.signage_2sqm)}
-                      onChange={(e) => setChecklist((p) => ({ ...p, signage_2sqm: e.target.checked }))}
+                      className="is-input"
+                      value={ownerDetails.middleName}
+                      onChange={(e) => setOwnerDetails((prev) => ({ ...prev, middleName: e.target.value }))}
+                      placeholder="Enter middle name"
                     />
-                    2sqm Signage (Compliant)
-                  </label>
+                  </div>
+
+                  <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                    <label>Business Name</label>
+                    <input
+                      className="is-input"
+                      value={ownerDetails.businessName}
+                      onChange={(e) => setOwnerDetails((prev) => ({ ...prev, businessName: e.target.value }))}
+                      placeholder="Enter business name"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <div className="mo-label">Signatures</div>
-                <div
-                  style={{
-                    marginTop: 10,
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                    gap: 10,
-                  }}
-                >
+              <div className="is-card">
+                <div className="is-section-head">
                   <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Inspector Signature
+                    <p className="is-section-title">Step 4: Business Details</p>
+                    <p className="is-section-sub">Key information needed for validation and inspection.</p>
+                  </div>
+                </div>
+
+                <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                  <div className="is-field">
+                    <label>BIN #</label>
+                    <input
+                      className="is-input"
+                      value={businessDetails.bin}
+                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, bin: e.target.value }))}
+                      placeholder="Enter BIN #"
+                    />
+                  </div>
+
+                  <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                    <label>Address</label>
+                    <input
+                      className="is-input"
+                      value={businessDetails.address}
+                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, address: e.target.value }))}
+                      placeholder="Address (autofilled when selecting a business, editable)"
+                    />
+                  </div>
+
+                  <div className="is-field">
+                    <label>Estimated Area (SQM)</label>
+                    <input
+                      className="is-input"
+                      type="number"
+                      min="0"
+                      value={businessDetails.estimatedAreaSqm}
+                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, estimatedAreaSqm: e.target.value }))}
+                      placeholder="Enter estimated area"
+                    />
+                  </div>
+
+                  <div className="is-field">
+                    <label>No. of Employees</label>
+                    <input
+                      className="is-input"
+                      type="number"
+                      min="0"
+                      value={businessDetails.numberOfEmployees}
+                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, numberOfEmployees: e.target.value }))}
+                      placeholder="Enter number of employees"
+                    />
+                  </div>
+
+                  <div className="is-field">
+                    <label>Landline #</label>
+                    <input
+                      className="is-input"
+                      value={businessDetails.landline}
+                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, landline: e.target.value }))}
+                      placeholder="Enter landline #"
+                    />
+                  </div>
+
+                  <div className="is-field">
+                    <label>Cellphone #</label>
+                    <input
+                      className="is-input"
+                      value={businessDetails.cellphone}
+                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, cellphone: e.target.value }))}
+                      placeholder="Enter cellphone #"
+                    />
+                  </div>
+
+                  <div className="is-field">
+                    <label>Email Address</label>
+                    <input
+                      className="is-input"
+                      type="email"
+                      value={businessDetails.email}
+                      onChange={(e) => setBusinessDetails((prev) => ({ ...prev, email: e.target.value }))}
+                      placeholder="Enter email address"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="is-card">
+                <div className="is-section-head">
+                  <div>
+                    <p className="is-section-title">Step 5: Compliance Checklist</p>
+                    <p className="is-section-sub">Use Compliant / Non-Compliant / N/A per item.</p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {[
+                    { key: 'business_permit', label: 'Business Permit (Presented)' },
+                    { key: 'with_cctv', label: 'With CCTV' },
+                    { key: 'signage_2sqm', label: '2sqm Signage' },
+                  ].map((item) => (
+                    <div key={item.key} className="is-check-row">
+                      <div className="is-check-title">{item.label}</div>
+                      <div className="is-seg" role="group" aria-label={`${item.label} status`}>
+                        {[
+                          { v: 'compliant', t: 'Compliant' },
+                          { v: 'non_compliant', t: 'Non-Compliant' },
+                          { v: 'na', t: 'N/A' },
+                        ].map((opt) => (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            className={checklist[item.key] === opt.v ? 'active' : ''}
+                            onClick={() => setChecklist((p) => ({ ...p, [item.key]: opt.v }))}
+                            aria-pressed={checklist[item.key] === opt.v}
+                          >
+                            {opt.t}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <div
-                      style={{
-                        border: '1px solid #cbd5e1',
-                        borderRadius: 10,
-                        background: '#ffffff',
-                        padding: 4,
-                      }}
-                    >
+                  ))}
+                </div>
+              </div>
+
+              <div className="is-card">
+                <div className="is-section-head">
+                  <div>
+                    <p className="is-section-title">Signatures</p>
+                    <p className="is-section-sub">Sign inside the box. Use Clear only if needed.</p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                  <div className="is-field">
+                    <label>Inspector Signature</label>
+                    <div className="is-sign-wrap">
                       <canvas
                         ref={inspectorCanvasRef}
                         width={400}
                         height={120}
-                        style={{ width: '100%', height: 120, display: 'block' }}
+                        style={{ width: '100%', height: 120, display: 'block', background: 'transparent' }}
                         onMouseDown={(e) => handleSignatureStart('inspector', e)}
                         onMouseMove={(e) => handleSignatureMove('inspector', e)}
                         onMouseUp={() => handleSignatureEnd('inspector')}
@@ -777,33 +660,26 @@ export default function InspectionSlipCreate() {
                         onTouchMove={(e) => handleSignatureMove('inspector', e)}
                         onTouchEnd={() => handleSignatureEnd('inspector')}
                       />
+                      {!inspectorSignature ? <div className="is-sign-hint">Sign here</div> : null}
                       <button
                         type="button"
-                        className="mo-btn mo-btn-secondary"
+                        className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
                         onClick={() => handleSignatureClear('inspector')}
-                        style={{ marginTop: 6 }}
+                        title="Clear signature"
                       >
                         Clear
                       </button>
                     </div>
                   </div>
-                  <div>
-                    <div className="mo-meta" style={{ marginBottom: 4 }}>
-                      Business Owner Signature
-                    </div>
-                    <div
-                      style={{
-                        border: '1px solid #cbd5e1',
-                        borderRadius: 10,
-                        background: '#ffffff',
-                        padding: 4,
-                      }}
-                    >
+
+                  <div className="is-field">
+                    <label>Business Owner Signature</label>
+                    <div className="is-sign-wrap">
                       <canvas
                         ref={ownerCanvasRef}
                         width={400}
                         height={120}
-                        style={{ width: '100%', height: 120, display: 'block' }}
+                        style={{ width: '100%', height: 120, display: 'block', background: 'transparent' }}
                         onMouseDown={(e) => handleSignatureStart('owner', e)}
                         onMouseMove={(e) => handleSignatureMove('owner', e)}
                         onMouseUp={() => handleSignatureEnd('owner')}
@@ -812,11 +688,12 @@ export default function InspectionSlipCreate() {
                         onTouchMove={(e) => handleSignatureMove('owner', e)}
                         onTouchEnd={() => handleSignatureEnd('owner')}
                       />
+                      {!ownerSignature ? <div className="is-sign-hint">Sign here</div> : null}
                       <button
                         type="button"
-                        className="mo-btn mo-btn-secondary"
+                        className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
                         onClick={() => handleSignatureClear('owner')}
-                        style={{ marginTop: 6 }}
+                        title="Clear signature"
                       >
                         Clear
                       </button>
