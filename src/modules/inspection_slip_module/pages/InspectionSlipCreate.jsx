@@ -43,7 +43,8 @@ export default function InspectionSlipCreate() {
 
   const [autoFillMessage, setAutoFillMessage] = useState('');
 
-  const [lineOfBusiness, setLineOfBusiness] = useState('');
+  // Businesses can have multiple line(s) of business. We store it as an editable list.
+  const [lineOfBusinessList, setLineOfBusinessList] = useState(['']);
 
   // Checklist with tri-state: compliant | non_compliant | na
   const [checklist, setChecklist] = useState({
@@ -233,7 +234,7 @@ export default function InspectionSlipCreate() {
     }
   };
 
-  const handleUseBusiness = (b) => {
+  const handleUseBusiness = async (b) => {
     if (!b) return;
 
     // Always fill business name
@@ -242,8 +243,10 @@ export default function InspectionSlipCreate() {
       businessName: b.business_name || prev.businessName,
     }));
 
-    // Only autofill owner personal name fields for Sole Proprietor
-    if (ownerType === 'sole') {
+    // Only autofill owner personal name fields + additional business info for Sole Proprietor
+    const isSole = ownerType === 'sole';
+
+    if (isSole) {
       const lastName = b.owner_last_name || b.last_name || b.lastname || '';
       const firstName = b.owner_first_name || b.first_name || b.firstname || '';
       const middleName = b.owner_middle_name || b.middle_name || b.middlename || '';
@@ -256,9 +259,11 @@ export default function InspectionSlipCreate() {
       }));
     }
 
+    const bin = b.epermit_no || b.permit_number || '';
+
     setBusinessDetails((prev) => ({
       ...prev,
-      bin: b.epermit_no || b.permit_number || prev.bin,
+      bin: bin || prev.bin,
       address:
         b.address ||
         b.business_address ||
@@ -267,12 +272,59 @@ export default function InspectionSlipCreate() {
         prev.address,
     }));
 
-    // Progressive disclosure: highlight that Line of Business can be pulled/updated.
-    // (If the businesses table has a line_of_business column, use it; otherwise keep manual entry.)
-    const lob = b.line_of_business || b.lineOfBusiness || '';
-    if (lob) {
-      setLineOfBusiness(lob);
-      setToast('Line of business autofilled from registered business.');
+    // Pull multi-line LOB + total_employees from businesses_additional based on BIN.
+    // Your schema shows:
+    // - businesses.bin (text)
+    // - businesses_additional.bin (text, NOT NULL)
+    // - businesses_additional.line_of_business (text)
+    // - businesses_additional.total_employees (bigint)
+    // Auto-populate only when Sole Proprietor; still editable anytime.
+    if (isSole) {
+      try {
+        const businessBin = String(b?.bin || '').trim();
+        if (!businessBin) return;
+
+        const { data: addRows, error: addErr } = await supabase
+          .from('businesses_additional')
+          .select('line_of_business, total_employees')
+          .eq('bin', businessBin);
+
+        if (addErr) throw addErr;
+        if (!addRows || addRows.length === 0) return;
+
+        // LOB can be multiple rows OR stored as a delimited string.
+        const lobs = addRows
+          .flatMap((r) => {
+            const v = r?.line_of_business ?? '';
+            if (typeof v === 'string') {
+              return v
+                .split(/\r?\n|\s*;\s*|\s*,\s*/g)
+                .map((s) => s.trim())
+                .filter(Boolean);
+            }
+            return [];
+          })
+          .filter((val, idx, arr) => arr.indexOf(val) === idx);
+
+        if (lobs.length > 0) {
+          setLineOfBusinessList(lobs);
+        }
+
+        // total_employees appears per-row; prefer MAX to avoid overcounting.
+        const maxEmployees = addRows
+          .map((r) => Number(r?.total_employees || 0))
+          .filter((n) => Number.isFinite(n) && n > 0)
+          .reduce((m, n) => (n > m ? n : m), 0);
+
+        if (maxEmployees > 0) {
+          setBusinessDetails((prev) => ({
+            ...prev,
+            numberOfEmployees: String(maxEmployees),
+          }));
+        }
+      } catch {
+        // Silent fail: do not block slip creation if businesses_additional is missing/not linked.
+      }
     }
   };
 
@@ -448,16 +500,51 @@ export default function InspectionSlipCreate() {
                 <div className="is-section-head">
                   <div>
                     <p className="is-section-title">Step 2: Line of Business</p>
-                    <p className="is-section-sub">Autofilled when available; editable anytime.</p>
+                    <p className="is-section-sub">Can be multiple lines. Autofilled for Sole Proprietor when available; editable anytime.</p>
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      className="mo-btn mo-btn-secondary"
+                      onClick={() => setLineOfBusinessList((p) => [...p, ''])}
+                      title="Add another line of business"
+                    >
+                      + Add Line
+                    </button>
                   </div>
                 </div>
 
-                <input
-                  className="is-input"
-                  value={lineOfBusiness}
-                  onChange={(e) => setLineOfBusiness(e.target.value)}
-                  placeholder="Enter line of business"
-                />
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {lineOfBusinessList.map((lob, idx) => (
+                    <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input
+                        className="is-input"
+                        value={lob}
+                        onChange={(e) =>
+                          setLineOfBusinessList((prev) => {
+                            const next = [...prev];
+                            next[idx] = e.target.value;
+                            return next;
+                          })
+                        }
+                        placeholder={`Line of business #${idx + 1}`}
+                        style={{ flex: '1 1 auto' }}
+                      />
+                      {lineOfBusinessList.length > 1 ? (
+                        <button
+                          type="button"
+                          className="mo-btn mo-btn-secondary"
+                          onClick={() =>
+                            setLineOfBusinessList((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                          title="Remove this line"
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="is-card">
