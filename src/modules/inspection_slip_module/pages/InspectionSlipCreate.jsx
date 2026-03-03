@@ -959,15 +959,15 @@ export default function InspectionSlipCreate() {
       const { error: subErr } = await supabase
         .from('inspection_reports')
         .update({
-          status: 'completed',
-          submitted_at: new Date().toISOString(),
+          // Keep this aligned with your DB check constraint for inspection_reports.status
+          status: 'submitted',
           completed_at: new Date().toISOString(),
         })
         .eq('id', inspectionReportId);
 
       if (subErr) throw subErr;
 
-      setToast('Inspection report submitted as Completed.');
+      setToast('Inspection report submitted.');
       setActiveTab('summary');
     } catch (e) {
       setError(e?.message || 'Failed to submit inspection report.');
