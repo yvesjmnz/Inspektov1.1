@@ -58,6 +58,236 @@ export default function InspectionSlipCreate() {
     signage_2sqm: 'na',
   });
 
+  // Only used when "With CCTV" is marked Compliant.
+  const [cctvCount, setCctvCount] = useState('');
+
+  const COMMENTS_MAX = 500;
+  const [additionalComments, setAdditionalComments] = useState('');
+
+  const quickTags = useMemo(
+    () => ['Major Violation', 'Minor Observation', 'Follow-up Required', 'Clean Record'],
+    []
+  );
+
+  const applyQuickTag = (tag) => {
+    const t = `[${tag}]`;
+    setAdditionalComments((prev) => {
+      const cur = String(prev || '');
+      if (!cur.trim()) return `${t} `;
+      if (cur.includes(t)) return cur; // avoid duplicates
+      return `${t} ${cur}`;
+    });
+  };
+
+  // Camera capture for evidence photos (Inspection Slip)
+  const [evidencePhotos, setEvidencePhotos] = useState([]);
+  const [activePhotoUrl, setActivePhotoUrl] = useState('');
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [facingMode, setFacingMode] = useState('environment'); // 'user' | 'environment'
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const cameraStartSeqRef = useRef(0);
+
+  const stopCamera = () => {
+    try {
+      const s = streamRef.current;
+      if (s) s.getTracks().forEach((t) => t.stop());
+    } finally {
+      streamRef.current = null;
+    }
+  };
+
+  const startCamera = async (mode = facingMode) => {
+    setCameraError('');
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('In-browser camera is not supported on this device/browser.');
+      return;
+    }
+
+    const seq = ++cameraStartSeqRef.current;
+    setCameraBusy(true);
+
+    try {
+      stopCamera();
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: mode } },
+        audio: false,
+      });
+
+      if (seq !== cameraStartSeqRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      streamRef.current = stream;
+
+      const videoEl = videoRef.current;
+      if (!videoEl) return;
+
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.autoplay = true;
+      videoEl.srcObject = stream;
+
+      if (videoEl.readyState < 2) {
+        await new Promise((resolve) => {
+          const onLoaded = () => {
+            videoEl.removeEventListener('loadeddata', onLoaded);
+            resolve();
+          };
+          videoEl.addEventListener('loadeddata', onLoaded);
+        });
+      }
+
+      if (seq !== cameraStartSeqRef.current || !videoRef.current) return;
+
+      try {
+        await videoEl.play();
+      } catch (playErr) {
+        const msg = String(playErr?.message || playErr || '');
+        if (!msg.includes('media was removed from the document')) {
+          setCameraError('Unable to start camera preview. Please tap Open Camera again.');
+          console.warn('video.play() failed:', playErr);
+        }
+      }
+
+      if (seq === cameraStartSeqRef.current) setCameraOpen(true);
+    } catch (e) {
+      if (seq === cameraStartSeqRef.current) {
+        setCameraError(e?.message || 'Unable to access camera. Please allow camera permission.');
+        setCameraOpen(false);
+      }
+    } finally {
+      if (seq === cameraStartSeqRef.current) setCameraBusy(false);
+    }
+  };
+
+  const closeCamera = () => {
+    cameraStartSeqRef.current += 1;
+    stopCamera();
+
+    if (videoRef.current) {
+      try {
+        videoRef.current.srcObject = null;
+      } catch {
+        // ignore
+      }
+    }
+
+    setCameraOpen(false);
+  };
+
+  const openCameraFlow = async () => {
+    setCameraError('');
+    setCameraOpen(true);
+    await new Promise((r) => setTimeout(r, 0));
+    await startCamera(facingMode);
+  };
+
+  const switchCamera = async () => {
+    const next = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(next);
+    await startCamera(next);
+  };
+
+  const captureFromCamera = async () => {
+    setCameraError('');
+    const video = videoRef.current;
+    if (!video) return;
+
+    try {
+      setCameraBusy(true);
+
+      const canvas = document.createElement('canvas');
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, w, h);
+
+      // Burn timestamp into the image (bottom-left)
+      const ts = Date.now();
+      const tsText = new Date(ts).toLocaleString();
+      const pad = Math.max(12, Math.round(Math.min(w, h) * 0.018));
+      const fontSize = Math.max(18, Math.round(Math.min(w, h) * 0.03));
+
+      ctx.font = `900 ${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+      ctx.textBaseline = 'bottom';
+
+      // Background pill
+      const textMetrics = ctx.measureText(tsText);
+      const textW = Math.ceil(textMetrics.width);
+      const boxH = Math.round(fontSize * 1.25);
+      const boxW = textW + pad * 2;
+      const x = pad;
+      const y = h - pad;
+      const r = Math.round(boxH / 2);
+
+      ctx.fillStyle = 'rgba(15,23,42,0.70)';
+      ctx.beginPath();
+      ctx.moveTo(x + r, y - boxH);
+      ctx.arcTo(x + boxW, y - boxH, x + boxW, y, r);
+      ctx.arcTo(x + boxW, y, x, y, r);
+      ctx.arcTo(x, y, x, y - boxH, r);
+      ctx.arcTo(x, y - boxH, x + boxW, y - boxH, r);
+      ctx.closePath();
+      ctx.fill();
+
+      // Timestamp text
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(tsText, x + pad, y - Math.round(pad * 0.25));
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      if (!blob) throw new Error('Failed to capture image.');
+
+      const url = URL.createObjectURL(blob);
+      setEvidencePhotos((prev) => [...prev, { url, blob, ts }]);
+    } catch (e) {
+      setCameraError(e?.message || 'Failed to capture image.');
+    } finally {
+      setCameraBusy(false);
+    }
+  };
+
+  const removeEvidencePhoto = (index) => {
+    setEvidencePhotos((prev) => {
+      const victim = prev[index];
+      if (victim?.url) {
+        try {
+          URL.revokeObjectURL(victim.url);
+        } catch {
+          // ignore
+        }
+      }
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  useEffect(() => {
+    // Cleanup camera + blob urls on unmount
+    return () => {
+      try {
+        closeCamera();
+      } catch {
+        // ignore
+      }
+
+      try {
+        evidencePhotos.forEach((p) => {
+          if (p?.url) URL.revokeObjectURL(p.url);
+        });
+      } catch {
+        // ignore
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const inspectorCanvasRef = useRef(null);
   const ownerCanvasRef = useRef(null);
 
@@ -492,6 +722,84 @@ export default function InspectionSlipCreate() {
 
   return (
     <div className="mo-container is-root">
+      {activePhotoUrl ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Photo preview"
+          onClick={() => setActivePhotoUrl('')}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setActivePhotoUrl('');
+          }}
+          tabIndex={-1}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2,6,23,0.72)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 18,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(980px, 100%)',
+              maxHeight: 'calc(100vh - 36px)',
+              background: '#0b1220',
+              borderRadius: 14,
+              border: '1px solid rgba(226,232,240,0.25)',
+              overflow: 'hidden',
+              boxShadow: '0 20px 55px rgba(0,0,0,0.45)',
+              position: 'relative',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setActivePhotoUrl('')}
+              aria-label="Close preview"
+              title="Close"
+              style={{
+                position: 'absolute',
+                top: 10,
+                right: 10,
+                width: 40,
+                height: 40,
+                borderRadius: 999,
+                border: '1px solid rgba(255,255,255,0.35)',
+                background: 'rgba(15,23,42,0.55)',
+                color: '#fff',
+                fontWeight: 900,
+                fontSize: 18,
+                lineHeight: '38px',
+                textAlign: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              ×
+            </button>
+
+            <div style={{ padding: 12 }}>
+              <img
+                src={activePhotoUrl}
+                alt="Evidence preview"
+                style={{
+                  width: '100%',
+                  height: 'auto',
+                  maxHeight: 'calc(100vh - 120px)',
+                  objectFit: 'contain',
+                  borderRadius: 10,
+                  display: 'block',
+                  background: '#0b1220',
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <Header />
       <main className="mo-main">
         <section className="mo-card">
@@ -1054,27 +1362,335 @@ export default function InspectionSlipCreate() {
                         { key: 'with_cctv', label: 'With CCTV' },
                         { key: 'signage_2sqm', label: '2sqm Signage' },
                       ].map((item) => (
-                        <div key={item.key} className="is-check-row">
-                          <div className="is-check-title">{item.label}</div>
-                          <div className="is-seg" role="group" aria-label={`${item.label} status`}>
-                            {[
-                              { v: 'compliant', t: 'Compliant' },
-                              { v: 'non_compliant', t: 'Non-Compliant' },
-                              { v: 'na', t: 'N/A' },
-                            ].map((opt) => (
-                              <button
-                                key={opt.v}
-                                type="button"
-                                className={checklist[item.key] === opt.v ? 'active' : ''}
-                                onClick={() => setChecklist((p) => ({ ...p, [item.key]: opt.v }))}
-                                aria-pressed={checklist[item.key] === opt.v}
-                              >
-                                {opt.t}
-                              </button>
-                            ))}
+                        <div key={item.key} className="is-check-row" style={{ alignItems: 'flex-start' }}>
+                          <div className="is-check-title" style={{ paddingTop: 6 }}>
+                            {item.label}
+                          </div>
+                          <div style={{ display: 'grid', gap: 8, justifyItems: 'start' }}>
+                            <div className="is-seg" role="group" aria-label={`${item.label} status`}>
+                              {[
+                                { v: 'compliant', t: 'Compliant' },
+                                { v: 'non_compliant', t: 'Non-Compliant' },
+                                { v: 'na', t: 'N/A' },
+                              ].map((opt) => (
+                                <button
+                                  key={opt.v}
+                                  type="button"
+                                  className={checklist[item.key] === opt.v ? 'active' : ''}
+                                  onClick={() => {
+                                    setChecklist((p) => ({ ...p, [item.key]: opt.v }));
+                                    if (item.key === 'with_cctv' && opt.v !== 'compliant') {
+                                      setCctvCount('');
+                                    }
+                                  }}
+                                  aria-pressed={checklist[item.key] === opt.v}
+                                >
+                                  {opt.t}
+                                </button>
+                              ))}
+                            </div>
+
+                            {item.key === 'with_cctv' && checklist.with_cctv === 'compliant' ? (
+                              <div className="is-field" style={{ margin: 0, width: 220 }}>
+                                <label style={{ fontSize: 12 }}>No. of CCTVs</label>
+                                <input
+                                  className="is-input"
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  value={cctvCount}
+                                  onChange={(e) => {
+                                    // Keep only digits (prevents "e", "+", "-", "." from being stored)
+                                    const next = String(e.target.value || '').replace(/\D+/g, '');
+                                    setCctvCount(next);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    // Block common non-integer characters that browsers allow in number inputs
+                                    if (['e', 'E', '+', '-', '.'].includes(e.key)) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                  placeholder="Enter count"
+                                />
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       ))}
+                    </div>
+                  </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <svg
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M12 20h9"
+                            stroke="#7c3aed"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                          <path
+                            d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+                            stroke="#7c3aed"
+                            strokeWidth="2"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        <div>
+                          <p className="is-section-title">Step 6: Additional Observations</p>
+                          <p className="is-section-sub">Optional notes, findings, or recommendations.</p>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        {!cameraOpen ? (
+                          <button
+                            type="button"
+                            className="mo-btn mo-btn-secondary"
+                            onClick={openCameraFlow}
+                            disabled={cameraBusy}
+                            title="Open Camera"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                          >
+                            <img src="/ui_icons/camera.png" alt="Camera" style={{ width: 16, height: 16 }} />
+                            {cameraBusy ? 'Opening…' : 'Open Camera'}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="mo-btn mo-btn-secondary"
+                            onClick={closeCamera}
+                            disabled={cameraBusy}
+                            title="Close Camera"
+                          >
+                            Close Camera
+                          </button>
+                        )}
+                        <div style={{ alignSelf: 'center', fontSize: 12, fontWeight: 800, color: '#64748b' }}>
+                          {evidencePhotos.length} photo{evidencePhotos.length === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {cameraError ? (
+                      <div className="mo-alert mo-alert-error" style={{ marginBottom: 10 }}>
+                        {cameraError}
+                      </div>
+                    ) : null}
+
+                    {cameraOpen ? (
+                      <div
+                        style={{
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          overflow: 'hidden',
+                          background: '#0b1220',
+                          position: 'relative',
+                          marginBottom: 10,
+                        }}
+                      >
+                        <video ref={videoRef} playsInline muted autoPlay style={{ width: '100%', height: 260, objectFit: 'cover' }} />
+
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: 12,
+                            right: 12,
+                            bottom: 12,
+                            display: 'grid',
+                            gridTemplateColumns: '1fr auto 1fr',
+                            alignItems: 'center',
+                            columnGap: 12,
+                          }}
+                        >
+                          <div style={{ justifySelf: 'start' }}>
+                            <button
+                              type="button"
+                              onClick={switchCamera}
+                              disabled={cameraBusy}
+                              className="mo-btn mo-btn-secondary"
+                              style={{ width: 40, height: 40, borderRadius: 999, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                              aria-label="Switch Camera"
+                              title="Switch Camera"
+                            >
+                              <img src="/ui_icons/switch-camera.png" alt="Switch" style={{ width: 18, height: 18 }} />
+                            </button>
+                          </div>
+
+                          <div style={{ justifySelf: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={captureFromCamera}
+                              disabled={cameraBusy}
+                              className="mo-btn mo-btn-primary"
+                              style={{ width: 62, height: 62, borderRadius: 999, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 24px rgba(0,0,0,0.35)' }}
+                              aria-label="Capture Photo"
+                              title="Capture Photo"
+                            >
+                              <img src="/ui_icons/camera.png" alt="Capture" style={{ width: 26, height: 26, filter: 'invert(1) brightness(2) contrast(100%)' }} />
+                            </button>
+                          </div>
+
+                          <div />
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {evidencePhotos.length ? (
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
+                          gap: 10,
+                          marginBottom: 10,
+                        }}
+                        aria-label="Evidence photos"
+                      >
+                        {evidencePhotos.map((p, idx) => (
+                          <div
+                            key={p.ts || idx}
+                            style={{
+                              position: 'relative',
+                              borderRadius: 12,
+                              overflow: 'hidden',
+                              border: '1px solid #e2e8f0',
+                              background: '#fff',
+                              aspectRatio: '1 / 1',
+                            }}
+                          >
+                            <img
+                              src={p.url}
+                              alt={`Evidence ${idx + 1}`}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }}
+                              onClick={() => setActivePhotoUrl(p.url)}
+                              title="Click to preview"
+                            />
+
+                            <div
+                              style={{
+                                position: 'absolute',
+                                left: 6,
+                                right: 6,
+                                bottom: 6,
+                                padding: '3px 6px',
+                                borderRadius: 8,
+                                background: 'rgba(15,23,42,0.65)',
+                                color: '#fff',
+                                fontSize: 10,
+                                fontWeight: 800,
+                                lineHeight: '12px',
+                                textAlign: 'center',
+                              }}
+                              title={p.ts ? new Date(p.ts).toLocaleString() : ''}
+                            >
+                              {p.ts ? new Date(p.ts).toLocaleString() : ''}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeEvidencePhoto(idx)}
+                              aria-label="Remove evidence photo"
+                              title="Remove"
+                              style={{
+                                position: 'absolute',
+                                top: 6,
+                                right: 6,
+                                width: 24,
+                                height: 24,
+                                borderRadius: 999,
+                                border: '1px solid rgba(255,255,255,0.7)',
+                                background: 'rgba(15,23,42,0.55)',
+                                color: '#fff',
+                                fontWeight: 900,
+                                lineHeight: '22px',
+                                textAlign: 'center',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} aria-label="Quick tags">
+                        {quickTags.map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            className="mo-btn mo-btn-secondary mo-btn--sm"
+                            onClick={() => applyQuickTag(t)}
+                            title={`Insert ${t}`}
+                            style={{
+                              borderRadius: 999,
+                              padding: '4px 8px',
+                              fontWeight: 800,
+                              fontSize: 11,
+                              lineHeight: '14px',
+                            }}
+                          >
+                            [{t}]
+                          </button>
+                        ))}
+                      </div>
+
+                      <div
+                        style={{
+                          position: 'relative',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          background: '#f8fafc',
+                          padding: 12,
+                        }}
+                      >
+                        <textarea
+                          value={additionalComments}
+                          onChange={(e) => {
+                            const next = String(e.target.value || '').slice(0, COMMENTS_MAX);
+                            setAdditionalComments(next);
+                          }}
+                          rows={5}
+                          placeholder="Type any specific findings or recommendations here…"
+                          style={{
+                            width: '100%',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: 10,
+                            padding: 12,
+                            background: '#fff',
+                            color: '#0f172a',
+                            fontWeight: 700,
+                            outline: 'none',
+                            resize: 'vertical',
+                          }}
+                        />
+
+                        <div
+                          style={{
+                            position: 'absolute',
+                            right: 18,
+                            bottom: 16,
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: '#94a3b8',
+                            pointerEvents: 'none',
+                            background: 'rgba(248,250,252,0.9)',
+                            padding: '2px 6px',
+                            borderRadius: 999,
+                          }}
+                        >
+                          {String(additionalComments || '').length} / {COMMENTS_MAX}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -1186,10 +1802,94 @@ export default function InspectionSlipCreate() {
                         return (
                           <div key={item.key} className="is-check-row">
                             <div className="is-check-title">{item.label}</div>
-                            <div style={{ fontWeight: 900, color: '#0f172a' }}>{text}</div>
+                            <div style={{ fontWeight: 900, color: '#0f172a' }}>
+                              {text}
+                              {item.key === 'with_cctv' && v === 'compliant' ? (
+                                <span style={{ marginLeft: 8, fontWeight: 900, color: '#0f172a' }}>
+                                  ({cctvCount ? `${cctvCount} CCTV${String(cctvCount) === '1' ? '' : 's'}` : 'CCTV count not set'})
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Additional Observations</p>
+                        <p className="is-section-sub">Inspector remarks / findings.</p>
+                      </div>
+                    </div>
+
+                    <div className="is-field" style={{ marginTop: 4 }}>
+                      <label>Remarks</label>
+                      <div style={{ fontWeight: 800, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                        {additionalComments?.trim() ? additionalComments : '—'}
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800, color: '#94a3b8' }}>
+                        {String(additionalComments || '').length} / {COMMENTS_MAX}
+                      </div>
+                    </div>
+
+                    <div className="is-field" style={{ marginTop: 12 }}>
+                      <label>Photo Evidence</label>
+                      {evidencePhotos.length ? (
+                        <div
+                          style={{
+                            marginTop: 8,
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
+                            gap: 10,
+                          }}
+                          aria-label="Evidence photos summary"
+                        >
+                          {evidencePhotos.map((p, idx) => (
+                            <div
+                              key={p.ts || idx}
+                              style={{
+                                borderRadius: 12,
+                                overflow: 'hidden',
+                                border: '1px solid #e2e8f0',
+                                background: '#fff',
+                                aspectRatio: '1 / 1',
+                                position: 'relative',
+                              }}
+                            >
+                              <img
+                                src={p.url}
+                                alt={`Evidence ${idx + 1}`}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }}
+                                onClick={() => setActivePhotoUrl(p.url)}
+                                title="Click to preview"
+                              />
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  left: 6,
+                                  right: 6,
+                                  bottom: 6,
+                                  padding: '3px 6px',
+                                  borderRadius: 8,
+                                  background: 'rgba(15,23,42,0.65)',
+                                  color: '#fff',
+                                  fontSize: 10,
+                                  fontWeight: 800,
+                                  lineHeight: '12px',
+                                  textAlign: 'center',
+                                }}
+                                title={p.ts ? new Date(p.ts).toLocaleString() : ''}
+                              >
+                                {p.ts ? new Date(p.ts).toLocaleString() : ''}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontWeight: 800, color: '#64748b' }}>—</div>
+                      )}
                     </div>
                   </div>
 

@@ -38,14 +38,14 @@
 
 .is-section-title{
   margin:0;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 900;
   color: var(--is-text);
 }
 
 .is-section-sub{
   margin:0;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--is-muted);
 }
