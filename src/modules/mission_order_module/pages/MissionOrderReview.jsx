@@ -1,12 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import Header from '../../../components/Header';
-import Footer from '../../../components/Footer';
+import { useEffect, useMemo, useState } from 'react';
+import DashboardSidebar from '../../../components/DashboardSidebar';
 import { supabase } from '../../../lib/supabase';
+import '../../dashboard_module/pages/Dashboard.css';
 import '../pages/MissionOrderEditor.css';
 
 function getMissionOrderIdFromQuery() {
   const params = new URLSearchParams(window.location.search);
   return params.get('id');
+}
+
+function formatDateHuman(yyyyMmDd) {
+  if (!yyyyMmDd) return '—';
+  const s = String(yyyyMmDd);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 function formatStatus(status) {
@@ -16,6 +24,75 @@ function formatStatus(status) {
     .trim()
     .replace(/\s+/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function statusBadgeClass(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'for inspection' || s === 'for_inspection') return 'status-badge status-success';
+  if (s === 'issued') return 'status-badge status-warning';
+  if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
+  if (s === 'draft') return 'status-badge status-info';
+  if (!s) return 'status-badge status-info';
+  return 'status-badge';
+}
+
+function KeyTile({ label, value, sub }) {
+  return (
+    <div
+      style={{
+        border: '1px solid #e2e8f0',
+        borderRadius: 14,
+        padding: 14,
+        background: '#fff',
+        boxShadow: '0 4px 10px rgba(2,6,23,0.06)',
+        minHeight: 82,
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.4, color: '#64748b', textTransform: 'uppercase' }}>
+        {label}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 18, fontWeight: 900, color: '#0f172a', lineHeight: 1.2 }}>
+        {value || '—'}
+      </div>
+      {sub ? <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: '#475569' }}>{sub}</div> : null}
+    </div>
+  );
+}
+
+function Panel({ title, right, children }) {
+  return (
+    <section
+      style={{
+        border: '1px solid #e2e8f0',
+        borderRadius: 16,
+        background: '#fff',
+        boxShadow: '0 6px 18px rgba(2,6,23,0.06)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          padding: '14px 16px',
+          borderBottom: '1px solid #e2e8f0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          background: 'linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)',
+        }}
+      >
+        <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 15 }}>{title}</div>
+        {right ? <div>{right}</div> : null}
+      </div>
+      <div style={{ padding: 16 }}>{children}</div>
+    </section>
+  );
+}
+
+function buildOfficeViewerUrl(docxUrl) {
+  if (!docxUrl) return '';
+  const src = encodeURIComponent(docxUrl);
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${src}`;
 }
 
 export default function MissionOrderReview() {
@@ -30,111 +107,104 @@ export default function MissionOrderReview() {
   const [inspectors, setInspectors] = useState([]);
   const [assignedInspectorIds, setAssignedInspectorIds] = useState([]);
 
-  const [directorComment, setDirectorComment] = useState('');
-  const [showComplaintSideBySide, setShowComplaintSideBySide] = useState(false);
-
   const [complaint, setComplaint] = useState(null);
   const [complaintLoading, setComplaintLoading] = useState(false);
   const [complaintError, setComplaintError] = useState('');
 
-  const previewRef = useRef(null);
+  const [directorComment, setDirectorComment] = useState('');
+  const [complaintExpanded, setComplaintExpanded] = useState(false);
+
+  const [docxPreviewOpen, setDocxPreviewOpen] = useState(false);
+  const [docxPreviewError, setDocxPreviewError] = useState(false);
+
+  // Sidebar persistence shared across dashboard + these pages
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('dash:navCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('dash:navCollapsed', navCollapsed ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [navCollapsed]);
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(''), 3500);
+    const t = setTimeout(() => setToast(''), 2800);
     return () => clearTimeout(t);
   }, [toast]);
 
-  const load = async () => {
-    if (!missionOrderId) {
-      setError('Missing mission order id. Open this page as /mission-order/review?id=<uuid>');
-      return;
+  const handleLogout = async () => {
+    setError('');
+    try {
+      await supabase.auth.signOut({ scope: 'global' });
+    } catch (e) {
+      setError(e?.message || 'Logout failed. Clearing local session…');
+    } finally {
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {
+        // ignore
+      }
+      window.location.replace('/login');
     }
+  };
 
+  const load = async () => {
     setError('');
     setLoading(true);
 
     try {
+      if (!missionOrderId) {
+        setError('Missing mission order id. Open this page as /mission-order/review?id=<uuid>');
+        return;
+      }
+
       const { data: mo, error: moError } = await supabase
         .from('mission_orders')
-        .select(
-          'id, title, content, status, complaint_id, created_at, updated_at, submitted_at, submitted_by, reviewed_at, reviewed_by, director_comment, director_signature_url, created_by'
-        )
+        .select('id, complaint_id, status, director_comment, director_signature_url, date_of_inspection, date_of_issuance, template_name, generated_docx_url, created_at, updated_at, submitted_at')
         .eq('id', missionOrderId)
         .single();
-
       if (moError) throw moError;
 
-      const { data: inspectorsData, error: inspectorsError } = await supabase
-        .from('profiles')
-        .select('id, full_name, role')
-        .eq('role', 'inspector')
-        .order('full_name', { ascending: true });
-
-      if (inspectorsError) throw inspectorsError;
-
-      // Load assignments.
-      // In many Supabase setups, RLS can allow INSERT/DELETE but accidentally block SELECT,
-      // which makes the UI think there are no assignments.
-      // We therefore:
-      // 1) Try to fetch assignments from mission_order_assignments.
-      // 2) Fallback to mission_orders.assigned_inspector_ids if present.
-      // 3) Finally, as a last-resort, infer from the MO HTML auto-field markers.
+      // NOTE: Director may not have permission (RLS) to list all inspector profiles.
+      // We only need names for the assigned inspectors, so we fetch assignments first and then
+      // resolve only those inspector profiles.
       const { data: assignedRows, error: assignedError } = await supabase
         .from('mission_order_assignments')
         .select('inspector_id, assigned_at')
         .eq('mission_order_id', missionOrderId)
         .order('assigned_at', { ascending: true });
+      if (assignedError) throw assignedError;
+      const assignedIds = Array.from(new Set((assignedRows || []).map((r) => r.inspector_id).filter(Boolean)));
 
-      let assignedIds = [];
-
-      if (!assignedError) {
-        assignedIds = (assignedRows || []).map((r) => r.inspector_id).filter(Boolean);
-      }
-
-      // Fallback #1: if the schema has a denormalized column.
-      if (assignedIds.length === 0) {
-        const maybe = mo?.assigned_inspector_ids;
-        if (Array.isArray(maybe)) assignedIds = maybe.filter(Boolean);
-      }
-
-      // Fallback #2: parse from stored HTML if it contains the inspector names list.
-      // This is best-effort only and prevents a false-negative block on approval.
-      if (assignedIds.length === 0 && mo?.content) {
-        const m = String(mo.content).match(/data-mo-auto="inspectors"[^>]*>([\s\S]*?)<\/span>/i);
-        if (m?.[1]) {
-          const text = m[1].replace(/<[^>]+>/g, '').trim();
-          if (text) {
-            const nameSet = new Set(
-              text
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean)
-            );
-            assignedIds = (inspectorsData || [])
-              .filter((p) => nameSet.has(String(p.full_name || '').trim()))
-              .map((p) => p.id);
-          }
-        }
-      }
-
-      // If SELECT is blocked by RLS, surface a warning but still allow approval when we have an alternate source.
-      if (assignedError && assignedIds.length === 0) {
-        // Don't hard-fail page load; allow director to see the mission order.
-        // The approve handler will still block if we truly can't determine any assignments.
-        // eslint-disable-next-line no-console
-        console.warn('Failed to load mission_order_assignments (possible RLS):', assignedError);
+      const { data: inspectorsData, error: inspectorsError } = assignedIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name, first_name, middle_name, last_name')
+            .in('id', assignedIds)
+        : { data: [], error: null };
+      if (inspectorsError) {
+        // If RLS blocks profiles, fall back to showing IDs.
+        console.warn('Unable to load inspector profiles for director view:', inspectorsError);
       }
 
       setMissionOrder(mo);
       setInspectors(inspectorsData || []);
       setAssignedInspectorIds(assignedIds);
+      setDirectorComment(mo?.director_comment || '');
 
-      // Best-effort complaint side panel data (read-only)
       if (mo?.complaint_id) {
+        setComplaintLoading(true);
+        setComplaintError('');
         try {
-          setComplaintError('');
-          setComplaintLoading(true);
           const { data: complaintData, error: complaintLoadError } = await supabase
             .from('complaints')
             .select('*')
@@ -152,81 +222,15 @@ export default function MissionOrderReview() {
         setComplaint(null);
       }
 
-      // Load existing director comment if you already have a column for it.
-      // If not present, keep UI-only.
-      setDirectorComment(mo?.director_comment || '');
-
-      // Render HTML safely (this app stores MO content as HTML; we assume only trusted users can edit it)
-      if (previewRef.current) {
-        let contentToDisplay = mo?.content || '';
-        
-        // If mission order is approved and has a signature, inject it above the director's name.
-        // Use an absolutely-positioned overlay so it doesn't push the name down.
-        if (mo?.director_signature_url && String(mo?.status || '').toLowerCase() === 'for inspection') {
-          // Create a reserved signature lane so the director name stays aligned with the other column,
-          // while still showing the signature on top of that reserved space.
-          // This avoids reflow/pushing the name down.
-          const signatureBlock = `
-            <div style="position: relative; height: 48px; width: 100%; margin: 0; padding: 0;">
-              <img
-                src="${mo.director_signature_url}"
-                alt="Director Signature"
-                style="
-                  position: absolute;
-                  left: 50%;
-                  transform: translateX(calc(-50% - 64px));
-                  bottom: -22px;
-                  max-width: 130px;
-                  height: auto;
-                  display: block;
-                  margin: 0;
-                  padding: 0;
-                  pointer-events: none;
-                "
-              />
-            </div>
-          `.trim();
-
-          // Insert signature lane right above the director name.
-          contentToDisplay = contentToDisplay.replace(
-            /(<p style="margin: 0; font-weight: 800;">LEVI C\. FACUNDO<\/p>)/i,
-            signatureBlock + '$1'
-          );
-
-          // Remove the pre-existing signature blank lines on the LEFT column only,
-          // so adding the director signature doesn't create extra vertical gap.
-          // Keep the RIGHT column (Approved by) spacing intact.
-          // Handle these variants:
-          // - <br/><br/>
-          // - <br/><br/> (with whitespace)
-          // - <br/><br/> as a single literal string
-          // - <br><br>
-          // - <p><br></p> (some editors generate empty paragraphs)
-
-          // 1) remove up to 2 <br> tags after the label
-          contentToDisplay = contentToDisplay.replace(
-            /(<p style="margin: 0;">Recommending approval:<\/p>)((?:\s*<br\s*\/?>\s*){1,2})/i,
-            '$1'
-          );
-
-          // 2) remove up to 2 empty <p> lines after the label (e.g. <p><br></p>)
-          contentToDisplay = contentToDisplay.replace(
-            /(<p style="margin: 0;">Recommending approval:<\/p>)((?:\s*<p[^>]*>\s*(?:<br\s*\/?>)?\s*<\/p>\s*){1,2})/i,
-            '$1'
-          );
-
-          // 3) editor template exact string (in case it survived formatting)
-          contentToDisplay = contentToDisplay.replace(
-            /(<p style="margin: 0;">Recommending approval:<\/p>)\s*<br\s*\/?>\s*<br\s*\/?>/i,
-            '$1'
-          );
-        }
-        
-        previewRef.current.innerHTML = contentToDisplay;
+      if (mo?.generated_docx_url) {
+        setDocxPreviewOpen(true);
       }
     } catch (e) {
       setError(e?.message || 'Failed to load mission order.');
       setMissionOrder(null);
+      setInspectors([]);
+      setAssignedInspectorIds([]);
+      setComplaint(null);
     } finally {
       setLoading(false);
     }
@@ -237,7 +241,6 @@ export default function MissionOrderReview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missionOrderId]);
 
-  // Best-effort realtime refresh for decision state/edits
   useEffect(() => {
     if (!missionOrderId) return;
 
@@ -246,21 +249,12 @@ export default function MissionOrderReview() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mission_orders', filter: `id=eq.${missionOrderId}` },
-        () => {
-          load().catch(() => {});
-        }
+        () => load()
       )
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'mission_order_assignments',
-          filter: `mission_order_id=eq.${missionOrderId}`,
-        },
-        () => {
-          load().catch(() => {});
-        }
+        { event: '*', schema: 'public', table: 'mission_order_assignments', filter: `mission_order_id=eq.${missionOrderId}` },
+        () => load()
       )
       .subscribe();
 
@@ -271,24 +265,25 @@ export default function MissionOrderReview() {
   }, [missionOrderId]);
 
   const assignedInspectorNames = useMemo(() => {
+    if (!assignedInspectorIds.length) return '';
+
+    const byId = new Map((inspectors || []).map((p) => {
+      const name =
+        p?.full_name ||
+        [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') ||
+        '';
+      return [p?.id, name];
+    }));
+
     return assignedInspectorIds
-      .map((id) => inspectors.find((x) => x.id === id)?.full_name)
+      .map((id) => byId.get(id) || String(id).slice(0, 8) + '…')
       .filter(Boolean)
       .join(', ');
   }, [assignedInspectorIds, inspectors]);
 
-  const requireReviewableState = () => {
+  const isReviewable = useMemo(() => {
     const s = String(missionOrder?.status || '').toLowerCase();
-    // DB constraint only allows: draft | issued | cancelled | completed
-    // "issued" is treated as the Director-review queue state.
-    return ['issued'].includes(s);
-  };
-
-  const decisionStatus = useMemo(() => {
-    const s = String(missionOrder?.status || '').toLowerCase();
-    if (s === 'for inspection') return 'approved';
-    if (s === 'cancelled') return 'rejected';
-    return '';
+    return s === 'issued';
   }, [missionOrder?.status]);
 
   const updateMissionOrderDecision = async (nextStatus) => {
@@ -305,333 +300,233 @@ export default function MissionOrderReview() {
       if (!userId) throw new Error('Not authenticated. Please login again.');
 
       const nowIso = new Date().toISOString();
-
-      // Industry-standard approach: store decision + actor + timestamp.
-      // Columns are assumed. If they don't exist, DB must be updated.
       const patch = {
         status: nextStatus,
         director_comment: directorComment || null,
-        reviewed_by: userId,
         reviewed_at: nowIso,
+        reviewed_by: userId,
         updated_at: nowIso,
+        ...(nextStatus === 'for inspection' ? { date_of_issuance: nowIso.slice(0, 10) } : {}),
       };
 
-      // Add director's e-signature URL only on approval
-      if (nextStatus === 'for inspection') {
-        patch.director_signature_url = 'https://nxmenhwpxtknrgvarioe.supabase.co/storage/v1/object/sign/e-signature%20bucket/634074338_937186158874457_7418890435965105244_n-removebg-preview.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV80MGY2ZWI5OS1iM2FjLTRmYzMtYjRlMS1kMTUyMTFjOTg5ODgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJlLXNpZ25hdHVyZSBidWNrZXQvNjM0MDc0MzM4XzkzNzE4NjE1ODg3NDQ1N183NDE4ODkwNDM1OTY1MTA1MjQ0X24tcmVtb3ZlYmctcHJldmlldy5wbmciLCJpYXQiOjE3NzE5OTEwOTYsImV4cCI6MTg1ODM5MTA5Nn0.OYxeyhCyBwhZBpHjkO5KQGdPYUVxhXLr4-AwW7lnuOg';
+      if (nextStatus === 'cancelled' && !String(directorComment || '').trim()) {
+        throw new Error('Rejection requires a director comment.');
       }
 
       const { error: updateError } = await supabase.from('mission_orders').update(patch).eq('id', missionOrderId);
       if (updateError) throw updateError;
 
-      // Update local UI immediately so buttons are replaced without requiring a refresh.
       setMissionOrder((prev) => ({ ...(prev || {}), ...patch }));
-
-      setToast(nextStatus === 'for inspection' ? 'Mission order approved.' : 'Mission order rejected.');
+      setToast(nextStatus === 'for inspection' ? 'Approved' : 'Rejected');
       await load();
     } catch (e) {
-      setError(e?.message || 'Failed to save decision.');
+      setError(e?.message || 'Failed to update mission order.');
     } finally {
       setSavingDecision(false);
     }
   };
 
   const handleApprove = async () => {
-    if (!requireReviewableState()) {
-      setToast('This mission order is not in a reviewable state.');
+    if (!isReviewable) {
+      setToast('Not reviewable');
       return;
     }
-
-    if (assignedInspectorIds.length === 0) {
-      setError('Cannot approve: no inspectors assigned.');
-      return;
-    }
-
-    // DB constraint allows: draft | issued | cancelled | for inspection
-    // "for inspection" is treated as "Director-approved / ready for inspectors".
     await updateMissionOrderDecision('for inspection');
   };
 
   const handleReject = async () => {
-    if (!requireReviewableState()) {
-      setToast('This mission order is not in a reviewable state.');
+    if (!isReviewable) {
+      setToast('Not reviewable');
       return;
     }
-
-    if (!directorComment.trim()) {
-      setError('Please provide a comment/instructions before rejecting.');
-      return;
-    }
-
-    // There is no "rejected" status in the current DB constraint.
-    // "cancelled" is treated as "Director-rejected" in this workflow.
     await updateMissionOrderDecision('cancelled');
   };
 
+  const officeViewerUrl = useMemo(() => buildOfficeViewerUrl(missionOrder?.generated_docx_url), [missionOrder?.generated_docx_url]);
+
   return (
-    <div className="mo-container">
-      <Header />
-      <main className="mo-main">
-        <section className="mo-card">
-          <div className="mo-header">
-            <div className="mo-title-wrap">
-              <div className="mo-label">Mission Order (Director Review)</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ fontWeight: 900, fontSize: 16, color: '#0f172a' }}>{missionOrder?.title || '—'}</div>
+    <div className="dash-container" style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif' }}>
+      <main className="dash-main">
+        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
+          <DashboardSidebar
+            role="director"
+            onLogout={handleLogout}
+            collapsed={navCollapsed}
+            onCollapsedChange={setNavCollapsed}
+          />
+
+          <div className="dash-maincol">
+            <div className="dash-card" style={{ padding: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontWeight: 1000, fontSize: 20, color: '#0f172a' }}>Mission Order</div>
+                  <div style={{ color: '#475569', fontWeight: 800, marginTop: 6, fontSize: 14 }}>
+                    {complaint?.business_name || '—'}
+                  </div>
+                  <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span className={statusBadgeClass(missionOrder?.status)}>{formatStatus(missionOrder?.status)}</span>
+                    <span style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>
+                      Template: {missionOrder?.template_name || 'MISSION-ORDER-TEMPLATE'}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <a className="dash-btn" href="/dashboard/director?tab=mission-orders" style={{ textDecoration: 'none' }}>Back</a>
+                  {missionOrder?.generated_docx_url ? (
+                    <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                      Download DOCX
+                    </a>
+                  ) : null}
+
+                  {isReviewable ? (
+                    <>
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={handleApprove}
+                        disabled={loading || savingDecision || !missionOrder}
+                        style={{ background: '#16a34a', color: '#fff', border: '1px solid #16a34a' }}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={handleReject}
+                        disabled={loading || savingDecision || !missionOrder}
+                        style={{ background: '#dc2626', color: '#fff', border: '1px solid #dc2626' }}
+                      >
+                        Reject
+                      </button>
+                    </>
+                  ) : (
+                    <span style={{ fontWeight: 900, color: '#64748b' }}>Read-only</span>
+                  )}
+                </div>
               </div>
-            </div>
 
-            <div className="mo-actions">
-              <a className="mo-link" href="/dashboard/director">
-                Back
-              </a>
+              {toast ? <div className="dash-alert dash-alert-success" style={{ marginTop: 14 }}>{toast}</div> : null}
+              {error ? <div className="dash-alert dash-alert-error" style={{ marginTop: 14 }}>{error}</div> : null}
 
-              {decisionStatus ? (
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 12px',
-                    borderRadius: 999,
-                    border: '1px solid #e2e8f0',
-                    background: decisionStatus === 'approved' ? '#ecfdf5' : '#fef2f2',
-                    color: decisionStatus === 'approved' ? '#065f46' : '#7f1d1d',
-                    fontWeight: 900,
-                    fontSize: 13,
-                  }}
-                  title={
-                    decisionStatus === 'approved'
-                      ? 'This mission order is approved (For Inspection).'
-                      : 'This mission order is rejected (Cancelled).'
+              <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+                <KeyTile label="Inspectors" value={assignedInspectorNames || '—'} sub={assignedInspectorIds.length ? `${assignedInspectorIds.length} assigned` : 'None assigned'} />
+                <KeyTile label="Inspection Date" value={formatDateHuman(missionOrder?.date_of_inspection)} sub="From Head Inspector" />
+                <KeyTile label="Issuance Date" value={missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'} sub={missionOrder?.date_of_issuance ? 'Already set' : 'Set on approval'} />
+              </div>
+
+              <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
+                {isReviewable ? (
+                  <Panel title="Director Comment" right={<span style={{ fontWeight: 900, fontSize: 12, color: '#64748b' }}>Required if rejecting</span>}>
+                    <textarea
+                      className="mo-title"
+                      value={directorComment}
+                      onChange={(e) => setDirectorComment(e.target.value)}
+                      rows={5}
+                      disabled={loading}
+                      style={{ fontSize: 16, fontWeight: 800, height: 'auto', minHeight: 120, borderRadius: 14 }}
+                      placeholder="Add instruction or reason…"
+                    />
+                  </Panel>
+                ) : null}
+
+                <Panel
+                  title="Business & Complaint"
+                  right={
+                    complaint?.id ? (
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={() => setComplaintExpanded((v) => !v)}
+                        style={{ background: '#fff', border: '1px solid #e2e8f0' }}
+                      >
+                        {complaintExpanded ? 'Hide Details' : 'Show Details'}
+                      </button>
+                    ) : null
                   }
                 >
-                  {decisionStatus === 'approved' ? 'Approved' : 'Rejected'}
-                </div>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="mo-btn mo-btn-primary"
-                    onClick={handleApprove}
-                    disabled={loading || savingDecision || !missionOrder || !requireReviewableState()}
-                    title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Approve this mission order.'}
-                  >
-                    {savingDecision ? 'Saving…' : 'Approve'}
-                  </button>
-                  <button
-                    type="button"
-                    className="mo-btn"
-                    onClick={handleReject}
-                    disabled={loading || savingDecision || !missionOrder || !requireReviewableState()}
-                    title={!requireReviewableState() ? 'Not in a reviewable status.' : 'Reject this mission order.'}
-                    style={{ background: '#dc2626' }}
-                  >
-                    {savingDecision ? 'Saving…' : 'Reject'}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
+                  {complaintLoading ? <div style={{ color: '#64748b', fontWeight: 800 }}>Loading complaint…</div> : null}
+                  {complaintError ? <div className="dash-alert dash-alert-error">{complaintError}</div> : null}
 
-          {toast ? <div className="mo-alert mo-alert-success">{toast}</div> : null}
-          {error ? <div className="mo-alert mo-alert-error">{error}</div> : null}
-
-          
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: showComplaintSideBySide ? 'minmax(0, 3fr) minmax(0, 2fr)' : 'minmax(0, 1fr)',
-              gap: showComplaintSideBySide ? 14 : 0,
-              alignItems: 'start',
-              marginTop: 14,
-              transition: 'grid-template-columns 0.3s ease-in-out',
-            }}
-          >
-            <div>
-              <label className="mo-label" htmlFor="directorComment">
-                Director Comments / Instructions
-              </label>
-              <textarea
-                id="directorComment"
-                value={directorComment}
-                onChange={(e) => setDirectorComment(e.target.value)}
-                placeholder="Add comments or specific instructions for the Head Inspector / assigned inspectors..."
-                disabled={loading || savingDecision}
-                style={{
-                  width: '100%',
-                  minHeight: 110,
-                  borderRadius: 12,
-                  border: '1px solid #cbd5e1',
-                  background: '#fff',
-                  color: '#0f172a',
-                  padding: 12,
-                  outline: 'none',
-                  fontSize: 14,
-                }}
-              />
-              <div className="mo-meta" style={{ marginTop: 6 }}>
-                Tip: Rejection requires a comment for auditability.
-              </div>
-
-              {/* Fixed toggle location (muscle-memory): right above the preview area */}
-              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  type="button"
-                  className="mo-btn"
-                  onClick={() => setShowComplaintSideBySide((v) => !v)}
-                  disabled={loading || savingDecision}
-                  title="Toggle complaint details side panel"
-                  style={{
-                    background: 'transparent',
-                    color: '#2563eb',
-                    border: '1px solid #2563eb',
-                  }}
-                >
-                  {showComplaintSideBySide ? 'Hide Complaint' : 'Show Complaint'}
-                </button>
-              </div>
-
-              <div className="mo-editor-wrap" aria-label="Mission Order Preview">
-                <div
-                  ref={previewRef}
-                  className="mo-editor"
-                  contentEditable={false}
-                  suppressContentEditableWarning
-                  style={{ cursor: 'default' }}
-                />
-              </div>
-
-              <div className="mo-note">
-                Director review is read-only. Approve/reject changes the mission order status and stores your comments.
-              </div>
-            </div>
-
-            {showComplaintSideBySide ? (
-              <aside
-                style={{
-                  background: '#fff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 12,
-                  padding: 12,
-                }}
-                aria-label="Complaint Details"
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-                  <div style={{ fontWeight: 900, color: '#0f172a' }}>Complaint Details</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    {complaint?.authenticity_level ? (
-                      <span
-                        style={{
-                          padding: '4px 8px',
-                          borderRadius: 999,
-                          fontSize: 12,
-                          fontWeight: 900,
-                          border: '1px solid #e2e8f0',
-                          background:
-                            String(complaint.authenticity_level).toLowerCase() === 'urgent' ? '#fee2e2' : '#e0f2fe',
-                          color: String(complaint.authenticity_level).toLowerCase() === 'urgent' ? '#991b1b' : '#075985',
-                        }}
-                        title="Urgency"
-                      >
-                        {complaint.authenticity_level}
-                      </span>
-                    ) : null}
-                    <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>
-                      {missionOrder?.complaint_id ? `ID: ${missionOrder.complaint_id}` : 'No complaint linked'}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ height: 1, background: '#f1f5f9', margin: '10px 0' }} />
-
-                {complaintLoading ? <div className="mo-meta">Loading complaint…</div> : null}
-                {complaintError ? <div className="mo-alert mo-alert-error">{complaintError}</div> : null}
-
-                {!missionOrder?.complaint_id ? (
-                  <div className="mo-meta">This mission order does not reference a complaint.</div>
-                ) : !complaint && !complaintLoading ? (
-                  <div className="mo-meta">No complaint record found.</div>
-                ) : complaint ? (
                   <div style={{ display: 'grid', gap: 10 }}>
                     <div>
-                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Business</div>
-                      <div style={{ fontWeight: 900, color: '#0f172a' }}>{complaint.business_name || '—'}</div>
-                      <div style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
-                        {complaint.business_address || '—'}
-                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Business</div>
+                      <div style={{ fontSize: 18, fontWeight: 1000, color: '#0f172a', marginTop: 6 }}>{complaint?.business_name || '—'}</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: '#475569', marginTop: 6 }}>{complaint?.business_address || '—'}</div>
                     </div>
 
-                    <div>
-                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Description</div>
-                      <div style={{ whiteSpace: 'pre-wrap', color: '#0f172a', fontWeight: 700, fontSize: 13 }}>
-                        {complaint.complaint_description || '—'}
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gap: 6 }}>
-                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Evidence</div>
-                      {Array.isArray(complaint.image_urls) && complaint.image_urls.length > 0 ? (
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {complaint.image_urls.slice(0, 6).map((url) => (
-                            <a
-                              key={url}
-                              href={url}
-                              target="_blank"
-                              rel="noreferrer"
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                height: 30,
-                                padding: '0 10px',
-                                borderRadius: 10,
-                                border: '1px solid #bfdbfe',
-                                background: '#eff6ff',
-                                color: '#1d4ed8',
-                                fontWeight: 900,
-                                textDecoration: 'none',
-                                fontSize: 12,
-                              }}
-                            >
-                              View
-                            </a>
-                          ))}
+                    {complaintExpanded ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Complaint Details</div>
+                        <div style={{ marginTop: 8, whiteSpace: 'pre-wrap', fontSize: 15, fontWeight: 800, color: '#0f172a', lineHeight: 1.65 }}>
+                          {complaint?.complaint_description || '—'}
                         </div>
-                      ) : (
-                        <div className="mo-meta">No images</div>
-                      )}
-                    </div>
+                        {complaint?.id ? (
+                          <div style={{ marginTop: 12 }}>
+                            <a className="dash-btn" href={`/complaints/view?id=${complaint.id}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                              Open Full Complaint
+                            </a>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>Details hidden to reduce clutter.</div>
+                    )}
+                  </div>
+                </Panel>
+              </div>
 
-                    <div style={{ display: 'grid', gap: 6, gridTemplateColumns: '1fr 1fr' }}>
-                      <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Reporter Email</div>
-                      <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 12 }}>
-                        {complaint.reporter_email || '—'}
+              <div style={{ marginTop: 14 }}>
+                <Panel
+                  title="Generated Mission Order (DOCX Preview)"
+                  right={
+                    missionOrder?.generated_docx_url ? (
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={() => {
+                          setDocxPreviewOpen((v) => !v);
+                          setDocxPreviewError(false);
+                        }}
+                        style={{ background: '#fff', border: '1px solid #e2e8f0' }}
+                      >
+                        {docxPreviewOpen ? 'Hide Preview' : 'Show Preview'}
+                      </button>
+                    ) : null
+                  }
+                >
+                  {!missionOrder?.generated_docx_url ? (
+                    <div style={{ color: '#64748b', fontWeight: 800 }}>No generated document yet.</div>
+                  ) : docxPreviewOpen ? (
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {docxPreviewError ? (
+                        <div className="dash-alert dash-alert-error">Preview failed to load. Use download instead.</div>
+                      ) : null}
+
+                      <iframe
+                        title="DOCX Preview"
+                        src={officeViewerUrl}
+                        style={{ width: '100%', height: 560, border: '1px solid #e2e8f0', borderRadius: 14, background: '#fff' }}
+                        onError={() => setDocxPreviewError(true)}
+                      />
+
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                        <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                          Open in new tab
+                        </a>
                       </div>
                     </div>
+                  ) : (
+                    <div style={{ color: '#64748b', fontWeight: 800 }}>Preview hidden.</div>
+                  )}
+                </Panel>
+              </div>
 
-                    <div style={{ display: 'grid', gap: 6 }}>
-                      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>Submitted</div>
-                      <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 12 }}>
-                        {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {missionOrder?.complaint_id ? (
-                  <div style={{ marginTop: 10 }}>
-                    <a className="mo-link" href={`/complaints/view?id=${missionOrder.complaint_id}`} target="_blank" rel="noreferrer">
-                      Open full complaint
-                    </a>
-                  </div>
-                ) : null}
-              </aside>
-            ) : null}
+              {loading ? <div style={{ marginTop: 12, color: '#64748b', fontWeight: 800 }}>Loading…</div> : null}
+            </div>
           </div>
         </section>
       </main>
-      <Footer />
     </div>
   );
 }

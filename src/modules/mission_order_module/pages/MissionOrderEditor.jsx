@@ -1,104 +1,104 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { saveAs } from 'file-saver';
+import DashboardSidebar from '../../../components/DashboardSidebar';
 import { supabase } from '../../../lib/supabase';
+import { buildMissionOrderDocxFileName, generateMissionOrderDocx } from '../lib/docx_template';
 import '../../dashboard_module/pages/Dashboard.css';
 import './MissionOrderEditor.css';
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-function applyAutoFieldsToHtml(html, { inspectorNames, businessName, businessAddress }) {
-  // Keep fields in sync without requiring original placeholders.
-  let next = String(html ?? '');
-
-  const inspectorSpan = `<span data-mo-auto="inspectors" contenteditable="false" data-mo-locked="true">${escapeHtml(
-    inspectorNames || ''
-  )}</span>`;
-  const businessNameSpan = `<span data-mo-auto="business_name" contenteditable="false" data-mo-locked="true">${escapeHtml(
-    businessName || ''
-  )}</span>`;
-  const businessAddressSpan = `<span data-mo-auto="business_address" contenteditable="false" data-mo-locked="true">${escapeHtml(
-    businessAddress || ''
-  )}</span>`;
-
-  const hasInspectorMarker = /data-mo-auto="inspectors"/.test(next);
-  const hasBusinessNameMarker = /data-mo-auto="business_name"/.test(next);
-  const hasBusinessAddressMarker = /data-mo-auto="business_address"/.test(next);
-
-  // Update existing markers
-  next = next.replace(/<span\s+data-mo-auto="inspectors"[^>]*>[\s\S]*?<\/span>/g, inspectorSpan);
-  next = next.replace(/<span\s+data-mo-auto="business_name"[^>]*>[\s\S]*?<\/span>/g, businessNameSpan);
-  next = next.replace(/<span\s+data-mo-auto="business_address"[^>]*>[\s\S]*?<\/span>/g, businessAddressSpan);
-
-  // If the TO line already contains the inspector auto-marker, remove any separate standalone paragraph for it.
-  if (/\<strong\>\s*TO:\s*\<\/strong\>[\s\S]*data-mo-auto="inspectors"/i.test(next)) {
-    next = next.replace(
-      /<p[^>]*>\s*(?:<br\s*\/?>(\s*)?)*<span\s+data-mo-auto="inspectors"[^>]*>[\s\S]*?<\/span>\s*<\/p>\s*/gi,
-      ''
-    );
-  }
-
-  // Back-compat placeholders
-  if (inspectorNames) next = next.replaceAll('[INSPECTOR NAME]', inspectorSpan);
-  if (businessName) next = next.replaceAll('[BUSINESS NAME]', businessNameSpan);
-  if (businessAddress) next = next.replaceAll('[ADDRESS]', businessAddressSpan);
-
-  // Inject into TO line if missing
-  if (!hasInspectorMarker) {
-    const toLine = /(<p[^>]*>\s*<strong>\s*TO:\s*<\/strong>)([\s\S]*?)(<\/p>)/i;
-    if (toLine.test(next)) {
-      next = next.replace(toLine, `$1 FIELD INSPECTOR ${inspectorSpan}$3`);
-    }
-  }
-
-  // Inject into SUBJECT line if missing
-  if (!hasBusinessNameMarker || !hasBusinessAddressMarker) {
-    const subjectLine = /(<p[^>]*>\s*<strong>\s*SUBJECT:\s*<\/strong>)([\s\S]*?)(<\/p>)/i;
-    if (subjectLine.test(next)) {
-      const subjectText = ` TO CONDUCT INSPECTION ON THE BUSINESS ESTABLISHMENT IDENTIFIED AS ${businessNameSpan} WITH ADDRESS AT ${businessAddressSpan}`;
-      next = next.replace(subjectLine, `$1${subjectText}$3`);
-    }
-  }
-
-  // Final fallback: prepend auto section
-  const missingAny =
-    !/data-mo-auto="inspectors"/.test(next) ||
-    !/data-mo-auto="business_name"/.test(next) ||
-    !/data-mo-auto="business_address"/.test(next);
-
-  if (missingAny) {
-    const autoBlock = [
-      '<div data-mo-auto-block="true" contenteditable="false" data-mo-locked="true" style="border: 1px dashed #cbd5e1; padding: 10px; border-radius: 8px; margin-bottom: 12px;">',
-      '<p style="margin:0;"><strong>Assigned Inspectors:</strong> ',
-      inspectorSpan,
-      '</p>',
-      '<p style="margin:6px 0 0 0;"><strong>Business:</strong> ',
-      businessNameSpan,
-      ' — ',
-      businessAddressSpan,
-      '</p>',
-      '</div>',
-    ].join('');
-
-    const firstDivOpen = /<div[^>]*>/i;
-    if (firstDivOpen.test(next)) {
-      next = next.replace(firstDivOpen, (m) => `${m}${autoBlock}`);
-    } else {
-      next = `${autoBlock}${next}`;
-    }
-  }
-
-  return next;
-}
 
 function getMissionOrderIdFromQuery() {
   const params = new URLSearchParams(window.location.search);
   return params.get('id');
+}
+
+function formatDateInputValue(value) {
+  if (!value) return '';
+  const s = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatDateHuman(yyyyMmDd) {
+  if (!yyyyMmDd) return '—';
+  const s = String(yyyyMmDd);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function statusLabel(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'draft') return 'Draft';
+  if (s === 'issued') return 'Submitted to Director';
+  if (s === 'for inspection' || s === 'for_inspection') return 'Approved (For Inspection)';
+  if (s === 'cancelled' || s === 'canceled') return 'Rejected';
+  return status || '—';
+}
+
+const TEMPLATE_NAME = 'MISSION-ORDER-TEMPLATE';
+
+function KeyTile({ label, value, sub }) {
+  return (
+    <div
+      style={{
+        border: '1px solid #e2e8f0',
+        borderRadius: 14,
+        padding: 14,
+        background: '#fff',
+        boxShadow: '0 4px 10px rgba(2,6,23,0.06)',
+        minHeight: 82,
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.4, color: '#64748b', textTransform: 'uppercase' }}>
+        {label}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 18, fontWeight: 900, color: '#0f172a', lineHeight: 1.2 }}>
+        {value || '—'}
+      </div>
+      {sub ? <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: '#475569' }}>{sub}</div> : null}
+    </div>
+  );
+}
+
+function Panel({ title, right, children }) {
+  return (
+    <section
+      style={{
+        border: '1px solid #e2e8f0',
+        borderRadius: 16,
+        background: '#fff',
+        boxShadow: '0 6px 18px rgba(2,6,23,0.06)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          padding: '14px 16px',
+          borderBottom: '1px solid #e2e8f0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          background: 'linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)',
+        }}
+      >
+        <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 15 }}>{title}</div>
+        {right ? <div>{right}</div> : null}
+      </div>
+      <div style={{ padding: 16 }}>{children}</div>
+    </section>
+  );
+}
+
+function buildOfficeViewerUrl(docxUrl) {
+  if (!docxUrl) return '';
+  const src = encodeURIComponent(docxUrl);
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${src}`;
 }
 
 export default function MissionOrderEditor() {
@@ -106,109 +106,137 @@ export default function MissionOrderEditor() {
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [generatingDocx, setGeneratingDocx] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
 
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
+  const [missionOrder, setMissionOrder] = useState(null);
+  const [complaint, setComplaint] = useState(null);
 
-  const [missionOrderStatus, setMissionOrderStatus] = useState('');
-  const [directorComment, setDirectorComment] = useState('');
-  const [reviewedAt, setReviewedAt] = useState(null);
-  const [createdAt, setCreatedAt] = useState(null);
-  const isApproved = String(missionOrderStatus || '').toLowerCase() === 'for inspection';
-  const isSubmitted = String(missionOrderStatus || '').toLowerCase() === 'issued';
-  const isReadOnly = isApproved || isSubmitted;
+  const [inspectors, setInspectors] = useState([]);
+  const [assignedInspectorIds, setAssignedInspectorIds] = useState([]);
+  const [selectedInspectorId, setSelectedInspectorId] = useState('');
 
-  // Sidebar nav state (reused from dashboard)
-  const [navCollapsed, setNavCollapsed] = useState(false);
-  const readTabFromHash = () => {
-    const h = (window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
-    if (h === 'issued' || h === 'for-inspection' || h === 'revisions' || h === 'todo') return h;
-    return 'todo';
-  };
-  const [activeTabFromHash, setActiveTabFromHash] = useState(readTabFromHash());
+  const [dateOfInspection, setDateOfInspection] = useState('');
+
+  const [complaintExpanded, setComplaintExpanded] = useState(false);
+
+  const [docxPreviewOpen, setDocxPreviewOpen] = useState(false);
+  const [docxPreviewError, setDocxPreviewError] = useState(false);
+
+  // Sidebar persistence shared across dashboard + these pages
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('dash:navCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+
   useEffect(() => {
-    const onHash = () => setActiveTabFromHash(readTabFromHash());
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
+    try {
+      localStorage.setItem('dash:navCollapsed', navCollapsed ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [navCollapsed]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(''), 2800);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const status = String(missionOrder?.status || '');
+  const isApproved = String(status).toLowerCase() === 'for inspection' || String(status).toLowerCase() === 'for_inspection';
+  const isSubmitted = String(status).toLowerCase() === 'issued';
+  const isReadOnly = isApproved || isSubmitted;
 
   const handleLogout = async () => {
     setError('');
     try {
-      const { error: signOutError } = await supabase.auth.signOut({ scope: 'global' });
-      if (signOutError) throw signOutError;
+      await supabase.auth.signOut({ scope: 'global' });
     } catch (e) {
       setError(e?.message || 'Logout failed. Clearing local session…');
     } finally {
       try {
         localStorage.clear();
         sessionStorage.clear();
-      } catch {}
+      } catch {
+        // ignore
+      }
       window.location.replace('/login');
     }
   };
 
-  const [isDirty, setIsDirty] = useState(false);
-  const allowDirtyTrackingRef = useRef(false);
-  const baselineRef = useRef({ title: '', content: '' });
+  const load = async () => {
+    if (!missionOrderId) {
+      setError('Missing mission order id. Open this page as /mission-order?id=<uuid>');
+      return;
+    }
 
-  const [inspectors, setInspectors] = useState([]);
-  const [assignedInspectorIds, setAssignedInspectorIds] = useState([]);
-  const [selectedInspectorId, setSelectedInspectorId] = useState('');
-  const [syncingAssignments, setSyncingAssignments] = useState(false);
+    setLoading(true);
+    setError('');
 
-  const [businessName, setBusinessName] = useState('');
-  const [businessAddress, setBusinessAddress] = useState('');
-
-  const [showComplaintSideBySide, setShowComplaintSideBySide] = useState(false);
-  const [complaint, setComplaint] = useState(null);
-  const [complaintLoading, setComplaintLoading] = useState(false);
-  const [complaintError, setComplaintError] = useState('');
-
-  const [submitting, setSubmitting] = useState(false);
-  const [previewImage, setPreviewImage] = useState(null);
-
-  const editorRef = useRef(null);
-
-  const [fmt, setFmt] = useState({ bold: false, italic: false, underline: false });
-  const refreshFormatState = () => {
     try {
-      const sel = window.getSelection?.();
-      const node = sel?.anchorNode;
-      const el = node?.nodeType === 1 ? node : node?.parentElement;
-      const inEditor = !!(editorRef.current && el && editorRef.current.contains(el));
-      if (!inEditor) {
-        setFmt({ bold: false, italic: false, underline: false });
-        return;
+      const { data: mo, error: moError } = await supabase
+        .from('mission_orders')
+        .select('id, complaint_id, status, director_comment, director_signature_url, date_of_inspection, date_of_issuance, template_name, generated_docx_url, created_at, updated_at')
+        .eq('id', missionOrderId)
+        .single();
+      if (moError) throw moError;
+
+      setMissionOrder(mo);
+      setDateOfInspection(formatDateInputValue(mo?.date_of_inspection));
+
+      if (mo?.complaint_id) {
+        const { data: c, error: cError } = await supabase
+          .from('complaints')
+          .select('id, business_name, business_address, complaint_description, reporter_email, created_at, status')
+          .eq('id', mo.complaint_id)
+          .single();
+        if (cError) throw cError;
+        setComplaint(c);
+      } else {
+        setComplaint(null);
       }
-      setFmt({
-        bold: document.queryCommandState('bold'),
-        italic: document.queryCommandState('italic'),
-        underline: document.queryCommandState('underline'),
-      });
-    } catch {
-      setFmt({ bold: false, italic: false, underline: false });
+
+      const { data: inspectorsData, error: inspectorsError } = await supabase
+        .from('profiles')
+        .select('id, full_name, role')
+        .eq('role', 'inspector')
+        .order('full_name', { ascending: true });
+      if (inspectorsError) throw inspectorsError;
+      setInspectors(inspectorsData || []);
+
+      const { data: assignedRows, error: assignedError } = await supabase
+        .from('mission_order_assignments')
+        .select('inspector_id, assigned_at')
+        .eq('mission_order_id', missionOrderId)
+        .order('assigned_at', { ascending: true });
+      if (assignedError) throw assignedError;
+      setAssignedInspectorIds(Array.from(new Set((assignedRows || []).map((r) => r.inspector_id).filter(Boolean))));
+
+      // If doc exists, default open the preview panel (reduces clicks)
+      if (mo?.generated_docx_url) {
+        setDocxPreviewOpen(true);
+      }
+    } catch (e) {
+      setError(e?.message || 'Failed to load mission order.');
+      setMissionOrder(null);
+      setComplaint(null);
+      setInspectors([]);
+      setAssignedInspectorIds([]);
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    const h = () => refreshFormatState();
-    document.addEventListener('selectionchange', h);
-    return () => document.removeEventListener('selectionchange', h);
-  }, []);
-
-  const applyCommand = (command, value = null) => {
-    if (loading || isApproved) return;
-    try {
-      editorRef.current?.focus();
-      document.execCommand(command, false, value);
-      const next = editorRef.current?.innerHTML ?? '';
-      setContent(next);
-      markDirty(title, next);
-    } catch {}
-  };
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missionOrderId]);
 
   const assignedInspectorNames = useMemo(() => {
     const uniqueIds = Array.from(new Set(assignedInspectorIds.filter(Boolean)));
@@ -218,238 +246,84 @@ export default function MissionOrderEditor() {
       .join(', ');
   }, [assignedInspectorIds, inspectors]);
 
-  const syncAutoFieldsIntoEditor = ({ nextBusinessName, nextBusinessAddress, nextInspectorNames } = {}) => {
-    if (!editorRef.current) return;
-    const html = editorRef.current.innerHTML ?? '';
-    const updated = applyAutoFieldsToHtml(html, {
-      inspectorNames: nextInspectorNames ?? assignedInspectorNames,
-      businessName: nextBusinessName ?? businessName,
-      businessAddress: nextBusinessAddress ?? businessAddress,
-    });
-    if (updated === html) return;
-    editorRef.current.innerHTML = updated;
-    setContent(updated);
-    markDirty(title, updated);
-  };
+  const canSave = !loading && !!missionOrderId && !isReadOnly;
+  const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection;
+  const canGenerateDocx = !loading && !!missionOrderId && isApproved;
 
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(''), 3000);
-    return () => clearTimeout(t);
-  }, [toast]);
+  const saveMissionOrder = async () => {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    const userId = userData?.user?.id;
+    if (!userId) throw new Error('Not authenticated. Please login again.');
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      if (!missionOrderId) {
-        setError('Missing mission order id. Open this page as /mission-order?id=<uuid>');
-        return;
-      }
-      setError('');
-      setLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from('mission_orders')
-          .select('id, title, content, complaint_id, status, director_comment, reviewed_at, reviewed_by, created_at, updated_at')
-          .eq('id', missionOrderId)
-          .single();
-        if (error) throw error;
-        if (!mounted) return;
-
-        setCreatedAt(data?.created_at ? new Date(data.created_at) : null);
-
-        // Load business details
-        const complaintId = data?.complaint_id;
-        let loadedBusinessName = '';
-        let loadedBusinessAddress = '';
-        if (complaintId) {
-          try {
-            setComplaintError('');
-            setComplaintLoading(true);
-            const { data: complaintData, error: complaintLoadError } = await supabase
-              .from('complaints')
-              .select('*')
-              .eq('id', complaintId)
-              .single();
-            if (complaintLoadError) throw complaintLoadError;
-            if (!mounted) return;
-            setComplaint(complaintData);
-            loadedBusinessName = complaintData?.business_name || '';
-            loadedBusinessAddress = complaintData?.business_address || '';
-          } catch (ce) {
-            if (!mounted) return;
-            setComplaint(null);
-            setComplaintError(ce?.message || 'Failed to load complaint details.');
-          } finally {
-            if (mounted) setComplaintLoading(false);
-          }
-        } else {
-          setComplaint(null);
-        }
-        setBusinessName(loadedBusinessName);
-        setBusinessAddress(loadedBusinessAddress);
-
-        setMissionOrderStatus(data?.status || '');
-        setDirectorComment(data?.director_comment || '');
-        setReviewedAt(data?.reviewed_at ? new Date(data.reviewed_at) : null);
-
-        // Inspectors list
-        const { data: inspectorsData, error: inspectorsError } = await supabase
-          .from('profiles')
-          .select('id, full_name, role')
-          .eq('role', 'inspector')
-          .order('full_name', { ascending: true });
-        if (inspectorsError) throw inspectorsError;
-        if (!mounted) return;
-        setInspectors(inspectorsData || []);
-
-        // Assignments
-        const { data: assignedRows, error: assignedError } = await supabase
-          .from('mission_order_assignments')
-          .select('id, inspector_id, assigned_at')
-          .eq('mission_order_id', missionOrderId)
-          .order('assigned_at', { ascending: true });
-        if (assignedError) throw assignedError;
-        if (!mounted) return;
-        const loadedAssignedInspectorIds = Array.from(
-          new Set((assignedRows || []).map((r) => r.inspector_id).filter(Boolean))
-        );
-        setAssignedInspectorIds(loadedAssignedInspectorIds);
-
-        const loadedInspectorNames = loadedAssignedInspectorIds
-          .map((id) => inspectorsData?.find((x) => x.id === id)?.full_name)
-          .filter(Boolean)
-          .join(', ');
-
-        // Hydrate content
-        allowDirtyTrackingRef.current = false;
-        setIsDirty(false);
-
-        const loadedTitle = data?.title || `Mission Order ${String(data?.id || '').slice(0, 8)}…`;
-        const loadedContent =
-          data?.content ||
-          [
-            '<div style="font-family: "Times New Roman", Times, serif; line-height: 1.25; font-size: 12px; color: #000;">',
-            '<p style="text-align:center; font-size: 18px;"><strong>MISSION ORDER</strong></p>',
-            '<br/>',
-            '<p><strong>TO:</strong> FIELD INSPECTOR [INSPECTOR NAME]</p>',
-            '<p><strong>SUBJECT:</strong> TO CONDUCT INSPECTION ON THE BUSINESS ESTABLISHMENT IDENTIFIED AS [BUSINESS NAME] WITH ADDRESS AT [ADDRESS]</p>',
-            '<p><strong>DATE OF INSPECTION: </strong>[INSERT DATE]</p>',
-            '<p><strong>DATE OF ISSUANCE: </strong>[INSERT DATE]</p>',
-            '<br/>',
-            '<p style="text-align:justify;">In the interest of public service, you are hereby ordered to conduct inspection of the aforementioned establishment, for the following purposes:</p>',
-            '<p style="text-align:justify; padding-left: 40px;">a) To verify the existence and authenticity of the Business Permits and other applicable permits, certificates, and other necessary documents, the completeness of the requirements therein.</p>',
-            '<p style="text-align:justify; padding-left: 40px;">b) To check actual business operation of the subject establishment.</p>',
-            '<p style="text-align:justify; padding-left: 40px;">c) To check compliance of said establishment with existing laws, ordinance, regulations relative to health & sanitation, fire safety, engineering & electrical installation standards.</p>',
-            '<br/>',
-            '<p style="text-align:justify;">You are hereby directed to identify yourself by showing proper identification and act with due courtesy and politeness in the implementation of this Order. All inspectors shall wear their IDs in such manner as the public will be informed of their true identity.</p>',
-            '<br/>',
-            '<p style="text-align:justify;"><strong>You should also inform the owner or representative of the establishment being inspected that they may verify the authenticity of this Mission Order, or ask questions, or lodge complaints, thru our telephone number (02) 8527-0871 or email at permits@manila.gov.ph</strong></p>',
-            '<br/>',
-            '<p style="text-align:justify;">This Order is in effect until [INSERT DATE] and any Order inconsistent herewith is hereby revoked and/or amended accordingly.</p>',
-            '<br/><br/>',
-            '<table style="width: 100%; border: none; border-collapse: collapse;">',
-            '<tr>',
-            '<td style="width: 50%; vertical-align: top;">',
-            '<p style="margin: 0;">Recommending approval:</p>',
-            '<br/><br/>',
-            '<p style="margin: 0;"><strong>LEVI FACUNDO</strong></p>',
-            '<p style="margin: 0;">Director</p>',
-            '</td>',
-            '<td style="width: 50%; vertical-align: top;">',
-            '<p style="margin: 0;">Approved by:</p>',
-            '<br/><br/>',
-            '<p style="margin: 0;"><strong>MANUEL M. ZARCAL</strong></p>',
-            '<p style="margin: 0;">Secretary to the Mayor</p>',
-            '</td>',
-            '</tr>',
-            '</table>',
-            '</div>',
-          ].join('');
-
-        const hydratedContent = applyAutoFieldsToHtml(loadedContent, {
-          inspectorNames: loadedInspectorNames,
-          businessName: loadedBusinessName,
-          businessAddress: loadedBusinessAddress,
-        });
-
-        baselineRef.current = { title: loadedTitle, content: hydratedContent };
-        setTitle(loadedTitle);
-        setContent(hydratedContent);
-
-        if (editorRef.current) editorRef.current.innerHTML = hydratedContent;
-      } catch (e) {
-        if (!mounted) return;
-        setError(e?.message || 'Failed to load mission order.');
-      } finally {
-        if (mounted) {
-          setLoading(false);
-          setTimeout(() => {
-            allowDirtyTrackingRef.current = true;
-          }, 0);
-        }
-      }
+    const patch = {
+      date_of_inspection: dateOfInspection || null,
+      template_name: TEMPLATE_NAME,
+      updated_at: new Date().toISOString(),
+      last_edited_by: userId,
     };
-    load();
-    return () => {
-      mounted = false;
-    };
-  }, [missionOrderId]);
 
-  const computeDirty = (nextTitle, nextContent) => {
-    const base = baselineRef.current;
-    return base.title !== nextTitle || base.content !== nextContent;
+    const { error: updateError } = await supabase.from('mission_orders').update(patch).eq('id', missionOrderId);
+    if (updateError) throw updateError;
+
+    setMissionOrder((prev) => ({ ...(prev || {}), ...patch }));
   };
 
-  const markDirty = (nextTitle, nextContent) => {
-    if (!allowDirtyTrackingRef.current) return;
-    setIsDirty(computeDirty(nextTitle, nextContent));
+  const handleSave = async () => {
+    setError('');
+    setToast('');
+    setSaving(true);
+    try {
+      await saveMissionOrder();
+      setToast('Saved');
+    } catch (e) {
+      setError(e?.message || 'Failed to save mission order.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  useEffect(() => {
-    if (!editorRef.current || loading) return;
-    const next = String(content ?? '');
-    if (next && editorRef.current.innerHTML !== next) editorRef.current.innerHTML = next;
-  }, [content, loading]);
+  const handleSubmitToDirector = async () => {
+    setError('');
+    setToast('');
+    setSubmitting(true);
 
-  // Also refresh toolbar toggle states when content updates
-  useEffect(() => { refreshFormatState(); }, [content]);
+    try {
+      await saveMissionOrder();
 
-  useEffect(() => {
-    if (!allowDirtyTrackingRef.current) return;
-    syncAutoFieldsIntoEditor({ nextInspectorNames: assignedInspectorNames });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignedInspectorNames]);
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error('Not authenticated. Please login again.');
 
-  useEffect(() => {
-    if (!allowDirtyTrackingRef.current) return;
-    if (!businessName && !businessAddress) return;
-    syncAutoFieldsIntoEditor({ nextBusinessName: businessName, nextBusinessAddress: businessAddress });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [businessName, businessAddress]);
+      const nowIso = new Date().toISOString();
+      const { error: submitError } = await supabase
+        .from('mission_orders')
+        .update({ status: 'issued', submitted_by: userId, submitted_at: nowIso, updated_at: nowIso })
+        .eq('id', missionOrderId);
+      if (submitError) throw submitError;
 
-  const loadAssignedInspectors = async () => {
-    if (!missionOrderId) return;
-    const { data: assignedRows, error: assignedError } = await supabase
-      .from('mission_order_assignments')
-      .select('id, inspector_id, assigned_at')
-      .eq('mission_order_id', missionOrderId)
-      .order('assigned_at', { ascending: true });
-    if (assignedError) throw assignedError;
-    const loadedIds = (assignedRows || []).map((r) => r.inspector_id);
-    setAssignedInspectorIds(loadedIds);
-    const nextNames = loadedIds
-      .map((id) => inspectors.find((x) => x.id === id)?.full_name)
-      .filter(Boolean)
-      .join(', ');
-    syncAutoFieldsIntoEditor({ nextInspectorNames: nextNames });
+      setMissionOrder((prev) => ({
+        ...(prev || {}),
+        status: 'issued',
+        submitted_by: userId,
+        submitted_at: nowIso,
+        updated_at: nowIso,
+      }));
+      setToast('Submitted');
+    } catch (e) {
+      setError(e?.message || 'Failed to submit to Director.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const addInspector = async () => {
     if (!missionOrderId || !selectedInspectorId) return;
+
     setError('');
     setToast('');
-    setSyncingAssignments(true);
+
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
@@ -465,705 +339,408 @@ export default function MissionOrderEditor() {
         .limit(1);
       if (existingError) throw existingError;
       if (existing && existing.length > 0) {
-        setToast('Inspector already assigned.');
+        setToast('Already added');
         return;
       }
-      const { error: insertError } = await supabase.from('mission_order_assignments').insert([
-        { mission_order_id: missionOrderId, inspector_id: inspectorId, assigned_by: userId },
-      ]);
+
+      const { error: insertError } = await supabase
+        .from('mission_order_assignments')
+        .insert([{ mission_order_id: missionOrderId, inspector_id: inspectorId, assigned_by: userId }]);
       if (insertError) throw insertError;
+
+      setAssignedInspectorIds((prev) => Array.from(new Set([...prev, inspectorId])));
       setSelectedInspectorId('');
-      await loadAssignedInspectors();
-      setToast('Inspector added.');
+      setToast('Inspector added');
     } catch (e) {
       setError(e?.message || 'Failed to add inspector.');
-    } finally {
-      setSyncingAssignments(false);
     }
   };
 
   const removeInspector = async (inspectorId) => {
     if (!missionOrderId) return;
+
     setError('');
     setToast('');
-    setSyncingAssignments(true);
+
     try {
-      const { data: deletedRows, error: delError } = await supabase
+      const { error: delError } = await supabase
         .from('mission_order_assignments')
         .delete()
         .eq('mission_order_id', missionOrderId)
-        .eq('inspector_id', inspectorId)
-        .select('id');
+        .eq('inspector_id', inspectorId);
       if (delError) throw delError;
+
       setAssignedInspectorIds((prev) => prev.filter((id) => id !== inspectorId));
-      if (deletedRows && Array.isArray(deletedRows) && deletedRows.length === 0) {
-        throw new Error('Remove failed: no rows deleted (check RLS).');
-      }
-      try { await loadAssignedInspectors(); } catch {}
-      setToast('Inspector removed.');
+      setToast('Removed');
     } catch (e) {
       setError(e?.message || 'Failed to remove inspector.');
-    } finally {
-      setSyncingAssignments(false);
     }
   };
 
-  useEffect(() => {
-    if (!missionOrderId) return;
-    const channel = supabase
-      .channel(`mo-assignments-${missionOrderId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'mission_order_assignments', filter: `mission_order_id=eq.${missionOrderId}` },
-        () => {
-          loadAssignedInspectors().catch(() => {});
+  const handleGenerateDocx = async () => {
+    if (!canGenerateDocx) return;
+
+    setError('');
+    setToast('');
+    setGeneratingDocx(true);
+
+    try {
+      const { data: fresh, error: freshErr } = await supabase
+        .from('mission_orders')
+        .select('id, complaint_id, status, director_signature_url, date_of_inspection, date_of_issuance')
+        .eq('id', missionOrderId)
+        .single();
+      if (freshErr) throw freshErr;
+
+      if (String(fresh?.status || '').toLowerCase() !== 'for inspection') {
+        throw new Error('DOCX can only be generated after approval (For Inspection).');
+      }
+      if (!fresh?.date_of_inspection) throw new Error('Missing date of inspection.');
+      if (!fresh?.date_of_issuance) throw new Error('Missing date of issuance (auto-set on approval).');
+
+      const { data: c, error: cErr } = await supabase
+        .from('complaints')
+        .select('id, business_name, business_address, complaint_description')
+        .eq('id', fresh.complaint_id)
+        .single();
+      if (cErr) throw cErr;
+
+      let directorSignatureUrl = fresh?.director_signature_url || null;
+      try {
+        const u = String(directorSignatureUrl || '');
+        if (u && u.includes('/storage/v1/object/') && u.includes('/private/')) {
+          const m2 = u.match(/\/storage\/v1\/object\/private\/([^/]+)\/(.+)$/i);
+          if (m2) {
+            const bucket = m2[1];
+            const path = decodeURIComponent(m2[2]);
+            const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+            if (signed?.signedUrl) directorSignatureUrl = signed.signedUrl;
+          }
         }
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missionOrderId]);
+      } catch {
+        // ignore
+      }
 
-  const saveMissionOrder = async () => {
-    if (!missionOrderId) return;
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError) throw userError;
-    const userId = userData?.user?.id;
-    if (!userId) throw new Error('Not authenticated. Please login again.');
-    const html = editorRef.current?.innerHTML ?? '';
-    const { error } = await supabase
-      .from('mission_orders')
-      .update({ title: title || null, content: html, last_edited_by: userId, updated_at: new Date().toISOString() })
-      .eq('id', missionOrderId);
-    if (error) throw error;
-    baselineRef.current = { title: title || '', content: html };
-    setIsDirty(false);
-  };
+      const templatePath = 'templates/MISSION-ORDER-TEMPLATE.docx';
+      const { data: signedTemplate, error: signTplErr } = await supabase.storage
+        .from('mission-orders')
+        .createSignedUrl(templatePath, 60);
+      if (signTplErr) throw signTplErr;
+      if (!signedTemplate?.signedUrl) throw new Error('Failed to create signed URL for mission order template.');
 
-  const handleSave = async () => {
-    if (!missionOrderId) return;
-    setError('');
-    setToast('');
-    setSaving(true);
-    try {
-      await saveMissionOrder();
-      setToast('Saved.');
-    } catch (e) {
-      setError(e?.message || 'Failed to save mission order.');
-    } finally {
-      setSaving(false);
-    }
-  };
+      const blob = await generateMissionOrderDocx({
+        templateUrl: signedTemplate.signedUrl,
+        inspectors: assignedInspectorNames || '—',
+        date_of_inspection: fresh.date_of_inspection,
+        date_of_issuance: fresh.date_of_issuance,
+        business_name: c?.business_name,
+        business_address: c?.business_address,
+        complaint_details: c?.complaint_description,
+        director_signature_url: directorSignatureUrl,
+      });
 
-  const handleSubmitToDirector = async () => {
-    if (!missionOrderId) return;
-    setError('');
-    setToast('');
-    setSubmitting(true);
-    try {
-      await saveMissionOrder();
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
       const userId = userData?.user?.id;
       if (!userId) throw new Error('Not authenticated. Please login again.');
-      const nowIso = new Date().toISOString();
-      const { error: submitError } = await supabase
-        .from('mission_orders')
-        .update({ status: 'issued', submitted_by: userId, submitted_at: nowIso, updated_at: nowIso })
-        .eq('id', missionOrderId);
-      if (submitError) throw submitError;
 
-      // Update local UI immediately so the submit button is replaced without requiring a refresh.
-      setMissionOrderStatus('issued');
-      baselineRef.current = { title: title || '', content: editorRef.current?.innerHTML ?? '' };
-      setIsDirty(false);
-      setToast('Submitted to Director for review.');
+      const fileName = buildMissionOrderDocxFileName({ business_name: c?.business_name, mission_order_id: fresh.id });
+
+      const bucket = 'mission-orders';
+      const objectPath = `${fresh.id}/${fileName}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from(bucket)
+        .upload(objectPath, blob, {
+          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          upsert: true,
+        });
+      if (uploadErr) throw uploadErr;
+
+      const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+      const publicUrl = publicData?.publicUrl;
+      if (!publicUrl) throw new Error('Failed to get public URL for uploaded DOCX.');
+
+      const nowIso = new Date().toISOString();
+      const patch = {
+        generated_docx_url: publicUrl,
+        generated_docx_created_at: nowIso,
+        generated_docx_created_by: userId,
+        updated_at: nowIso,
+      };
+
+      const { error: updateErr } = await supabase.from('mission_orders').update(patch).eq('id', fresh.id);
+      if (updateErr) throw updateErr;
+
+      setMissionOrder((prev) => ({ ...(prev || {}), ...patch }));
+
+      // show preview automatically for newly generated doc
+      setDocxPreviewOpen(true);
+      setDocxPreviewError(false);
+
+      setToast('DOCX ready');
+      saveAs(blob, fileName);
     } catch (e) {
-      setError(e?.message || 'Failed to submit to Director.');
+      setError(e?.message || 'Failed to generate DOCX.');
     } finally {
-      setSubmitting(false);
+      setGeneratingDocx(false);
     }
   };
 
-  const createdAtDisplay = useMemo(() => (createdAt ? createdAt.toLocaleDateString() : '—'), [createdAt]);
+  const officeViewerUrl = useMemo(() => buildOfficeViewerUrl(missionOrder?.generated_docx_url), [missionOrder?.generated_docx_url]);
 
   return (
-    <div className="dash-container">
+    <div className="dash-container" style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif' }}>
       <main className="dash-main">
         <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
-          {/* Sidebar */}
-          <aside
-            className="dash-side"
-            title="Menu"
-            style={{ width: navCollapsed ? 72 : 240, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
-            onClick={(e) => {
-              const t = e.target;
-              if (t && typeof t.closest === 'function' && t.closest('.dash-nav-item')) return;
-              setNavCollapsed((v) => !v);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                const t = e.target;
-                if (t && typeof t.closest === 'function' && t.closest('.dash-nav-item')) return;
-                e.preventDefault();
-                setNavCollapsed((v) => !v);
-              }
-            }}
-          >
-            <div className="dash-side-brand" title="Menu">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
-                <img src="/logo.png" alt="City Hall Logo" style={{ width: 44, height: 44, objectFit: 'contain', borderRadius: '50%' }} />
-              </div>
-              <div className="hamburger" aria-hidden="true">
-                <div className="hamburger-bar"></div>
-                <div className="hamburger-bar"></div>
-                <div className="hamburger-bar"></div>
-              </div>
-            </div>
-            <ul className="dash-nav" style={{ flex: 1 }}>
-              <li className="dash-nav-section">
-                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Mission Orders</span>
-              </li>
-              <li>
-                <a href="/dashboard/head-inspector#todo" className={`dash-nav-item ${activeTabFromHash === 'todo' ? 'active' : ''}`} style={{ textDecoration: 'none' }}>
-                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/menu.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
-                  </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Draft</span>
-                </a>
-              </li>
-              <li>
-                <a href="/dashboard/head-inspector#issued" className={`dash-nav-item ${activeTabFromHash === 'issued' ? 'active' : ''}`} style={{ textDecoration: 'none' }}>
-                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/mo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
-                  </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Issued</span>
-                </a>
-              </li>
-              <li>
-                <a href="/dashboard/head-inspector#for-inspection" className={`dash-nav-item ${activeTabFromHash === 'for-inspection' ? 'active' : ''}`} style={{ textDecoration: 'none' }}>
-                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/queue.png" alt="" style={{ width: 24, height: 24, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
-                  </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>For Inspection</span>
-                </a>
-              </li>
-              <li>
-                <a href="/dashboard/head-inspector#revisions" className={`dash-nav-item ${activeTabFromHash === 'revisions' ? 'active' : ''}`} style={{ textDecoration: 'none' }}>
-                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
-                  </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>For Revisions</span>
-                </a>
-              </li>
-            </ul>
-            <button
-              type="button"
-              className="dash-nav-item"
-              onClick={handleLogout}
-              style={{
-                marginTop: 'auto', border: 'none', background: 'transparent', color: '#ef4444', fontWeight: 800, textAlign: 'left',
-                padding: '10px 12px', borderRadius: 10, cursor: 'pointer', display: 'grid', gridTemplateColumns: '24px 1fr', alignItems: 'center', gap: 10,
-              }}
-            >
-              <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                <img src="/ui_icons/logout.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(21%) sepia(97%) saturate(4396%) hue-rotate(346deg) brightness(95%) contrast(101%)' }} />
-              </span>
-              <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Logout</span>
-            </button>
-          </aside>
+          <DashboardSidebar
+            role="head_inspector"
+            onLogout={handleLogout}
+            collapsed={navCollapsed}
+            onCollapsedChange={setNavCollapsed}
+          />
 
-          {/* Content */}
           <div className="dash-maincol">
-            <div className="mo-main">
-              <section className="mo-card" style={{ position: 'relative' }}>
-                {/* Top Bar: Back Button (Left) and Action Buttons (Right) */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 24 }}>
-                  {/* Back Button - Top Left */}
-                  <a
-                    href="/dashboard/head-inspector#todo"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '8px 12px',
-                      background: 'transparent',
-                      border: '1px solid #cbd5e1',
-                      borderRadius: 8,
-                      color: '#0f172a',
-                      fontWeight: 700,
-                      fontSize: 14,
-                      textDecoration: 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = '#f1f5f9';
-                      e.currentTarget.style.borderColor = '#94a3b8';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent';
-                      e.currentTarget.style.borderColor = '#cbd5e1';
-                    }}
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
-                      <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    Back to Drafts
-                  </a>
-
-                  {/* Action Buttons - Top Right */}
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    {isApproved ? (
-                      <button className="mo-btn" type="button" onClick={() => window.print()} disabled={loading} title="Print this approved mission order." style={{ background: 'transparent', border: '1px solid #0f172a', color: '#0f172a' }}>
-                        Print
-                      </button>
-                    ) : isSubmitted ? (
-                      <div
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          padding: '8px 12px',
-                          borderRadius: 999,
-                          border: '1px solid #e2e8f0',
-                          background: '#f8fafc',
-                          color: '#0f172a',
-                          fontWeight: 900,
-                          fontSize: 13,
-                        }}
-                        title="This mission order has been submitted to the Director and is awaiting review."
-                      >
-                        Submitted
-                      </div>
-                    ) : (
-                      <>
-                        <button className="mo-btn" type="button" onClick={handleSave} disabled={saving || loading} title="Save changes">
-                          {saving ? 'Saving…' : 'Save'}
-                        </button>
-                        <button className="mo-btn mo-btn-primary" type="button" onClick={handleSubmitToDirector} disabled={loading || saving || submitting || assignedInspectorIds.length === 0} title={assignedInspectorIds.length === 0 ? 'Assign at least one inspector before submitting.' : 'Forward to Director for review.'}>
-                          {submitting ? 'Submitting…' : 'Submit to Director'}
-                        </button>
-                      </>
-                    )}
+            <div className="dash-card" style={{ padding: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontWeight: 1000, fontSize: 20, color: '#0f172a' }}>Mission Order</div>
+                  <div style={{ color: '#475569', fontWeight: 800, marginTop: 6, fontSize: 14 }}>
+                    {complaint?.business_name || '—'}
+                  </div>
+                  <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span className="status-badge status-info">{statusLabel(missionOrder?.status)}</span>
+                    <span style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Template: {missionOrder?.template_name || TEMPLATE_NAME}</span>
                   </div>
                 </div>
 
-                {/* Director Comments - Top Section */}
-                {directorComment && directorComment.trim() ? (
-                  <div style={{
-                    background: '#fff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 8,
-                    padding: 12,
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                    marginBottom: 24,
-                  }}>
-                    <div style={{ fontWeight: 900, fontSize: 12, color: '#0f172a', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Director Comments
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <a className="dash-btn" href="/dashboard/head-inspector" style={{ textDecoration: 'none' }}>Back</a>
+
+                  {!isApproved && !isSubmitted ? (
+                    <>
+                      <button className="dash-btn" type="button" onClick={handleSave} disabled={!canSave || saving}>
+                        {saving ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        className="dash-btn"
+                        type="button"
+                        onClick={handleSubmitToDirector}
+                        disabled={!canSubmit || submitting}
+                        style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
+                        title={assignedInspectorIds.length === 0 ? 'Assign at least one inspector.' : !dateOfInspection ? 'Set the date of inspection.' : 'Submit to Director'}
+                      >
+                        {submitting ? 'Submitting…' : 'Submit'}
+                      </button>
+                    </>
+                  ) : (
+                    <div style={{ fontWeight: 900, color: '#0f172a' }}>{isApproved ? 'Approved' : 'Submitted'}</div>
+                  )}
+                </div>
+              </div>
+
+              {toast ? <div className="dash-alert dash-alert-success" style={{ marginTop: 14 }}>{toast}</div> : null}
+              {error ? <div className="dash-alert dash-alert-error" style={{ marginTop: 14 }}>{error}</div> : null}
+
+              <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+                <KeyTile label="Inspectors" value={assignedInspectorNames || '—'} sub={assignedInspectorIds.length ? `${assignedInspectorIds.length} assigned` : 'None assigned'} />
+                <KeyTile label="Inspection Date" value={dateOfInspection ? formatDateHuman(dateOfInspection) : '—'} sub="Required" />
+                <KeyTile label="Issuance Date" value={missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'} sub={missionOrder?.date_of_issuance ? 'Set by Director' : 'Set on approval'} />
+              </div>
+
+              <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
+                <Panel title="Quick Inputs" right={isReadOnly ? <span style={{ fontWeight: 900, fontSize: 12, color: '#64748b' }}>Read-only</span> : null}>
+                  <div style={{ display: 'grid', gap: 14 }}>
+                    <div>
+                      <label className="mo-label" htmlFor="dateInspection" style={{ fontSize: 13 }}>Date of Inspection</label>
+                      <input
+                        id="dateInspection"
+                        type="date"
+                        value={dateOfInspection}
+                        onChange={(e) => setDateOfInspection(e.target.value)}
+                        disabled={loading || isReadOnly}
+                        className="mo-title"
+                        style={{ fontSize: 16, fontWeight: 900, height: 46, borderRadius: 14 }}
+                      />
                     </div>
-                    
-                    <div style={{
-                      background: '#f8fafc',
-                      borderRadius: 6,
-                      padding: 10,
-                      borderLeft: '3px solid #dc2626',
-                    }}>
-                      <div style={{
-                        color: '#0f172a',
-                        fontSize: 12,
-                        lineHeight: 1.4,
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        marginBottom: 6,
-                      }}>
-                        {directorComment}
-                      </div>
-                      
-                      <div style={{
-                        fontSize: 10,
-                        color: '#64748b',
-                        fontWeight: 600,
-                      }}>
-                        {reviewedAt ? reviewedAt.toLocaleString() : '—'}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
 
-                {/* Complaint Details & Director Comments - Two Section Layout */}
-                {complaint ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
-                    {/* Left: Complaint Details */}
-                    <div style={{
-                      background: '#fff',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 12,
-                      padding: 24,
-                    }} aria-label="Complaint Details">
-                      <div style={{ fontWeight: 900, fontSize: 16, color: '#0f172a', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        Complaint Details
-                      </div>
-                      {complaintLoading ? <div className="mo-meta">Loading complaint…</div> : null}
-                      {complaintError ? <div className="mo-alert mo-alert-error">{complaintError}</div> : null}
-                      {complaint ? (
-                        <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '24px 32px', alignItems: 'start' }}>
-                          {/* Business Name */}
-                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business</div>
-                          <div>
-                            <div style={{ fontWeight: 900, fontSize: 14, color: '#0f172a', marginBottom: 4 }}>{complaint.business_name || '—'}</div>
-                            <div style={{ fontWeight: 700, fontSize: 12, color: '#475569' }}>{complaint.business_address || '—'}</div>
-                          </div>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: 13, color: '#0f172a' }}>Inspectors</div>
 
-                          {/* Reported By */}
-                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Reported By</div>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>{complaint.reporter_email || '—'}</div>
-
-                          {/* Submitted */}
-                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</div>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
-                            {complaint?.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
-                          </div>
-
-                          {/* Description */}
-                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 8 }}>Description</div>
-                          <div style={{ whiteSpace: 'pre-wrap', color: '#0f172a', fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>{complaint.complaint_description || '—'}</div>
-
-                          {/* Evidence */}
-                          <div style={{ fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 8 }}>Evidence</div>
-                          <div>
-                            {Array.isArray(complaint.image_urls) && complaint.image_urls.length > 0 ? (
-                              <div style={{ position: 'relative', width: '100%', maxWidth: 200, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 120 }}>
-                                <img
-                                  src={complaint.image_urls[0]}
-                                  alt="Evidence"
-                                  onClick={() => setPreviewImage(complaint.image_urls[0])}
-                                  style={{ maxWidth: '100%', maxHeight: 100, objectFit: 'contain', cursor: 'pointer' }}
-                                  loading="lazy"
-                                />
-                                {complaint.image_urls.length > 1 && (
-                                  <div style={{ position: 'absolute', bottom: 4, right: 4, background: '#0f172a', color: '#fff', fontWeight: 800, padding: '2px 6px', borderRadius: 4, fontSize: 10 }}>
-                                    1 / {complaint.image_urls.length}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div style={{ color: '#64748b', fontWeight: 700, fontSize: 13 }}>No images</div>
-                            )}
-                          </div>
+                      {!isReadOnly ? (
+                        <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
+                          <select
+                            className="mo-select"
+                            value={selectedInspectorId}
+                            onChange={(e) => setSelectedInspectorId(e.target.value)}
+                            disabled={loading}
+                            style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', height: 46, fontWeight: 900, fontSize: 15 }}
+                          >
+                            <option value="">Select inspector…</option>
+                            {inspectors.map((ins) => (
+                              <option key={ins.id} value={ins.id}>
+                                {ins.full_name || ins.id}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="button" className="dash-btn" onClick={addInspector} disabled={loading || !selectedInspectorId}>
+                            Add
+                          </button>
                         </div>
                       ) : null}
-                    </div>
 
-                    {/* Right: Director Comments */}
-                    <div style={{
-                      background: '#fff',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 12,
-                      padding: 24,
-                    }} aria-label="Director Comments">
-                      <div style={{ fontWeight: 900, fontSize: 16, color: '#0f172a', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        Director Comments
-                      </div>
-                      {directorComment && directorComment.trim() ? (
-                        <div style={{
-                          background: '#f8fafc',
-                          borderRadius: 8,
-                          padding: 16,
-                          borderLeft: '4px solid #dc2626',
-                          color: '#0f172a',
-                          fontSize: 13,
-                          lineHeight: 1.6,
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                        }}>
-                          <div style={{ marginBottom: 12 }}>{directorComment}</div>
-                          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, paddingTop: 12, borderTop: '1px solid #e2e8f0' }}>
-                            Reviewed: {reviewedAt ? reviewedAt.toLocaleString() : '—'}
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ color: '#94a3b8', fontWeight: 700, fontSize: 13, textAlign: 'center', padding: '32px 16px' }}>
-                          No director comments yet
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-
-                {/* 2-column layout: left editor panel, right preview */}
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(0, 7fr) 1px minmax(0, 9fr)',
-                    gap: 0,
-                    alignItems: 'stretch',
-                    marginTop: 0,
-                  }}
-                >
-                  {/* Left: Editor panel */}
-                  <div style={{ paddingRight: 18 }}>
-                    {/* Compact toolbar aligned with paper */}
-                    {!isApproved ? (
-                      <div style={{ display: 'flex', justifyContent: 'center', marginTop: -28, marginBottom: 12, borderBottom: '1px solid #e2e8f0', paddingBottom: 8, marginLeft: -18, marginRight: -28, paddingLeft: 18, paddingRight: 28 }}>
-                        <div
-                          style={{
-                            width: '100%',
-                            maxWidth: 800,
-                            display: 'flex',
-                            gap: 8,
-                            flexWrap: 'wrap',
-                            alignItems: 'center',
-                            padding: '8px 0',
-                            border: 'none',
-                            borderRadius: 0,
-                            background: 'transparent',
-                          }}
-                          aria-label="Formatting toolbar"
-                        >
-                          <label style={{ fontWeight: 800, fontSize: 12, color: '#334155' }}>
-                            Font
-                            <select className="mo-toolbar-select" onChange={(e) => applyCommand('fontName', e.target.value)} disabled={loading} defaultValue="Times New Roman" style={{ marginLeft: 8, padding: '6px 8px', borderRadius: 10, border: '1px solid #e2e8f0' }}>
-                              <option value="Times New Roman">Times New Roman</option>
-                              <option value="Arial">Arial</option>
-                              <option value="Calibri">Calibri</option>
-                              <option value="Georgia">Georgia</option>
-                              <option value="Garamond">Garamond</option>
-                            </select>
-                          </label>
-                          <label style={{ fontWeight: 800, fontSize: 12, color: '#334155' }}>
-                            Size
-                            <select className="mo-toolbar-select" onChange={(e) => applyCommand('fontSize', e.target.value)} disabled={loading} defaultValue="3" style={{ marginLeft: 8, padding: '6px 8px', borderRadius: 10, border: '1px solid #e2e8f0' }} title="Font size (browser scale)">
-                              <option value="1">10px</option>
-                              <option value="2">12px</option>
-                              <option value="3">14px</option>
-                              <option value="4">16px</option>
-                              <option value="5">18px</option>
-                              <option value="6">24px</option>
-                              <option value="7">32px</option>
-                            </select>
-                          </label>
-                          <div style={{ width: 1, height: 28, background: '#e2e8f0', margin: '0 4px' }} />
-                          <button type="button" className="mo-format-btn mo-btn-iconish mo-btn--sm" aria-pressed={fmt.bold} onClick={() => applyCommand('bold')} disabled={loading} title="Bold"><strong>B</strong></button>
-                          <button type="button" className="mo-format-btn mo-btn-iconish mo-btn--sm" aria-pressed={fmt.italic} onClick={() => applyCommand('italic')} disabled={loading} title="Italic"><em>I</em></button>
-                          <button type="button" className="mo-format-btn mo-btn-iconish mo-btn--sm" aria-pressed={fmt.underline} onClick={() => applyCommand('underline')} disabled={loading} title="Underline"><span style={{ textDecoration: 'underline' }}>U</span></button>
-                          <div style={{ width: 1, height: 28, background: '#e2e8f0', margin: '0 4px' }} />
-                          <button type="button" className="mo-btn mo-btn--sm" onClick={() => applyCommand('insertUnorderedList')} disabled={loading} title="Bulleted list">• List</button>
-                          <button type="button" className="mo-btn mo-btn--sm" onClick={() => applyCommand('insertOrderedList')} disabled={loading} title="Numbered list">1. List</button>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {/* Title + meta */}
-                    <div className="mo-title-wrap">
-                      <label className="mo-label" htmlFor="moTitle">Title</label>
-                      <input
-                        id="moTitle"
-                        className="mo-title"
-                        type="text"
-                        value={title}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          setTitle(next);
-                          markDirty(next, editorRef.current?.innerHTML ?? content);
-                        }}
-                        placeholder="Mission Order Title"
-                        disabled={loading || isReadOnly}
-                      />
-                      {/* Meta row */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12, marginTop: 10 }}>
-                        <div>
-                          <div className="mo-label" style={{ marginBottom: 6, color: '#64748b' }}>MO ID</div>
-                          <div style={{ height: 40, borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', alignItems: 'center', padding: '0 12px', color: '#334155', fontWeight: 800, fontSize: 13 }}>
-                            {missionOrderId ? missionOrderId : '—'}
-                          </div>
-                        </div>
-                                              </div>
-                    </div>
-
-                    {/* Assigned Inspectors */}
-                    <div style={{ marginTop: 14 }}>
-                      <div style={{ fontWeight: 900, color: '#0f172a' }}>Assigned Inspectors</div>
-                      <div className="mo-meta" style={{ marginTop: 4 }}>
-                        {assignedInspectorIds.length === 0 ? 'No inspectors assigned yet.' : null}
-                      </div>
-                      <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
-                        <select
-                          className="mo-select"
-                          value={selectedInspectorId}
-                          onChange={(e) => setSelectedInspectorId(e.target.value)}
-                          disabled={loading || syncingAssignments}
-                          style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #e2e8f0' }}
-                        >
-                          <option value="">Select inspector…</option>
-                          {inspectors.map((ins) => (
-                            <option key={ins.id} value={ins.id}>{ins.full_name || ins.id}</option>
-                          ))}
-                        </select>
-                        <button type="button" className="mo-btn" onClick={addInspector} disabled={loading || syncingAssignments || !selectedInspectorId}>
-                          {syncingAssignments ? 'Updating…' : 'Add'}
-                        </button>
-                      </div>
-
-                      {/* Assigned chips */}
                       {assignedInspectorIds.length > 0 ? (
                         <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {assignedInspectorIds.map((id) => {
                             const ins = inspectors.find((x) => x.id === id);
                             const label = ins?.full_name || id;
                             return (
-                              <button key={id} type="button" className="mo-chip" title="Click to remove" onClick={() => removeInspector(id)} disabled={syncingAssignments}>
+                              <button
+                                key={id}
+                                type="button"
+                                className="mo-chip"
+                                title={isReadOnly ? '' : 'Click to remove'}
+                                onClick={() => (isReadOnly ? null : removeInspector(id))}
+                                disabled={isReadOnly}
+                                style={{ fontSize: 14, fontWeight: 1000 }}
+                              >
                                 <span className="mo-chip-label">{label}</span>
-                                <span aria-hidden="true" className="mo-chip-x">×</span>
+                                {!isReadOnly ? <span aria-hidden="true" className="mo-chip-x">×</span> : null}
                               </button>
                             );
                           })}
                         </div>
-                      ) : null}
-                    </div>
-
-                    {/* Feedback */}
-                    {toast ? <div className="mo-alert mo-alert-success" style={{ marginTop: 12 }}>{toast}</div> : null}
-                    {error ? <div className="mo-alert mo-alert-error" style={{ marginTop: 12 }}>{error}</div> : null}
-                    {String(missionOrderStatus || '').toLowerCase() === 'cancelled' && directorComment ? (
-                      <div className="mo-alert" style={{ marginTop: 12, border: '1px solid #fecaca', background: '#fef2f2', color: '#7f1d1d' }}>
-                        <div style={{ fontWeight: 900, marginBottom: 6 }}>Director Revisions Required</div>
-                        <div style={{ whiteSpace: 'pre-wrap', fontWeight: 700 }}>{directorComment}</div>
-                        {reviewedAt ? (
-                          <div style={{ marginTop: 8, color: '#991b1b', fontWeight: 800, fontSize: 12 }}>Reviewed at {reviewedAt.toLocaleString()}</div>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                                      </div>
-
-                  <div style={{ background: '#e2e8f0', width: 1, alignSelf: 'stretch', marginTop: -28, marginBottom: -28 }} />
-
-                  {/* Right: Preview */}
-                  <div style={{ paddingLeft: 40 }}>
-                    {/* Gray workspace with equal padding, paper centered */}
-                    <div className="mo-editor-wrap" style={{ marginTop: 0, padding: 40, boxSizing: 'border-box', display: 'flex', justifyContent: 'center' }}>
-                      <div
-                        ref={editorRef}
-                        className="mo-editor"
-                        contentEditable={!loading && !isReadOnly}
-                        suppressContentEditableWarning
-                        onMouseDown={(e) => {
-                          const locked = e.target?.closest?.('[data-mo-locked="true"]');
-                          if (!locked) return;
-                          e.preventDefault();
-                        }}
-                        onKeyDown={(e) => {
-                          const sel = window.getSelection?.();
-                          const node = sel?.anchorNode;
-                          const el = node?.nodeType === 1 ? node : node?.parentElement;
-                          const locked = el?.closest?.('[data-mo-locked="true"]');
-                          if (!locked) return;
-                          const allowed = new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Tab','Escape']);
-                          if (!allowed.has(e.key)) e.preventDefault();
-                        }}
-                        onBeforeInput={(e) => {
-                          const targetLocked = e.target?.closest?.('[data-mo-locked="true"]');
-                          const sel = window.getSelection?.();
-                          const node = sel?.anchorNode;
-                          const el = node?.nodeType === 1 ? node : node?.parentElement;
-                          const caretLocked = el?.closest?.('[data-mo-locked="true"]');
-                          if (targetLocked || caretLocked) e.preventDefault();
-                        }}
-                        onPaste={(e) => {
-                          const sel = window.getSelection?.();
-                          const node = sel?.anchorNode;
-                          const el = node?.nodeType === 1 ? node : node?.parentElement;
-                          const locked = el?.closest?.('[data-mo-locked="true"]') || e.target?.closest?.('[data-mo-locked="true"]');
-                          if (locked) e.preventDefault();
-                        }}
-                        onDrop={(e) => {
-                          const sel = window.getSelection?.();
-                          const node = sel?.anchorNode;
-                          const el = node?.nodeType === 1 ? node : node?.parentElement;
-                          const locked = el?.closest?.('[data-mo-locked="true"]') || e.target?.closest?.('[data-mo-locked="true"]');
-                          if (locked) e.preventDefault();
-                        }}
-                        onInput={() => {
-                          const next = editorRef.current?.innerHTML ?? '';
-                          setContent(next);
-                          markDirty(title, next);
-                          refreshFormatState();
-                        }}
-                      />
+                      ) : (
+                        <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>No inspectors assigned yet.</div>
+                      )}
                     </div>
                   </div>
-                </div>
-              </section>
+                </Panel>
+
+                <Panel
+                  title="Business & Complaint"
+                  right={
+                    complaint?.id ? (
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={() => setComplaintExpanded((v) => !v)}
+                        style={{ background: '#fff', border: '1px solid #e2e8f0' }}
+                      >
+                        {complaintExpanded ? 'Hide Details' : 'Show Details'}
+                      </button>
+                    ) : null
+                  }
+                >
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Business</div>
+                      <div style={{ fontSize: 18, fontWeight: 1000, color: '#0f172a', marginTop: 6 }}>{complaint?.business_name || '—'}</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: '#475569', marginTop: 6 }}>{complaint?.business_address || '—'}</div>
+                    </div>
+
+                    {complaintExpanded ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Complaint Details</div>
+                        <div style={{ marginTop: 8, whiteSpace: 'pre-wrap', fontSize: 15, fontWeight: 800, color: '#0f172a', lineHeight: 1.65 }}>
+                          {complaint?.complaint_description || '—'}
+                        </div>
+                        {complaint?.id ? (
+                          <div style={{ marginTop: 12 }}>
+                            <a className="dash-btn" href={`/complaints/view?id=${complaint.id}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                              Open Full Complaint
+                            </a>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>
+                        Details hidden to reduce clutter.
+                      </div>
+                    )}
+                  </div>
+                </Panel>
+              </div>
+
+              <div style={{ marginTop: 14, display: 'grid', gap: 14 }}>
+                <Panel title="DOCX (after approval)">
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      className="dash-btn"
+                      onClick={handleGenerateDocx}
+                      disabled={!canGenerateDocx || generatingDocx}
+                      style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
+                    >
+                      {generatingDocx ? 'Generating…' : missionOrder?.generated_docx_url ? 'Regenerate DOCX' : 'Generate DOCX'}
+                    </button>
+
+                    {missionOrder?.generated_docx_url ? (
+                      <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                        Download
+                      </a>
+                    ) : (
+                      <span style={{ color: '#64748b', fontWeight: 800 }}>No document yet.</span>
+                    )}
+
+                    {!isApproved ? (
+                      <span style={{ color: '#64748b', fontWeight: 900 }}>(Available after Director approval)</span>
+                    ) : null}
+                  </div>
+                </Panel>
+
+                <Panel
+                  title="DOCX Preview"
+                  right={
+                    missionOrder?.generated_docx_url ? (
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={() => {
+                          setDocxPreviewOpen((v) => !v);
+                          setDocxPreviewError(false);
+                        }}
+                        style={{ background: '#fff', border: '1px solid #e2e8f0' }}
+                      >
+                        {docxPreviewOpen ? 'Hide Preview' : 'Show Preview'}
+                      </button>
+                    ) : null
+                  }
+                >
+                  {!missionOrder?.generated_docx_url ? (
+                    <div style={{ color: '#64748b', fontWeight: 800 }}>No generated document yet.</div>
+                  ) : docxPreviewOpen ? (
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {docxPreviewError ? (
+                        <div className="dash-alert dash-alert-error">
+                          Preview failed to load. Use download instead.
+                        </div>
+                      ) : null}
+
+                      <iframe
+                        title="DOCX Preview"
+                        src={officeViewerUrl}
+                        style={{ width: '100%', height: 560, border: '1px solid #e2e8f0', borderRadius: 14, background: '#fff' }}
+                        onError={() => setDocxPreviewError(true)}
+                      />
+
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                        <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                          Open in new tab
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ color: '#64748b', fontWeight: 800 }}>Preview hidden.</div>
+                  )}
+                </Panel>
+              </div>
+
+              {loading ? <div style={{ marginTop: 12, color: '#64748b', fontWeight: 800 }}>Loading…</div> : null}
             </div>
           </div>
         </section>
       </main>
-
-      {/* Image Preview Overlay */}
-      {previewImage ? (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.85)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            cursor: 'pointer',
-          }}
-          onClick={() => setPreviewImage(null)}
-        >
-          <div
-            style={{
-              position: 'relative',
-              maxWidth: '90vw',
-              maxHeight: '90vh',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={() => setPreviewImage(null)}
-              style={{
-                position: 'absolute',
-                top: -40,
-                right: 0,
-                background: 'transparent',
-                border: 'none',
-                color: '#fff',
-                fontSize: 32,
-                cursor: 'pointer',
-                fontWeight: 300,
-                padding: 0,
-                width: 40,
-                height: 40,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-              title="Close"
-            >
-              ×
-            </button>
-            <img
-              src={previewImage}
-              alt="Evidence Preview"
-              style={{
-                maxWidth: '100%',
-                maxHeight: '100%',
-                objectFit: 'contain',
-              }}
-            />
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
