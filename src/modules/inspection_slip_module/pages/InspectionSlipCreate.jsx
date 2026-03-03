@@ -21,6 +21,8 @@ export default function InspectionSlipCreate() {
 
   const [inspectionReportId, setInspectionReportId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [completionKnown, setCompletionKnown] = useState(false);
 
   const [businessSearch, setBusinessSearch] = useState('');
   const [businessResult, setBusinessResult] = useState(null);
@@ -470,8 +472,15 @@ export default function InspectionSlipCreate() {
           }
 
           if (existingReport.status && String(existingReport.status).toLowerCase() === 'completed') {
-            setToast('This inspection report is already completed (read-only save/submit not enforced yet).');
+            setIsCompleted(true);
+            setToast(
+              'This inspection report is already completed. Editing is disabled, but you can still view details and summary.'
+            );
+            setActiveTab('summary');
+          } else {
+            setIsCompleted(false);
           }
+          setCompletionKnown(true);
         } else {
           const { data: createdReport, error: createErr } = await supabase
             .from('inspection_reports')
@@ -489,6 +498,8 @@ export default function InspectionSlipCreate() {
 
           if (createErr) throw createErr;
           setInspectionReportId(createdReport.id);
+          setIsCompleted(false);
+          setCompletionKnown(true);
         }
 
         // Load linked complaint (if any).
@@ -853,6 +864,10 @@ export default function InspectionSlipCreate() {
   };
 
   const handleSaveReport = async () => {
+    if (isCompleted) {
+      setError('This inspection report is already completed and can no longer be edited.');
+      return;
+    }
     if (!inspectionReportId) {
       setError('Inspection report is not initialized yet. Please wait and try again.');
       return;
@@ -926,6 +941,7 @@ export default function InspectionSlipCreate() {
         email_address: businessDetails.email || null,
         attachment_urls: attachmentUrlsForDb.length ? attachmentUrlsForDb : null,
 
+        // Save signature storage paths into their dedicated columns
         inspector_signature_url: inspectorSigPath,
         owner_signature_url: ownerSigPath,
       };
@@ -946,6 +962,10 @@ export default function InspectionSlipCreate() {
   };
 
   const handleSubmitReport = async () => {
+    if (isCompleted) {
+      setError('This inspection report is already completed and can no longer be submitted.');
+      return;
+    }
     if (!inspectionReportId) {
       setError('Inspection report is not initialized yet. Please wait and try again.');
       return;
@@ -969,6 +989,8 @@ export default function InspectionSlipCreate() {
       if (subErr) throw subErr;
 
       setToast('Inspection report marked as Completed.');
+      setIsCompleted(true);
+      setCompletionKnown(true);
       setActiveTab('summary');
     } catch (e) {
       setError(e?.message || 'Failed to submit inspection report.');
@@ -1112,26 +1134,30 @@ export default function InspectionSlipCreate() {
               >
                 Print
               </button>
-              <button
-                type="button"
-                className="mo-btn mo-btn-secondary"
-                onClick={handleSaveReport}
-                disabled={saving || loading || !inspectionReportId}
-                style={{ marginLeft: 8 }}
-                title="Save draft"
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button
-                type="button"
-                className="mo-btn mo-btn-primary"
-                onClick={handleSubmitReport}
-                disabled={saving || loading || !inspectionReportId}
-                style={{ marginLeft: 8 }}
-                title="Submit as Completed"
-              >
-                {saving ? 'Submitting…' : 'Submit'}
-              </button>
+              {completionKnown && !isCompleted ? (
+                <>
+                  <button
+                    type="button"
+                    className="mo-btn mo-btn-secondary"
+                    onClick={handleSaveReport}
+                    disabled={saving || loading || !inspectionReportId}
+                    style={{ marginLeft: 8 }}
+                    title="Save draft"
+                  >
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    className="mo-btn mo-btn-primary"
+                    onClick={handleSubmitReport}
+                    disabled={saving || loading || !inspectionReportId}
+                    style={{ marginLeft: 8 }}
+                    title="Submit as Completed"
+                  >
+                    {saving ? 'Submitting…' : 'Submit'}
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
 
@@ -1165,15 +1191,17 @@ export default function InspectionSlipCreate() {
                   >
                     Inspection Details
                   </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === 'inspection'}
-                    className={activeTab === 'inspection' ? 'active' : ''}
-                    onClick={() => setActiveTab('inspection')}
-                  >
-                    Inspection
-                  </button>
+                  {!isCompleted ? (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeTab === 'inspection'}
+                      className={activeTab === 'inspection' ? 'active' : ''}
+                      onClick={() => setActiveTab('inspection')}
+                    >
+                      Inspection
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     role="tab"
@@ -1358,7 +1386,7 @@ export default function InspectionSlipCreate() {
                     )}
                   </div>
                 </>
-              ) : activeTab === 'inspection' ? (
+              ) : activeTab === 'inspection' && !isCompleted ? (
                 <>
                   <div className="is-card">
                     <div className="is-section-head">
@@ -2007,7 +2035,7 @@ export default function InspectionSlipCreate() {
                     <div className="is-section-head">
                       <div>
                         <p className="is-section-title">Summary</p>
-                        <p className="is-section-sub">Review key details below. Switch back to Inspection to edit anything.</p>
+                        <p className="is-section-sub">Review key details below.</p>
                       </div>
                     </div>
 
