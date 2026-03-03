@@ -479,7 +479,9 @@ export default function InspectionSlipCreate() {
               {
                 mission_order_id: missionOrderId,
                 inspector_id: userId,
-                status: 'on going',
+                // When an inspector opens the slip, they are starting the inspection.
+                status: 'in progress',
+                started_at: new Date().toISOString(),
               },
             ])
             .select('id')
@@ -959,15 +961,14 @@ export default function InspectionSlipCreate() {
       const { error: subErr } = await supabase
         .from('inspection_reports')
         .update({
-          // Keep this aligned with your DB check constraint for inspection_reports.status
-          status: 'submitted',
+          status: 'completed',
           completed_at: new Date().toISOString(),
         })
         .eq('id', inspectionReportId);
 
       if (subErr) throw subErr;
 
-      setToast('Inspection report submitted.');
+      setToast('Inspection report marked as Completed.');
       setActiveTab('summary');
     } catch (e) {
       setError(e?.message || 'Failed to submit inspection report.');
