@@ -19,6 +19,9 @@ export default function InspectionSlipCreate() {
   const [missionOrder, setMissionOrder] = useState(null);
   const [complaint, setComplaint] = useState(null);
 
+  const [inspectionReportId, setInspectionReportId] = useState(null);
+  const [saving, setSaving] = useState(false);
+
   const [businessSearch, setBusinessSearch] = useState('');
   const [businessResult, setBusinessResult] = useState(null);
   const [checkingBusiness, setCheckingBusiness] = useState(false);
@@ -378,6 +381,114 @@ export default function InspectionSlipCreate() {
 
         setMissionOrder(mo);
 
+        // Create or load inspection report draft for this mission order + inspector.
+        const { data: existingReport, error: reportErr } = await supabase
+          .from('inspection_reports')
+          .select('*')
+          .eq('mission_order_id', missionOrderId)
+          .eq('inspector_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (reportErr) throw reportErr;
+
+        if (existingReport?.id) {
+          setInspectionReportId(existingReport.id);
+
+          // Hydrate fields from draft
+          setAdditionalComments(existingReport.inspection_comments || '');
+
+          if (Array.isArray(existingReport.lines_of_business) && existingReport.lines_of_business.length) {
+            setLineOfBusinessList(existingReport.lines_of_business);
+          }
+
+          setBusinessDetails((prev) => ({
+            ...prev,
+            bin: existingReport.bin ?? prev.bin,
+            address: existingReport.business_address ?? prev.address,
+            estimatedAreaSqm:
+              existingReport.estimated_area_sqm != null ? String(existingReport.estimated_area_sqm) : prev.estimatedAreaSqm,
+            numberOfEmployees:
+              existingReport.no_of_employees != null ? String(existingReport.no_of_employees) : prev.numberOfEmployees,
+            landline: existingReport.landline_no ?? prev.landline,
+            cellphone: existingReport.mobile_no ?? prev.cellphone,
+            email: existingReport.email_address ?? prev.email,
+          }));
+
+          if (existingReport.business_name) {
+            setOwnerDetails((prev) => ({ ...prev, businessName: existingReport.business_name ?? prev.businessName }));
+          }
+
+          // Evidence urls (persisted)
+          if (Array.isArray(existingReport.attachment_urls) && existingReport.attachment_urls.length) {
+            // Convert stored paths into signed urls for preview
+            const mapped = [];
+            for (const path of existingReport.attachment_urls.filter(Boolean)) {
+              // eslint-disable-next-line no-await-in-loop
+              const { data: signed } = await supabase.storage.from('inspection').createSignedUrl(path, 60 * 60 * 24 * 7);
+              mapped.push({ url: signed?.signedUrl || '', blob: null, ts: Date.now(), storagePath: path });
+            }
+            setEvidencePhotos(mapped.filter((x) => x.url));
+          }
+
+          if (existingReport.inspector_signature_url) {
+            const { data: signed } = await supabase.storage
+              .from('inspection')
+              .createSignedUrl(existingReport.inspector_signature_url, 60 * 60 * 24 * 7);
+            if (signed?.signedUrl) setInspectorSignature(signed.signedUrl);
+          }
+          if (existingReport.owner_signature_url) {
+            const { data: signed } = await supabase.storage
+              .from('inspection')
+              .createSignedUrl(existingReport.owner_signature_url, 60 * 60 * 24 * 7);
+            if (signed?.signedUrl) setOwnerSignature(signed.signedUrl);
+          }
+
+          // Checklist
+          setChecklist((p) => ({
+            ...p,
+            business_permit: fromDbStatus(existingReport.business_permit_status) || p.business_permit,
+            with_cctv: fromDbStatus(existingReport.cctv_status) || p.with_cctv,
+            signage_2sqm: fromDbStatus(existingReport.signage_status) || p.signage_2sqm,
+          }));
+          setCctvCount(existingReport.cctv_count != null ? String(existingReport.cctv_count) : '');
+
+          if (existingReport.owner_name) {
+            const ownerName = String(existingReport.owner_name || '');
+            if (ownerName) {
+              // best-effort split "Last, First Middle" style
+              const [lastPart, rest] = ownerName.split(',').map((s) => s.trim());
+              const restParts = (rest || '').split(' ').filter(Boolean);
+              setOwnerDetails((prev) => ({
+                ...prev,
+                lastName: lastPart || prev.lastName,
+                firstName: restParts[0] || prev.firstName,
+                middleName: restParts.slice(1).join(' ') || prev.middleName,
+              }));
+            }
+          }
+
+          if (existingReport.status && String(existingReport.status).toLowerCase() === 'completed') {
+            setToast('This inspection report is already completed (read-only save/submit not enforced yet).');
+          }
+        } else {
+          const { data: createdReport, error: createErr } = await supabase
+            .from('inspection_reports')
+            .insert([
+              {
+                mission_order_id: missionOrderId,
+                inspector_id: userId,
+                status: 'on going',
+              },
+            ])
+            .select('id')
+            .single();
+
+          if (createErr) throw createErr;
+          setInspectionReportId(createdReport.id);
+        }
+
         // Load linked complaint (if any).
         if (mo?.complaint_id) {
           const { data: c, error: complaintError } = await supabase
@@ -443,6 +554,7 @@ export default function InspectionSlipCreate() {
       } catch (e) {
         setMissionOrder(null);
         setComplaint(null);
+        setInspectionReportId(null);
         setError(e?.message || 'Failed to load mission order.');
       } finally {
         setLoading(false);
@@ -691,6 +803,179 @@ export default function InspectionSlipCreate() {
     return `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`;
   }, [complaint?.business_address]);
 
+  const INSPECTION_BUCKET = 'inspection';
+
+  const uploadToInspectionBucket = async ({ path, file, contentType }) => {
+    const { error: upErr } = await supabase.storage
+      .from(INSPECTION_BUCKET)
+      .upload(path, file, {
+        contentType,
+        upsert: true,
+      });
+    if (upErr) throw upErr;
+
+    // Private bucket: store the storage path, and generate a signed URL for immediate preview.
+    const { data: signed, error: signedErr } = await supabase.storage
+      .from(INSPECTION_BUCKET)
+      .createSignedUrl(path, 60 * 60 * 24 * 7); // 7 days
+    if (signedErr) throw signedErr;
+
+    return { path, signedUrl: signed?.signedUrl || '' };
+  };
+
+  const dataUrlToBlob = async (dataUrl) => {
+    const res = await fetch(dataUrl);
+    return await res.blob();
+  };
+
+  const toOwnerNameString = () => {
+    const ln = (ownerDetails.lastName || '').trim();
+    const fn = (ownerDetails.firstName || '').trim();
+    const mn = (ownerDetails.middleName || '').trim();
+    const rest = [fn, mn].filter(Boolean).join(' ');
+    return `${ln}${ln && rest ? ', ' : ''}${rest}`.trim();
+  };
+
+  const toDbStatus = (v) => {
+    // DB defaults show "N/A"; map our values to match
+    if (v === 'compliant') return 'Compliant';
+    if (v === 'non_compliant') return 'Non-Compliant';
+    return 'N/A';
+  };
+
+  const fromDbStatus = (v) => {
+    const s = String(v || '').toLowerCase();
+    if (s.includes('non')) return 'non_compliant';
+    if (s.includes('compliant')) return 'compliant';
+    return 'na';
+  };
+
+  const handleSaveReport = async () => {
+    if (!inspectionReportId) {
+      setError('Inspection report is not initialized yet. Please wait and try again.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+
+    try {
+      // Upload any new evidence blobs (captured locally)
+      const nextEvidence = [];
+      for (const p of evidencePhotos) {
+        if (p?.blob && p?.url && p.url.startsWith('blob:')) {
+          const file = new File([p.blob], `evidence-${p.ts || Date.now()}.jpg`, { type: 'image/jpeg' });
+          const storagePath = `inspection-reports/${inspectionReportId}/evidence/${file.name}`;
+          const { path, signedUrl } = await uploadToInspectionBucket({
+            path: storagePath,
+            file,
+            contentType: file.type,
+          });
+          nextEvidence.push({ url: signedUrl, blob: null, ts: p.ts || Date.now(), storagePath: path });
+        } else {
+          nextEvidence.push(p);
+        }
+      }
+      setEvidencePhotos(nextEvidence);
+
+      // Upload signatures if they are still data URLs
+      let inspectorSigPath = null;
+      let ownerSigPath = null;
+
+      if (inspectorSignature && inspectorSignature.startsWith('data:image')) {
+        const blob = await dataUrlToBlob(inspectorSignature);
+        const file = new File([blob], `inspector-signature.png`, { type: blob.type || 'image/png' });
+        const storagePath = `inspection-reports/${inspectionReportId}/signatures/${file.name}`;
+        const { path, signedUrl } = await uploadToInspectionBucket({ path: storagePath, file, contentType: file.type });
+        inspectorSigPath = path;
+        setInspectorSignature(signedUrl);
+      }
+
+      if (ownerSignature && ownerSignature.startsWith('data:image')) {
+        const blob = await dataUrlToBlob(ownerSignature);
+        const file = new File([blob], `owner-signature.png`, { type: blob.type || 'image/png' });
+        const storagePath = `inspection-reports/${inspectionReportId}/signatures/${file.name}`;
+        const { path, signedUrl } = await uploadToInspectionBucket({ path: storagePath, file, contentType: file.type });
+        ownerSigPath = path;
+        setOwnerSignature(signedUrl);
+      }
+
+      const attachmentUrlsForDb = nextEvidence
+        .map((x) => x?.storagePath)
+        .filter(Boolean);
+
+      const payload = {
+        bin: businessDetails.bin || null,
+        business_name: ownerDetails.businessName || null,
+        owner_name: toOwnerNameString() || null,
+        business_address: businessDetails.address || null,
+
+        business_permit_status: toDbStatus(checklist.business_permit),
+        cctv_status: toDbStatus(checklist.with_cctv),
+        signage_status: toDbStatus(checklist.signage_2sqm),
+        cctv_count: cctvCount ? Number(cctvCount) : 0,
+
+        inspection_comments: additionalComments || null,
+        lines_of_business: lineOfBusinessList.filter(Boolean),
+        no_of_employees: businessDetails.numberOfEmployees ? Number(businessDetails.numberOfEmployees) : null,
+        estimated_area_sqm: businessDetails.estimatedAreaSqm ? Number(businessDetails.estimatedAreaSqm) : null,
+        mobile_no: businessDetails.cellphone || null,
+        landline_no: businessDetails.landline || null,
+        email_address: businessDetails.email || null,
+        attachment_urls: attachmentUrlsForDb.length ? attachmentUrlsForDb : null,
+
+        inspector_signature_url: inspectorSigPath,
+        owner_signature_url: ownerSigPath,
+      };
+
+      const { error: upErr } = await supabase
+        .from('inspection_reports')
+        .update(payload)
+        .eq('id', inspectionReportId);
+
+      if (upErr) throw upErr;
+
+      setToast('Inspection report saved.');
+    } catch (e) {
+      setError(e?.message || 'Failed to save inspection report.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSubmitReport = async () => {
+    if (!inspectionReportId) {
+      setError('Inspection report is not initialized yet. Please wait and try again.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+
+    try {
+      // Save first to ensure uploads happen
+      await handleSaveReport();
+
+      const { error: subErr } = await supabase
+        .from('inspection_reports')
+        .update({
+          status: 'completed',
+          submitted_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', inspectionReportId);
+
+      if (subErr) throw subErr;
+
+      setToast('Inspection report submitted as Completed.');
+      setActiveTab('summary');
+    } catch (e) {
+      setError(e?.message || 'Failed to submit inspection report.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleCheckBusiness = async () => {
     if (!businessSearch.trim()) {
       setError('Enter business permit number / business name to validate.');
@@ -825,6 +1110,26 @@ export default function InspectionSlipCreate() {
                 style={{ marginLeft: 8 }}
               >
                 Print
+              </button>
+              <button
+                type="button"
+                className="mo-btn mo-btn-secondary"
+                onClick={handleSaveReport}
+                disabled={saving || loading || !inspectionReportId}
+                style={{ marginLeft: 8 }}
+                title="Save draft"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                type="button"
+                className="mo-btn mo-btn-primary"
+                onClick={handleSubmitReport}
+                disabled={saving || loading || !inspectionReportId}
+                style={{ marginLeft: 8 }}
+                title="Submit as Completed"
+              >
+                {saving ? 'Submitting…' : 'Submit'}
               </button>
             </div>
           </div>
