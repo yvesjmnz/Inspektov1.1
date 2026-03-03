@@ -727,7 +727,12 @@ export default function DashboardInspector() {
                                     <td style={{ padding: '12px' }}>
                                       <a
                                         className="dash-btn"
-                                        href={`/inspection-slip/create?missionOrderId=${r.mission_order_id}`}
+                                        // Open the existing completed report (read-only) instead of creating a new draft.
+                                        href={
+                                          r.inspection_report_id
+                                            ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
+                                            : `/inspection-slip/create?missionOrderId=${r.mission_order_id}`
+                                        }
                                       >
                                         View
                                       </a>

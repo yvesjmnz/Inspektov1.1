@@ -5,12 +5,18 @@ import { supabase } from '../../../lib/supabase';
 import './InspectionSlipCreate.css';
 
 function getMissionOrderIdFromQuery() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('missionOrderId') || params.get('id');
+const params = new URLSearchParams(window.location.search);
+return params.get('missionOrderId') || params.get('id');
+}
+
+function getInspectionReportIdFromQuery() {
+const params = new URLSearchParams(window.location.search);
+return params.get('inspectionReportId') || params.get('reportId') || params.get('id');
 }
 
 export default function InspectionSlipCreate() {
   const missionOrderId = useMemo(() => getMissionOrderIdFromQuery(), []);
+  const inspectionReportIdFromQuery = useMemo(() => getInspectionReportIdFromQuery(), []);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -383,19 +389,157 @@ export default function InspectionSlipCreate() {
 
         setMissionOrder(mo);
 
+        // If the URL explicitly references a specific inspection report (e.g., from history),
+        // ALWAYS load that exact report and NEVER create a new draft row.
+        if (inspectionReportIdFromQuery) {
+          const { data: explicitReport, error: explicitErr } = await supabase
+            .from('inspection_reports')
+            .select('*')
+            .eq('id', inspectionReportIdFromQuery)
+            .single();
+
+          if (explicitErr) throw explicitErr;
+
+          setInspectionReportId(explicitReport.id);
+
+          // Hydrate fields from the explicit report
+          setAdditionalComments(explicitReport.inspection_comments || '');
+
+          if (Array.isArray(explicitReport.lines_of_business) && explicitReport.lines_of_business.length) {
+            setLineOfBusinessList(explicitReport.lines_of_business);
+          }
+
+          setBusinessDetails((prev) => ({
+            ...prev,
+            bin: explicitReport.bin ?? prev.bin,
+            address: explicitReport.business_address ?? prev.address,
+            estimatedAreaSqm:
+              explicitReport.estimated_area_sqm != null
+                ? String(explicitReport.estimated_area_sqm)
+                : prev.estimatedAreaSqm,
+            numberOfEmployees:
+              explicitReport.no_of_employees != null
+                ? String(explicitReport.no_of_employees)
+                : prev.numberOfEmployees,
+            landline: explicitReport.landline_no ?? prev.landline,
+            cellphone: explicitReport.mobile_no ?? prev.cellphone,
+            email: explicitReport.email_address ?? prev.email,
+          }));
+
+          if (explicitReport.business_name) {
+            setOwnerDetails((prev) => ({ ...prev, businessName: explicitReport.business_name ?? prev.businessName }));
+          }
+
+          // Evidence urls (persisted)
+          if (Array.isArray(explicitReport.attachment_urls) && explicitReport.attachment_urls.length) {
+            const mapped = [];
+            for (const path of explicitReport.attachment_urls.filter(Boolean)) {
+              // eslint-disable-next-line no-await-in-loop
+              const { data: signed } = await supabase.storage.from('inspection').createSignedUrl(path, 60 * 60 * 24 * 7);
+              mapped.push({ url: signed?.signedUrl || '', blob: null, ts: Date.now(), storagePath: path });
+            }
+            setEvidencePhotos(mapped.filter((x) => x.url));
+          }
+
+          if (explicitReport.inspector_signature_url) {
+            const { data: signed } = await supabase.storage
+              .from('inspection')
+              .createSignedUrl(explicitReport.inspector_signature_url, 60 * 60 * 24 * 7);
+            if (signed?.signedUrl) setInspectorSignature(signed.signedUrl);
+          }
+          if (explicitReport.owner_signature_url) {
+            const { data: signed } = await supabase.storage
+              .from('inspection')
+              .createSignedUrl(explicitReport.owner_signature_url, 60 * 60 * 24 * 7);
+            if (signed?.signedUrl) setOwnerSignature(signed.signedUrl);
+          }
+
+          // Checklist
+          setChecklist((p) => ({
+            ...p,
+            business_permit: fromDbStatus(explicitReport.business_permit_status) || p.business_permit,
+            with_cctv: fromDbStatus(explicitReport.cctv_status) || p.with_cctv,
+            signage_2sqm: fromDbStatus(explicitReport.signage_status) || p.signage_2sqm,
+          }));
+          setCctvCount(explicitReport.cctv_count != null ? String(explicitReport.cctv_count) : '');
+
+          if (explicitReport.owner_name) {
+            const ownerName = String(explicitReport.owner_name || '');
+            if (ownerName) {
+              const [lastPart, rest] = ownerName.split(',').map((s) => s.trim());
+              const restParts = (rest || '').split(' ').filter(Boolean);
+              setOwnerDetails((prev) => ({
+                ...prev,
+                lastName: lastPart || prev.lastName,
+                firstName: restParts[0] || prev.firstName,
+                middleName: restParts.slice(1).join(' ') || prev.middleName,
+              }));
+            }
+          }
+
+          // Completed reports are view-only
+          if (explicitReport.status && String(explicitReport.status).toLowerCase() === 'completed') {
+            setIsCompleted(true);
+            setActiveTab('summary');
+          } else {
+            setIsCompleted(false);
+          }
+          setCompletionKnown(true);
+
+          // Do not proceed to draft creation logic
+          return;
+        }
+
         // Create or load inspection report draft for this mission order + inspector.
+        // IMPORTANT: always reuse an existing non-completed draft if it exists.
+        // This prevents duplicates where a new row is created on submit instead of updating the draft.
         const { data: existingReport, error: reportErr } = await supabase
           .from('inspection_reports')
           .select('*')
           .eq('mission_order_id', missionOrderId)
           .eq('inspector_id', userId)
+          .neq('status', 'completed')
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
+        // If there are multiple non-completed drafts (legacy bug), keep the latest one and
+        // clean up the older ones to avoid confusion and future duplicate updates.
+        const { data: allDrafts, error: allDraftsErr } = await supabase
+          .from('inspection_reports')
+          .select('id, created_at')
+          .eq('mission_order_id', missionOrderId)
+          .eq('inspector_id', userId)
+          .neq('status', 'completed')
+          .order('created_at', { ascending: false });
+
+        if (allDraftsErr) throw allDraftsErr;
+
+        const draftIds = (allDrafts || []).map((r) => r.id).filter(Boolean);
+        if (draftIds.length > 1) {
+          const keepId = draftIds[0];
+          const deleteIds = draftIds.slice(1);
+          // Best-effort cleanup; don't fail loading if delete is blocked by RLS.
+          await supabase.from('inspection_reports').delete().in('id', deleteIds);
+          if (existingReport?.id && existingReport.id !== keepId) {
+            // Ensure we continue with the kept draft if the query returned a different one.
+            // (Shouldn't happen due to ordering, but kept for safety.)
+            // eslint-disable-next-line no-param-reassign
+            existingReport.id = keepId;
+          }
+        }
+
         if (reportErr) throw reportErr;
 
         if (existingReport?.id) {
+          // Safety: guarantee we are always pointing at the most recent non-completed draft.
+          // This avoids creating a second row later during save/submit flows.
+          if (allDrafts?.length) {
+            const latestId = allDrafts[0]?.id;
+            if (latestId && latestId !== existingReport.id) {
+              setInspectionReportId(latestId);
+            }
+          }
           setInspectionReportId(existingReport.id);
 
           // Hydrate fields from draft
@@ -606,6 +750,8 @@ export default function InspectionSlipCreate() {
   };
 
   const handleSignatureStart = (who, event) => {
+    if (isCompleted) return;
+
     event.preventDefault();
 
     const { canvas, ctx, drawingRef, lastPosRef } = getCanvasContextAndState(who);
@@ -630,6 +776,8 @@ export default function InspectionSlipCreate() {
   };
 
   const handleSignatureMove = (who, event) => {
+    if (isCompleted) return;
+
     const { canvas, ctx, drawingRef, lastPosRef } = getCanvasContextAndState(who);
     if (!canvas || !ctx || !drawingRef.current) return;
 
@@ -652,6 +800,8 @@ export default function InspectionSlipCreate() {
   };
 
   const handleSignatureEnd = (who, event) => {
+    if (isCompleted) return;
+
     const { canvas, drawingRef } = getCanvasContextAndState(who);
     if (!canvas) return;
 
@@ -672,6 +822,8 @@ export default function InspectionSlipCreate() {
   };
 
   const handleSignatureClear = (who) => {
+    if (isCompleted) return;
+
     const { canvas, ctx } = getCanvasContextAndState(who);
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -679,6 +831,44 @@ export default function InspectionSlipCreate() {
       setInspectorSignature('');
     } else {
       setOwnerSignature('');
+    }
+  };
+
+  const paintSignatureToCanvas = async (who, src) => {
+    const { canvas, ctx } = getCanvasContextAndState(who);
+    if (!canvas || !ctx || !src) return;
+
+    try {
+      configureCanvas(canvas);
+
+      const img = new Image();
+      // Signed URLs can be cross-origin; setting crossOrigin improves compatibility
+      // (works when CORS headers allow it).
+      img.crossOrigin = 'anonymous';
+
+      await new Promise((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load signature image.'));
+        img.src = src;
+      });
+
+      // Clear + draw scaled to fit
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const w = rect.width * dpr;
+      const h = rect.height * dpr;
+
+      const scale = Math.min(w / img.width, h / img.height);
+      const drawW = img.width * scale;
+      const drawH = img.height * scale;
+      const x = (w - drawW) / 2;
+      const y = (h - drawH) / 2;
+
+      ctx.drawImage(img, x, y, drawW, drawH);
+    } catch {
+      // If painting fails, at least keep the stored URL state; canvas will remain blank.
     }
   };
 
@@ -863,6 +1053,24 @@ export default function InspectionSlipCreate() {
     return 'na';
   };
 
+  // When loading an existing report (completed view), we store signed URLs in state.
+  // We also need to paint them onto the canvases because the UI uses <canvas>.
+  useEffect(() => {
+    if (!completionKnown) return;
+    if (inspectorSignature && !inspectorSignature.startsWith('data:image')) {
+      paintSignatureToCanvas('inspector', inspectorSignature);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completionKnown, inspectorSignature]);
+
+  useEffect(() => {
+    if (!completionKnown) return;
+    if (ownerSignature && !ownerSignature.startsWith('data:image')) {
+      paintSignatureToCanvas('owner', ownerSignature);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completionKnown, ownerSignature]);
+
   const handleSaveReport = async () => {
     if (isCompleted) {
       setError('This inspection report is already completed and can no longer be edited.');
@@ -968,6 +1176,53 @@ export default function InspectionSlipCreate() {
     }
     if (!inspectionReportId) {
       setError('Inspection report is not initialized yet. Please wait and try again.');
+      return;
+    }
+
+    // Basic required-field validation (client-side stopper)
+    const missing = [];
+
+    // Business / owner details
+    if (!String(ownerDetails.businessName || '').trim()) missing.push('Business Name');
+    if (!String(businessDetails.bin || '').trim()) missing.push('BIN #');
+    if (!String(businessDetails.address || '').trim()) missing.push('Business Address');
+
+    // Owner name is required for Sole Proprietor
+    if (ownerType === 'sole') {
+      if (!String(ownerDetails.lastName || '').trim()) missing.push('Owner Last Name');
+      if (!String(ownerDetails.firstName || '').trim()) missing.push('Owner First Name');
+    }
+
+    // At least one line of business
+    if (!lineOfBusinessList.some((x) => String(x || '').trim())) missing.push('Line of Business');
+
+    // Estimated area (sqm) required and must be > 0
+    {
+      const n = Number(String(businessDetails.estimatedAreaSqm || '').trim());
+      if (!Number.isFinite(n) || n <= 0) missing.push('Estimated Area (SQM)');
+    }
+
+    // Photo evidence required (at least 1)
+    if (!Array.isArray(evidencePhotos) || evidencePhotos.length === 0) missing.push('Photo Evidence');
+
+    // Checklist items must be answered (not N/A)
+    if (checklist.business_permit === 'na') missing.push('Business Permit (Presented) status');
+    if (checklist.with_cctv === 'na') missing.push('With CCTV status');
+    if (checklist.signage_2sqm === 'na') missing.push('2sqm Signage status');
+
+    // CCTV count required when compliant
+    if (checklist.with_cctv === 'compliant') {
+      const n = Number(String(cctvCount || '').trim());
+      if (!Number.isFinite(n) || n <= 0) missing.push('No. of CCTVs');
+    }
+
+    // Signatures required
+    if (!inspectorSignature) missing.push('Inspector Signature');
+    if (!ownerSignature) missing.push('Business Owner Signature');
+
+    if (missing.length) {
+      setError(`Cannot submit. Please complete the required fields: ${missing.join(', ')}`);
+      setActiveTab('inspection');
       return;
     }
 
@@ -2263,14 +2518,16 @@ export default function InspectionSlipCreate() {
                             onPointerLeave={(e) => handleSignatureEnd('inspector', e)}
                           />
                           {!inspectorSignature ? <div className="is-sign-hint">Sign here</div> : null}
-                          <button
-                            type="button"
-                            className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
-                            onClick={() => handleSignatureClear('inspector')}
-                            title="Clear signature"
-                          >
-                            Clear
-                          </button>
+                          {!isCompleted ? (
+                            <button
+                              type="button"
+                              className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
+                              onClick={() => handleSignatureClear('inspector')}
+                              title="Clear signature"
+                            >
+                              Clear
+                            </button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -2295,14 +2552,16 @@ export default function InspectionSlipCreate() {
                             onPointerLeave={(e) => handleSignatureEnd('owner', e)}
                           />
                           {!ownerSignature ? <div className="is-sign-hint">Sign here</div> : null}
-                          <button
-                            type="button"
-                            className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
-                            onClick={() => handleSignatureClear('owner')}
-                            title="Clear signature"
-                          >
-                            Clear
-                          </button>
+                          {!isCompleted ? (
+                            <button
+                              type="button"
+                              className="mo-btn mo-btn--sm mo-btn-secondary is-sign-clear"
+                              onClick={() => handleSignatureClear('owner')}
+                              title="Clear signature"
+                            >
+                              Clear
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     </div>
