@@ -754,74 +754,60 @@ export default function MissionOrderEditor() {
                 </Panel>
               </div>
 
+              {/* Unified DOCX actions inside the Preview panel header */}
               <div style={{ marginTop: 14, display: 'grid', gap: 14 }}>
-                <Panel title="DOCX (after approval)">
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {!isAwaitingSignature && (
+                <Panel
+                  title="Document Preview"
+                  right={
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                       <button
                         type="button"
                         className="dash-btn"
                         onClick={handleGenerateDocx}
                         disabled={!canGenerateDocx || generatingDocx}
                         style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
+                        title={
+                          isDraft
+                            ? 'Generate a previewable DOCX during draft.'
+                            : (isApproved || isAwaitingSignature)
+                            ? 'Regenerate the approved DOCX.'
+                            : 'Available during draft or after approval.'
+                        }
                       >
                         {generatingDocx ? 'Generating…' : missionOrder?.generated_docx_url ? 'Regenerate DOCX' : 'Generate DOCX'}
                       </button>
-                    )}
 
-                    {isAwaitingSignature && (
-                      <button
-                        type="button"
-                        className="dash-btn"
-                        onClick={handleGenerateDocx}
-                        disabled={!canGenerateDocx || generatingDocx}
-                        style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
-                      >
-                        {generatingDocx ? 'Generating…' : 'Regenerate DOCX'}
-                      </button>
-                    )}
+                      {missionOrder?.generated_docx_url && (isApproved || isAwaitingSignature) ? (
+                        <button
+                          type="button"
+                          className="dash-btn"
+                          onClick={handleDownloadDocx}
+                          style={{ textDecoration: 'none' }}
+                        >
+                          Download
+                        </button>
+                      ) : null}
 
-                    {missionOrder?.generated_docx_url && (isApproved || isAwaitingSignature) ? (
-                      <button
-                        type="button"
-                        className="dash-btn"
-                        onClick={handleDownloadDocx}
-                        style={{ textDecoration: 'none' }}
-                      >
-                        Download
-                      </button>
-                    ) : (
-                      !isAwaitingSignature && <span style={{ color: '#64748b', fontWeight: 800 }}>No document yet.</span>
-                    )}
-
-                    {isDraft ? (
-                      <span style={{ color: '#64748b', fontWeight: 900 }}>(Preview only during draft)</span>
-                    ) : !isApproved && !isAwaitingSignature ? (
-                      <span style={{ color: '#64748b', fontWeight: 900 }}>(Available after Director approval)</span>
-                    ) : null}
-                  </div>
-                </Panel>
-
-                <Panel
-                  title="DOCX Preview"
-                  right={
-                    missionOrder?.generated_docx_url ? (
-                      <button
-                        type="button"
-                        className="dash-btn"
-                        onClick={() => {
-                          setDocxPreviewOpen((v) => !v);
-                          setDocxPreviewError(false);
-                        }}
-                        style={{ background: '#fff', border: '1px solid #e2e8f0' }}
-                      >
-                        {docxPreviewOpen ? 'Hide Preview' : 'Show Preview'}
-                      </button>
-                    ) : null
+                      {missionOrder?.generated_docx_url ? (
+                        <button
+                          type="button"
+                          className="dash-btn"
+                          onClick={() => {
+                            setDocxPreviewOpen((v) => !v);
+                            setDocxPreviewError(false);
+                          }}
+                          style={{ background: '#fff', border: '1px solid #e2e8f0', color: '#0b2249' }}
+                        >
+                          {docxPreviewOpen ? 'Hide Preview' : 'Show Preview'}
+                        </button>
+                      ) : null}
+                    </div>
                   }
                 >
                   {!missionOrder?.generated_docx_url ? (
-                    <div style={{ color: '#64748b', fontWeight: 800 }}>No generated document yet.</div>
+                    <div style={{ color: '#64748b', fontWeight: 800 }}>
+                      No generated document yet. {isDraft ? '(Preview only during draft)' : (!isApproved && !isAwaitingSignature ? '(Available after Director approval)' : '')}
+                    </div>
                   ) : docxPreviewOpen ? (
                     <div style={{ display: 'grid', gap: 10 }}>
                       {docxPreviewError ? (
