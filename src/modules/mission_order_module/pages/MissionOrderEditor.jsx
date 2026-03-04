@@ -11,6 +11,11 @@ function getMissionOrderIdFromQuery() {
   return params.get('id');
 }
 
+function getTabFromHash() {
+  const hash = window.location.hash.slice(1);
+  return hash || 'todo';
+}
+
 function formatDateInputValue(value) {
   if (!value) return '';
   const s = String(value);
@@ -248,7 +253,8 @@ export default function MissionOrderEditor() {
 
   const canSave = !loading && !!missionOrderId && !isReadOnly;
   const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection;
-  const canGenerateDocx = !loading && !!missionOrderId && isApproved;
+  const isDraft = String(status).toLowerCase() === 'draft';
+  const canGenerateDocx = !loading && !!missionOrderId && (isDraft || isApproved);
 
   const saveMissionOrder = async () => {
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -385,6 +391,11 @@ export default function MissionOrderEditor() {
     setGeneratingDocx(true);
 
     try {
+      // First, save the current date of inspection if it's not saved yet
+      if (isDraft && dateOfInspection && !missionOrder?.date_of_inspection) {
+        await saveMissionOrder();
+      }
+
       const { data: fresh, error: freshErr } = await supabase
         .from('mission_orders')
         .select('id, complaint_id, status, director_signature_url, date_of_inspection, date_of_issuance')
@@ -392,11 +403,18 @@ export default function MissionOrderEditor() {
         .single();
       if (freshErr) throw freshErr;
 
-      if (String(fresh?.status || '').toLowerCase() !== 'for inspection') {
-        throw new Error('DOCX can only be generated after approval (For Inspection).');
+      const freshStatus = String(fresh?.status || '').toLowerCase();
+      const isCurrentlyDraft = freshStatus === 'draft';
+      const isCurrentlyApproved = freshStatus === 'for inspection' || freshStatus === 'for_inspection';
+
+      if (!isCurrentlyDraft && !isCurrentlyApproved) {
+        throw new Error('DOCX can only be generated during draft or after approval.');
       }
-      if (!fresh?.date_of_inspection) throw new Error('Missing date of inspection.');
-      if (!fresh?.date_of_issuance) throw new Error('Missing date of issuance (auto-set on approval).');
+      
+      // Use the local state if available, otherwise use the database value
+      const inspectionDate = dateOfInspection || fresh?.date_of_inspection;
+      if (!inspectionDate) throw new Error('Missing date of inspection.');
+      if (isCurrentlyApproved && !fresh?.date_of_issuance) throw new Error('Missing date of issuance (auto-set on approval).');
 
       const { data: c, error: cErr } = await supabase
         .from('complaints')
@@ -479,7 +497,6 @@ export default function MissionOrderEditor() {
       setDocxPreviewError(false);
 
       setToast('DOCX ready');
-      saveAs(blob, fileName);
     } catch (e) {
       setError(e?.message || 'Failed to generate DOCX.');
     } finally {
@@ -515,7 +532,41 @@ export default function MissionOrderEditor() {
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <a className="dash-btn" href="/dashboard/head-inspector" style={{ textDecoration: 'none' }}>Back</a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const tab = getTabFromHash();
+                      window.location.assign(`/dashboard/head-inspector#${tab}`);
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 12px',
+                      background: 'transparent',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 8,
+                      color: '#0f172a',
+                      fontWeight: 700,
+                      fontSize: 14,
+                      textDecoration: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#f1f5f9';
+                      e.currentTarget.style.borderColor = '#94a3b8';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.borderColor = '#cbd5e1';
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+                      <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Back
+                  </button>
 
                   {!isApproved && !isSubmitted ? (
                     <>
@@ -675,7 +726,7 @@ export default function MissionOrderEditor() {
                       {generatingDocx ? 'Generating…' : missionOrder?.generated_docx_url ? 'Regenerate DOCX' : 'Generate DOCX'}
                     </button>
 
-                    {missionOrder?.generated_docx_url ? (
+                    {missionOrder?.generated_docx_url && isApproved ? (
                       <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
                         Download
                       </a>
@@ -683,7 +734,9 @@ export default function MissionOrderEditor() {
                       <span style={{ color: '#64748b', fontWeight: 800 }}>No document yet.</span>
                     )}
 
-                    {!isApproved ? (
+                    {isDraft ? (
+                      <span style={{ color: '#64748b', fontWeight: 900 }}>(Preview only during draft)</span>
+                    ) : !isApproved ? (
                       <span style={{ color: '#64748b', fontWeight: 900 }}>(Available after Director approval)</span>
                     ) : null}
                   </div>
@@ -713,7 +766,7 @@ export default function MissionOrderEditor() {
                     <div style={{ display: 'grid', gap: 10 }}>
                       {docxPreviewError ? (
                         <div className="dash-alert dash-alert-error">
-                          Preview failed to load. Use download instead.
+                          Preview failed to load.
                         </div>
                       ) : null}
 
@@ -724,11 +777,13 @@ export default function MissionOrderEditor() {
                         onError={() => setDocxPreviewError(true)}
                       />
 
-                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                        <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-                          Open in new tab
-                        </a>
-                      </div>
+                      {isApproved ? (
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                          <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                            Open in new tab
+                          </a>
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div style={{ color: '#64748b', fontWeight: 800 }}>Preview hidden.</div>

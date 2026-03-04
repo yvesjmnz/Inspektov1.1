@@ -95,29 +95,29 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           section: 'MISSION ORDERS',
         },
         {
-          label: 'To Do',
-          icon: '/ui_icons/task.png',
+          label: 'Draft',
+          icon: '/ui_icons/menu.png',
           href: '/dashboard/head-inspector',
           section: null,
           tabName: 'todo',
         },
         {
-          label: 'Issued',
-          icon: '/ui_icons/queue.png',
+          label: 'Director Approval',
+          icon: '/ui_icons/mo.png',
           href: '/dashboard/head-inspector',
           section: null,
-          tabName: 'issued',
+          tabName: 'results',
         },
         {
-          label: 'For Inspection',
-          icon: '/ui_icons/inspection.png',
+          label: 'Secretary Approval',
+          icon: '/ui_icons/queue.png',
           href: '/dashboard/head-inspector',
           section: null,
           tabName: 'for-inspection',
         },
         {
-          label: 'Revisions',
-          icon: '/ui_icons/revision.png',
+          label: 'Mission Order History',
+          icon: '/ui_icons/history.png',
           href: '/dashboard/head-inspector',
           section: null,
           tabName: 'revisions',
@@ -156,6 +156,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
     const path = window.location.pathname;
     const params = new URLSearchParams(window.location.search);
     const tab = params.get('tab');
+    const hash = window.location.hash.slice(1);
 
     // For complaint review page, check if we came from queue or history
     if (path === '/complaint/review') {
@@ -164,6 +165,15 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
         return 'Complaint History';
       }
       return 'Review Complaints'; // default to queue
+    }
+
+    // For mission order page, check the hash to determine which tab
+    if (path === '/mission-order') {
+      if (hash === 'todo') return 'Draft';
+      if (hash === 'results') return 'Director Approval';
+      if (hash === 'for-inspection') return 'Secretary Approval';
+      if (hash === 'revisions') return 'Mission Order History';
+      return 'Draft'; // default to Draft
     }
 
     // For mission order review page
@@ -181,10 +191,10 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
     }
 
     if (path === '/dashboard/head-inspector') {
-      if (tab === 'todo') return 'To Do';
-      if (tab === 'issued') return 'Issued';
-      if (tab === 'for-inspection') return 'For Inspection';
-      if (tab === 'revisions') return 'Revisions';
+      if (tab === 'todo') return 'Draft';
+      if (tab === 'results') return 'Director Approval';
+      if (tab === 'for-inspection') return 'Secretary Approval';
+      if (tab === 'revisions') return 'Mission Order History';
       return 'Dashboard';
     }
 
@@ -196,6 +206,16 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
   };
 
   const activeItem = getActiveNavItem();
+
+  // Filter nav items based on current page
+  const filteredNavItems = navItems.filter((item) => {
+    const path = window.location.pathname;
+    // Hide Dashboard item when on mission order page
+    if (path === '/mission-order' && item.label === 'Dashboard') {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <aside
@@ -219,7 +239,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
 
       {/* Navigation Items */}
       <ul className="dash-nav" style={{ flex: 1 }}>
-        {navItems.map((item, idx) => {
+        {filteredNavItems.map((item, idx) => {
           // Section header
           if (item.section) {
             return (
@@ -233,12 +253,13 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
 
           // Navigation item
           const isActive = item.label === activeItem;
+          const href = item.tabName ? `${item.href}#${item.tabName}` : item.href;
           return (
             <li key={`nav-${idx}`}>
               <button
                 type="button"
                 className={`dash-nav-item ${isActive ? 'active' : ''}`}
-                onClick={() => window.location.assign(item.href)}
+                onClick={() => window.location.assign(href)}
               >
                 <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                   <img

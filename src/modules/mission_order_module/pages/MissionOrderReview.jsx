@@ -373,11 +373,6 @@ export default function MissionOrderReview() {
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                   <a className="dash-btn" href="/dashboard/director?tab=mission-orders" style={{ textDecoration: 'none' }}>Back</a>
-                  {missionOrder?.generated_docx_url ? (
-                    <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-                      Download DOCX
-                    </a>
-                  ) : null}
 
                   {isReviewable ? (
                     <>

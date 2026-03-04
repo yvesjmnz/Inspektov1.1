@@ -143,16 +143,16 @@ export default function DashboardHeadInspector() {
         subtitle: 'Review Director-approved complaints that still need a mission order draft.',
       },
       results: {
-        title: '(Results) Mission Order',
-        subtitle: 'Track mission orders issued and queued for Director review.',
+        title: '(Director Approval) Mission Order',
+        subtitle: 'Track mission orders issued and approved or rejected by the Director.',
       },
       'for-inspection': {
-        title: '(Submitted) Mission Order',
-        subtitle: 'Mission orders approved and ready for field inspection.',
+        title: '(Secretary Approval) Mission Order',
+        subtitle: 'Mission orders pre-approved and ready for submission to the secretary.',
       },
       revisions: {
         title: 'Mission Order History',
-        subtitle: 'Review mission orders that were cancelled or returned for changes.',
+        subtitle: 'History for all of the Mission-Orders Accomplished.',
       },
     };
 
@@ -385,7 +385,7 @@ export default function DashboardHeadInspector() {
 
       // If there is already a mission order, just open it.
       if (row.mission_order_id) {
-        window.location.assign(`/mission-order?id=${row.mission_order_id}#${currentTab}`);
+        window.location.assign(`/mission-order?id=${row.mission_order_id}#${currentTab || 'todo'}`);
         return;
       }
 
@@ -583,7 +583,7 @@ export default function DashboardHeadInspector() {
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img src="/ui_icons/mo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Results</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Director Approval</span>
                 </button>
               </li>
               <li>
@@ -591,7 +591,7 @@ export default function DashboardHeadInspector() {
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img src="/ui_icons/queue.png" alt="" style={{ width: 24, height: 24, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>For Inspection</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Secretary Approval</span>
                 </button>
               </li>
               <li>
@@ -599,7 +599,7 @@ export default function DashboardHeadInspector() {
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>For Revisions</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Mission Order History</span>
                 </button>
               </li>
                           </ul>
