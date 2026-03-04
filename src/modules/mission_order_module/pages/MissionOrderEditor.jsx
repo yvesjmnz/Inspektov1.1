@@ -40,7 +40,8 @@ function statusLabel(status) {
   const s = String(status || '').toLowerCase();
   if (s === 'draft') return 'Draft';
   if (s === 'issued') return 'Submitted to Director';
-  if (s === 'for inspection' || s === 'for_inspection') return 'Approved (For Inspection)';
+  if (s === 'for inspection' || s === 'for_inspection') return 'Pre-Approved';
+  if (s === 'awaiting_signature') return 'Awaiting Signature';
   if (s === 'cancelled' || s === 'canceled') return 'Rejected';
   return status || '—';
 }
@@ -156,7 +157,8 @@ export default function MissionOrderEditor() {
   const status = String(missionOrder?.status || '');
   const isApproved = String(status).toLowerCase() === 'for inspection' || String(status).toLowerCase() === 'for_inspection';
   const isSubmitted = String(status).toLowerCase() === 'issued';
-  const isReadOnly = isApproved || isSubmitted;
+  const isAwaitingSignature = String(status).toLowerCase() === 'awaiting_signature';
+  const isReadOnly = isApproved || isSubmitted || isAwaitingSignature;
 
   const handleLogout = async () => {
     setError('');
@@ -254,7 +256,7 @@ export default function MissionOrderEditor() {
   const canSave = !loading && !!missionOrderId && !isReadOnly;
   const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection;
   const isDraft = String(status).toLowerCase() === 'draft';
-  const canGenerateDocx = !loading && !!missionOrderId && (isDraft || isApproved);
+  const canGenerateDocx = !loading && !!missionOrderId && (isDraft || isApproved || isAwaitingSignature);
 
   const saveMissionOrder = async () => {
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -406,8 +408,9 @@ export default function MissionOrderEditor() {
       const freshStatus = String(fresh?.status || '').toLowerCase();
       const isCurrentlyDraft = freshStatus === 'draft';
       const isCurrentlyApproved = freshStatus === 'for inspection' || freshStatus === 'for_inspection';
+      const isCurrentlyAwaitingSignature = freshStatus === 'awaiting_signature';
 
-      if (!isCurrentlyDraft && !isCurrentlyApproved) {
+      if (!isCurrentlyDraft && !isCurrentlyApproved && !isCurrentlyAwaitingSignature) {
         throw new Error('DOCX can only be generated during draft or after approval.');
       }
       
@@ -504,6 +507,40 @@ export default function MissionOrderEditor() {
     }
   };
 
+  const handleDownloadDocx = async () => {
+    setError('');
+    setToast('');
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error('Not authenticated. Please login again.');
+
+      const nowIso = new Date().toISOString();
+      const { error: updateErr } = await supabase
+        .from('mission_orders')
+        .update({ status: 'awaiting_signature', updated_at: nowIso })
+        .eq('id', missionOrderId);
+      if (updateErr) throw updateErr;
+
+      setMissionOrder((prev) => ({
+        ...(prev || {}),
+        status: 'awaiting_signature',
+        updated_at: nowIso,
+      }));
+
+      setToast('Status updated to Awaiting Signature');
+      
+      // Open the document in a new tab
+      if (missionOrder?.generated_docx_url) {
+        window.open(missionOrder.generated_docx_url, '_blank');
+      }
+    } catch (e) {
+      setError(e?.message || 'Failed to update status.');
+    }
+  };
+
   const officeViewerUrl = useMemo(() => buildOfficeViewerUrl(missionOrder?.generated_docx_url), [missionOrder?.generated_docx_url]);
 
   return (
@@ -568,7 +605,7 @@ export default function MissionOrderEditor() {
                     Back
                   </button>
 
-                  {!isApproved && !isSubmitted ? (
+                  {!isApproved && !isSubmitted && !isAwaitingSignature ? (
                     <>
                       <button className="dash-btn" type="button" onClick={handleSave} disabled={!canSave || saving}>
                         {saving ? 'Saving…' : 'Save'}
@@ -585,7 +622,7 @@ export default function MissionOrderEditor() {
                       </button>
                     </>
                   ) : (
-                    <div style={{ fontWeight: 900, color: '#0f172a' }}>{isApproved ? 'Approved' : 'Submitted'}</div>
+                    <div style={{ fontWeight: 900, color: '#0f172a' }}>{isApproved ? 'Approved' : isAwaitingSignature ? 'Awaiting Signature' : 'Submitted'}</div>
                   )}
                 </div>
               </div>
@@ -716,27 +753,46 @@ export default function MissionOrderEditor() {
               <div style={{ marginTop: 14, display: 'grid', gap: 14 }}>
                 <Panel title="DOCX (after approval)">
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <button
-                      type="button"
-                      className="dash-btn"
-                      onClick={handleGenerateDocx}
-                      disabled={!canGenerateDocx || generatingDocx}
-                      style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
-                    >
-                      {generatingDocx ? 'Generating…' : missionOrder?.generated_docx_url ? 'Regenerate DOCX' : 'Generate DOCX'}
-                    </button>
+                    {!isAwaitingSignature && (
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={handleGenerateDocx}
+                        disabled={!canGenerateDocx || generatingDocx}
+                        style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
+                      >
+                        {generatingDocx ? 'Generating…' : missionOrder?.generated_docx_url ? 'Regenerate DOCX' : 'Generate DOCX'}
+                      </button>
+                    )}
 
-                    {missionOrder?.generated_docx_url && isApproved ? (
-                      <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                    {isAwaitingSignature && (
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={handleGenerateDocx}
+                        disabled={!canGenerateDocx || generatingDocx}
+                        style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
+                      >
+                        {generatingDocx ? 'Generating…' : 'Regenerate DOCX'}
+                      </button>
+                    )}
+
+                    {missionOrder?.generated_docx_url && (isApproved || isAwaitingSignature) ? (
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={handleDownloadDocx}
+                        style={{ textDecoration: 'none' }}
+                      >
                         Download
-                      </a>
+                      </button>
                     ) : (
-                      <span style={{ color: '#64748b', fontWeight: 800 }}>No document yet.</span>
+                      !isAwaitingSignature && <span style={{ color: '#64748b', fontWeight: 800 }}>No document yet.</span>
                     )}
 
                     {isDraft ? (
                       <span style={{ color: '#64748b', fontWeight: 900 }}>(Preview only during draft)</span>
-                    ) : !isApproved ? (
+                    ) : !isApproved && !isAwaitingSignature ? (
                       <span style={{ color: '#64748b', fontWeight: 900 }}>(Available after Director approval)</span>
                     ) : null}
                   </div>

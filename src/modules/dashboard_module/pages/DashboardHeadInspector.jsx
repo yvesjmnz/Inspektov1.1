@@ -487,7 +487,7 @@ export default function DashboardHeadInspector() {
       const s = normalize(c.mission_order_status);
       if (tab === 'todo') return !s || s === 'draft';
       if (tab === 'results') return s === 'issued' || s === 'for inspection' || s === 'for_inspection' || s === 'cancelled' || s === 'canceled';
-      if (tab === 'for-inspection') return s === 'for inspection' || s === 'for_inspection';
+      if (tab === 'for-inspection') return s === 'awaiting_signature';
       if (tab === 'revisions') return s === 'cancelled' || s === 'canceled';
       return true;
     });
