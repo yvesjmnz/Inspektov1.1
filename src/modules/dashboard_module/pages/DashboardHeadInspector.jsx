@@ -732,15 +732,22 @@ export default function DashboardHeadInspector() {
                                           style={{
                                             background: 'none',
                                             border: 'none',
+                                            outline: 'none',
                                             cursor: 'pointer',
-                                            fontSize: 18,
                                             padding: 0,
                                             color: '#64748b',
-                                            transition: 'transform 0.2s ease',
+                                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                             transform: expandedComplaintId === c.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            width: 24,
+                                            height: 24,
                                           }}
                                         >
-                                          ▼
+                                          <svg width="20" height="20" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M80 160L256 320L432 160" stroke="currentColor" strokeWidth="40" strokeLinecap="round" strokeLinejoin="round"/>
+                                          </svg>
                                         </button>
                                       </td>
                                       <td onClick={() => createMissionOrder(c.complaint_id, 'todo')}>
@@ -754,7 +761,7 @@ export default function DashboardHeadInspector() {
                                       </td>
                                     </tr>
                                     {expandedComplaintId === c.complaint_id && (
-                                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', animation: 'slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
                                         <td colSpan="3" style={{ padding: '16px 24px' }}>
                                           {/* Progress Timeline */}
                                           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -768,10 +775,10 @@ export default function DashboardHeadInspector() {
                                               flexDirection: 'column',
                                               gap: 6,
                                             }}>
-                                              <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
+                                              <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
                                                 {c.created_at ? new Date(c.created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
                                               </div>
-                                              <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                                              <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
                                                 Complaint Submitted by <span style={{ fontWeight: 700 }}>{c.reporter_email || 'No email provided'}</span>
                                               </div>
                                             </div>
@@ -786,13 +793,33 @@ export default function DashboardHeadInspector() {
                                               flexDirection: 'column',
                                               gap: 6,
                                             }}>
-                                              <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
+                                              <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
                                                 {c.approved_at ? new Date(c.approved_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.approved_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
                                               </div>
-                                              <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                                              <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
                                                 Complaint Approved
                                               </div>
                                             </div>
+
+                                            {/* Box 3: Mission Order Created */}
+                                            {c.mission_order_created_at && (
+                                              <div style={{
+                                                background: '#ffffff',
+                                                border: '1px solid #e2e8f0',
+                                                borderRadius: 8,
+                                                padding: '14px 16px',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                gap: 6,
+                                              }}>
+                                                <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                  {new Date(c.mission_order_created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.mission_order_created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                                </div>
+                                                <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                  Mission Order Created
+                                                </div>
+                                              </div>
+                                            )}
                                           </div>
                                         </td>
                                       </tr>
@@ -870,15 +897,22 @@ export default function DashboardHeadInspector() {
                                       style={{
                                         background: 'none',
                                         border: 'none',
+                                        outline: 'none',
                                         cursor: 'pointer',
-                                        fontSize: 18,
                                         padding: 0,
                                         color: '#64748b',
-                                        transition: 'transform 0.2s ease',
+                                        transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                         transform: expandedComplaintId === c.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        width: 24,
+                                        height: 24,
                                       }}
                                     >
-                                      ▼
+                                      <svg width="20" height="20" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M80 160L256 320L432 160" stroke="currentColor" strokeWidth="40" strokeLinecap="round" strokeLinejoin="round"/>
+                                      </svg>
                                     </button>
                                   </td>
                                   <td onClick={() => createMissionOrder(c.complaint_id, 'results')}>
@@ -911,7 +945,7 @@ export default function DashboardHeadInspector() {
                                   </td>
                                 </tr>
                                 {expandedComplaintId === c.complaint_id && (
-                                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', animation: 'slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
                                     <td colSpan="5" style={{ padding: '16px 24px' }}>
                                       {/* Progress Timeline */}
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1043,15 +1077,22 @@ export default function DashboardHeadInspector() {
                                       style={{
                                         background: 'none',
                                         border: 'none',
+                                        outline: 'none',
                                         cursor: 'pointer',
-                                        fontSize: 18,
                                         padding: 0,
                                         color: '#64748b',
-                                        transition: 'transform 0.2s ease',
+                                        transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                         transform: expandedComplaintId === c.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        width: 24,
+                                        height: 24,
                                       }}
                                     >
-                                      ▼
+                                      <svg width="20" height="20" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M80 160L256 320L432 160" stroke="currentColor" strokeWidth="40" strokeLinecap="round" strokeLinejoin="round"/>
+                                      </svg>
                                     </button>
                                   </td>
                                   <td onClick={() => createMissionOrder(c.complaint_id, 'results')}>
@@ -1084,7 +1125,7 @@ export default function DashboardHeadInspector() {
                                   </td>
                                 </tr>
                                 {expandedComplaintId === c.complaint_id && (
-                                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', animation: 'slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
                                     <td colSpan="5" style={{ padding: '16px 24px' }}>
                                       {/* Progress Timeline */}
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1237,15 +1278,22 @@ export default function DashboardHeadInspector() {
                                           style={{
                                             background: 'none',
                                             border: 'none',
+                                            outline: 'none',
                                             cursor: 'pointer',
-                                            fontSize: 18,
                                             padding: 0,
                                             color: '#64748b',
-                                            transition: 'transform 0.2s ease',
+                                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                             transform: expandedComplaintId === c.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            width: 24,
+                                            height: 24,
                                           }}
                                         >
-                                          ▼
+                                          <svg width="20" height="20" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M80 160L256 320L432 160" stroke="currentColor" strokeWidth="40" strokeLinecap="round" strokeLinejoin="round"/>
+                                          </svg>
                                         </button>
                                       </td>
                                       <td onClick={() => createMissionOrder(c.complaint_id, 'for-inspection')}>
@@ -1313,7 +1361,7 @@ export default function DashboardHeadInspector() {
                                       </td>
                                     </tr>
                                     {expandedComplaintId === c.complaint_id && (
-                                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', animation: 'slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
                                         <td colSpan="6" style={{ padding: '16px 24px' }}>
                                           {/* Progress Timeline */}
                                           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

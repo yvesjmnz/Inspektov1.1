@@ -433,6 +433,20 @@
 
 .overlay-close:hover { color: #dc2626; }
 
+/* Animations for expanded rows */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+  }
+  to {
+    opacity: 1;
+    max-height: 1000px;
+    overflow: visible;
+  }
+}
+
 @media (max-width: 900px) {
   .dash-grid { grid-template-columns: 1fr; }
   .dash-shell { padding-left: 240px; grid-template-columns: 1fr; }
