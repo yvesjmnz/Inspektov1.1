@@ -11,9 +11,11 @@ function getMissionOrderIdFromQuery() {
   return params.get('id');
 }
 
-function getTabFromHash() {
+function getTabFromQuery() {
   const hash = window.location.hash.slice(1);
-  return hash || 'todo';
+  if (hash) return hash;
+  const params = new URLSearchParams(window.location.search);
+  return params.get('tab') || 'todo';
 }
 
 function formatDateInputValue(value) {
@@ -130,6 +132,9 @@ export default function MissionOrderEditor() {
 
   const [docxPreviewOpen, setDocxPreviewOpen] = useState(false);
   const [docxPreviewError, setDocxPreviewError] = useState(false);
+
+  // Store the tab from URL query parameter
+  const [sourceTab, setSourceTab] = useState(() => getTabFromQuery());
 
   // Sidebar persistence shared across dashboard + these pages
   const [navCollapsed, setNavCollapsed] = useState(() => {
@@ -572,8 +577,7 @@ export default function MissionOrderEditor() {
                   <button
                     type="button"
                     onClick={() => {
-                      const tab = getTabFromHash();
-                      window.location.assign(`/dashboard/head-inspector#${tab}`);
+                      window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
                     }}
                     style={{
                       display: 'inline-flex',

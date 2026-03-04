@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import './Dashboard.css';
 
@@ -33,8 +33,14 @@ function statusBadgeClass(status) {
   return 'status-badge';
 }
 
+function getInitialTab() {
+  const hash = window.location.hash.slice(1);
+  const validTabs = ['todo', 'results', 'for-inspection', 'revisions'];
+  return validTabs.includes(hash) ? hash : 'todo';
+}
+
 export default function DashboardHeadInspector() {
-  const [tab, setTab] = useState('todo'); // todo | results | for-inspection | revisions
+  const [tab, setTab] = useState(getInitialTab); // todo | results | for-inspection | revisions
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [navCollapsed, setNavCollapsed] = useState(false);
@@ -164,6 +170,7 @@ export default function DashboardHeadInspector() {
 
   const [creatingForId, setCreatingForId] = useState(null);
   const [toast, setToast] = useState('');
+  const [expandedComplaintId, setExpandedComplaintId] = useState(null);
 
   const handleLogout = async () => {
     setError('');
@@ -216,7 +223,7 @@ export default function DashboardHeadInspector() {
       const { data: missionOrders, error: moError } = complaintIds.length
         ? await supabase
             .from('mission_orders')
-            .select('id, complaint_id, status, created_at')
+            .select('id, complaint_id, status, created_at, date_of_inspection')
             .in('complaint_id', complaintIds)
             .order('created_at', { ascending: false })
             .limit(500)
@@ -291,6 +298,7 @@ export default function DashboardHeadInspector() {
           mission_order_id: mo?.id || null,
           mission_order_status: mo?.status || null,
           mission_order_created_at: mo?.created_at || null,
+          date_of_inspection: mo?.date_of_inspection || null,
           inspector_names: mo?.id ? inspectorNamesByMissionOrderId.get(mo.id) || [] : [],
         };
       });
@@ -511,15 +519,16 @@ export default function DashboardHeadInspector() {
 
     for (const c of filteredComplaints) {
       // Bucket rows by the most relevant timestamp for the current view.
-      // - for inspection: group by approval timestamp (inspection-ready)
+      // - for inspection (Secretary Approval): group by mission_order_created_at (Pre-Approval date)
       // - issued/revisions/todo: group by MO created_at when present, else complaint approval/created
       const dtRaw =
         tab === 'for-inspection'
-          ? (c.approved_at || c.created_at)
+          ? (c.mission_order_created_at || c.approved_at || c.created_at)
           : (c.mission_order_created_at || c.approved_at || c.created_at);
 
       const dt = dtRaw ? new Date(dtRaw) : null;
-      const key = dt ? new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).toISOString().slice(0, 10) : 'unknown';
+      // Create key from local date components to avoid timezone issues
+      const key = dt ? `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` : 'unknown';
       if (!groups[key]) {
         groups[key] = {
           label: dt ? dt.toLocaleDateString() : 'Unknown Date',
@@ -532,7 +541,7 @@ export default function DashboardHeadInspector() {
     // Newest day first.
     const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
     return { groups, sortedKeys };
-  }, [filteredComplaints]);
+  }, [filteredComplaints, tab]);
 
   return (
     <div className="dash-container">
@@ -691,40 +700,104 @@ export default function DashboardHeadInspector() {
                             <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                               <thead>
                                 <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                  <th style={{ width: 40, padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: 12, color: '#64748b' }}></th>
                                   <th style={{ width: 150, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
                                   <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
-                                  <th style={{ width: 220, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Approved</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {dayGroup.items.map((c) => (
-                                  <tr
-                                    key={c.complaint_id}
-                                    style={{
-                                      cursor: 'pointer',
-                                      borderBottom: '1px solid #e2e8f0',
-                                      transition: 'background-color 0.2s ease',
-                                      position: 'relative',
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.currentTarget.style.background = '#f8fafc';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.currentTarget.style.background = '#ffffff';
-                                    }}
-                                    onClick={() => createMissionOrder(c.complaint_id, tab)}
-                                  >
-                                    <td>
-                                      <span className={statusBadgeClass(c.mission_order_status)}>
-                                        {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
-                                      </span>
-                                    </td>
-                                    <td>
-                                      <div className="dash-cell-title">{c.business_name || '—'}</div>
-                                      <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                    </td>
-                                    <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
-                                  </tr>
+                                  <React.Fragment key={c.complaint_id}>
+                                    <tr
+                                      style={{
+                                        cursor: 'pointer',
+                                        borderBottom: '1px solid #e2e8f0',
+                                        transition: 'background-color 0.2s ease',
+                                        position: 'relative',
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = '#f8fafc';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = '#ffffff';
+                                      }}
+                                    >
+                                      <td style={{ padding: '12px', textAlign: 'center' }}>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedComplaintId(expandedComplaintId === c.complaint_id ? null : c.complaint_id);
+                                          }}
+                                          style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            fontSize: 18,
+                                            padding: 0,
+                                            color: '#64748b',
+                                            transition: 'transform 0.2s ease',
+                                            transform: expandedComplaintId === c.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)',
+                                          }}
+                                        >
+                                          ▼
+                                        </button>
+                                      </td>
+                                      <td onClick={() => createMissionOrder(c.complaint_id, 'todo')}>
+                                        <span className={statusBadgeClass(c.mission_order_status)}>
+                                          {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                                        </span>
+                                      </td>
+                                      <td onClick={() => createMissionOrder(c.complaint_id, 'todo')}>
+                                        <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                        <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                      </td>
+                                    </tr>
+                                    {expandedComplaintId === c.complaint_id && (
+                                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                        <td colSpan="3" style={{ padding: '16px 24px' }}>
+                                          {/* Progress Timeline */}
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                            {/* Box 1: Submitted */}
+                                            <div style={{
+                                              background: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              borderRadius: 8,
+                                              padding: '14px 16px',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              gap: 6,
+                                            }}>
+                                              <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
+                                                {c.created_at ? new Date(c.created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                              </div>
+                                              <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                                                Complaint Submitted by <span style={{ fontWeight: 700 }}>{c.reporter_email || 'No email provided'}</span>
+                                              </div>
+                                            </div>
+
+                                            {/* Box 2: Approved */}
+                                            <div style={{
+                                              background: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              borderRadius: 8,
+                                              padding: '14px 16px',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              gap: 6,
+                                            }}>
+                                              <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
+                                                {c.approved_at ? new Date(c.approved_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.approved_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                              </div>
+                                              <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                                                Complaint Approved
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
                                 ))}
                               </tbody>
                             </table>
@@ -736,7 +809,7 @@ export default function DashboardHeadInspector() {
                 </div>
               ) : tab === 'results' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-                  {/* Rejected Table */}
+                  {/* Rejected Section */}
                   <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
                     <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
                       <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Rejected</h3>
@@ -751,58 +824,172 @@ export default function DashboardHeadInspector() {
                       <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0 }}>
-                            <th style={{ width: 100, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
-                            <th style={{ width: 140, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
-                            <th style={{ width: 120, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Date</th>
+                            <th style={{ width: 40, padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: 12, color: '#64748b' }}></th>
+                            <th style={{ width: 150, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
+                            <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                            <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspection Date</th>
+                            <th style={{ width: 140, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspectors</th>
                           </tr>
                         </thead>
                         <tbody>
                           {complaints.filter((c) => {
                             const s = String(c.mission_order_status || '').toLowerCase();
                             return s === 'cancelled' || s === 'canceled';
-                          }).map((c) => (
-                            <tr
-                              key={c.complaint_id}
-                              style={{
-                                cursor: 'pointer',
-                                borderBottom: '1px solid #e2e8f0',
-                                transition: 'background-color 0.2s ease',
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.background = '#f8fafc';
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.background = '#ffffff';
-                              }}
-                              onClick={() => createMissionOrder(c.complaint_id, 'results')}
-                            >
-                              <td style={{ padding: '12px' }}>
-                                <span className={statusBadgeClass(c.mission_order_status)} style={{ fontSize: 11 }}>
-                                  {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
-                                </span>
-                              </td>
-                              <td style={{ padding: '12px', fontSize: 13 }}>
-                                <div style={{ fontWeight: 700, color: '#1e293b' }}>{c.business_name || '—'}</div>
-                                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{c.business_address || ''}</div>
-                              </td>
-                              <td style={{ padding: '12px', fontSize: 13, color: '#64748b' }}>
-                                {c.approved_at ? new Date(c.approved_at).toLocaleDateString() : '—'}
+                          }).length === 0 ? (
+                            <tr>
+                              <td colSpan="5" style={{ textAlign: 'center', padding: 32, color: '#475569' }}>
+                                No rejected items
                               </td>
                             </tr>
-                          ))}
+                          ) : (
+                            complaints.filter((c) => {
+                              const s = String(c.mission_order_status || '').toLowerCase();
+                              return s === 'cancelled' || s === 'canceled';
+                            }).map((c) => (
+                              <React.Fragment key={`rejected-${c.complaint_id}`}>
+                                <tr
+                                  style={{
+                                    cursor: 'pointer',
+                                    borderBottom: '1px solid #e2e8f0',
+                                    transition: 'background-color 0.2s ease',
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = '#f8fafc';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = '#ffffff';
+                                  }}
+                                >
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setExpandedComplaintId(expandedComplaintId === c.complaint_id ? null : c.complaint_id);
+                                      }}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontSize: 18,
+                                        padding: 0,
+                                        color: '#64748b',
+                                        transition: 'transform 0.2s ease',
+                                        transform: expandedComplaintId === c.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)',
+                                      }}
+                                    >
+                                      ▼
+                                    </button>
+                                  </td>
+                                  <td onClick={() => createMissionOrder(c.complaint_id, 'results')}>
+                                    <span className={statusBadgeClass(c.mission_order_status)}>
+                                      {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                                    </span>
+                                  </td>
+                                  <td onClick={() => createMissionOrder(c.complaint_id, 'results')}>
+                                    <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                    <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                  </td>
+                                  <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                    {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                  </td>
+                                  <td>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 30, alignItems: 'center', fontSize: 12 }}>
+                                      {(c.inspector_names || []).length === 0 ? (
+                                        <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                      ) : (
+                                        (c.inspector_names || []).map((name, idx) => (
+                                          <span
+                                            key={`${c.complaint_id}-${idx}`}
+                                            style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}
+                                          >
+                                            {name}
+                                          </span>
+                                        ))
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                                {expandedComplaintId === c.complaint_id && (
+                                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                    <td colSpan="5" style={{ padding: '16px 24px' }}>
+                                      {/* Progress Timeline */}
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                        {/* Box 1: Submitted */}
+                                        <div style={{
+                                          background: '#ffffff',
+                                          border: '1px solid #e2e8f0',
+                                          borderRadius: 8,
+                                          padding: '14px 16px',
+                                          display: 'flex',
+                                          flexDirection: 'column',
+                                          gap: 6,
+                                        }}>
+                                          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                            {c.created_at ? new Date(c.created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                          </div>
+                                          <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                            Complaint Submitted by <span style={{ fontWeight: 700 }}>{c.reporter_email || 'No email provided'}</span>
+                                          </div>
+                                        </div>
+
+                                        {/* Box 2: Approved */}
+                                        <div style={{
+                                          background: '#ffffff',
+                                          border: '1px solid #e2e8f0',
+                                          borderRadius: 8,
+                                          padding: '14px 16px',
+                                          display: 'flex',
+                                          flexDirection: 'column',
+                                          gap: 6,
+                                        }}>
+                                          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                            {c.approved_at ? new Date(c.approved_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.approved_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                          </div>
+                                          <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                            Complaint Approved
+                                          </div>
+                                        </div>
+
+                                        {/* Box 3: Mission Order Created */}
+                                        {c.mission_order_created_at && (
+                                          <div style={{
+                                            background: '#ffffff',
+                                            border: '1px solid #e2e8f0',
+                                            borderRadius: 8,
+                                            padding: '14px 16px',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: 6,
+                                          }}>
+                                            <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                              {new Date(c.mission_order_created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.mission_order_created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                            </div>
+                                            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                              Mission Order Created
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            ))
+                          )}
                         </tbody>
                       </table>
                     </div>
                   </div>
 
-                  {/* Pre-Approved Table */}
+                  {/* Pre-Approved Section */}
                   <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
                     <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
                       <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Pre-Approved</h3>
                       <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#10b981' }}>
                         {complaints.filter((c) => {
                           const s = String(c.mission_order_status || '').toLowerCase();
-                          return s === 'for inspection' || s === 'for_inspection';
+                          return s === 'issued' || s === 'for inspection' || s === 'for_inspection';
                         }).length} items
                       </div>
                     </div>
@@ -810,49 +997,392 @@ export default function DashboardHeadInspector() {
                       <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0 }}>
-                            <th style={{ width: 100, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
-                            <th style={{ width: 140, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
-                            <th style={{ width: 120, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Date</th>
+                            <th style={{ width: 40, padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: 12, color: '#64748b' }}></th>
+                            <th style={{ width: 150, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
+                            <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                            <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspection Date</th>
+                            <th style={{ width: 140, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspectors</th>
                           </tr>
                         </thead>
                         <tbody>
                           {complaints.filter((c) => {
                             const s = String(c.mission_order_status || '').toLowerCase();
-                            return s === 'for inspection' || s === 'for_inspection';
-                          }).map((c) => (
-                            <tr
-                              key={c.complaint_id}
-                              style={{
-                                cursor: 'pointer',
-                                borderBottom: '1px solid #e2e8f0',
-                                transition: 'background-color 0.2s ease',
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.background = '#f8fafc';
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.background = '#ffffff';
-                              }}
-                              onClick={() => createMissionOrder(c.complaint_id, 'results')}
-                            >
-                              <td style={{ padding: '12px' }}>
-                                <span className={statusBadgeClass(c.mission_order_status)} style={{ fontSize: 11 }}>
-                                  {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
-                                </span>
-                              </td>
-                              <td style={{ padding: '12px', fontSize: 13 }}>
-                                <div style={{ fontWeight: 700, color: '#1e293b' }}>{c.business_name || '—'}</div>
-                                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{c.business_address || ''}</div>
-                              </td>
-                              <td style={{ padding: '12px', fontSize: 13, color: '#64748b' }}>
-                                {c.approved_at ? new Date(c.approved_at).toLocaleDateString() : '—'}
+                            return s === 'issued' || s === 'for inspection' || s === 'for_inspection';
+                          }).length === 0 ? (
+                            <tr>
+                              <td colSpan="5" style={{ textAlign: 'center', padding: 32, color: '#475569' }}>
+                                No pre-approved items
                               </td>
                             </tr>
-                          ))}
+                          ) : (
+                            complaints.filter((c) => {
+                              const s = String(c.mission_order_status || '').toLowerCase();
+                              return s === 'issued' || s === 'for inspection' || s === 'for_inspection';
+                            }).map((c) => (
+                              <React.Fragment key={`preapproved-${c.complaint_id}`}>
+                                <tr
+                                  style={{
+                                    cursor: 'pointer',
+                                    borderBottom: '1px solid #e2e8f0',
+                                    transition: 'background-color 0.2s ease',
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = '#f8fafc';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = '#ffffff';
+                                  }}
+                                >
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setExpandedComplaintId(expandedComplaintId === c.complaint_id ? null : c.complaint_id);
+                                      }}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontSize: 18,
+                                        padding: 0,
+                                        color: '#64748b',
+                                        transition: 'transform 0.2s ease',
+                                        transform: expandedComplaintId === c.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)',
+                                      }}
+                                    >
+                                      ▼
+                                    </button>
+                                  </td>
+                                  <td onClick={() => createMissionOrder(c.complaint_id, 'results')}>
+                                    <span className={statusBadgeClass(c.mission_order_status)}>
+                                      {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                                    </span>
+                                  </td>
+                                  <td onClick={() => createMissionOrder(c.complaint_id, 'results')}>
+                                    <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                    <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                  </td>
+                                  <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                    {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                  </td>
+                                  <td>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 30, alignItems: 'center', fontSize: 12 }}>
+                                      {(c.inspector_names || []).length === 0 ? (
+                                        <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                      ) : (
+                                        (c.inspector_names || []).map((name, idx) => (
+                                          <span
+                                            key={`${c.complaint_id}-${idx}`}
+                                            style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}
+                                          >
+                                            {name}
+                                          </span>
+                                        ))
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                                {expandedComplaintId === c.complaint_id && (
+                                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                    <td colSpan="5" style={{ padding: '16px 24px' }}>
+                                      {/* Progress Timeline */}
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                        {/* Box 1: Submitted */}
+                                        <div style={{
+                                          background: '#ffffff',
+                                          border: '1px solid #e2e8f0',
+                                          borderRadius: 8,
+                                          padding: '14px 16px',
+                                          display: 'flex',
+                                          flexDirection: 'column',
+                                          gap: 6,
+                                        }}>
+                                          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                            {c.created_at ? new Date(c.created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                          </div>
+                                          <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                            Complaint Submitted by <span style={{ fontWeight: 700 }}>{c.reporter_email || 'No email provided'}</span>
+                                          </div>
+                                        </div>
+
+                                        {/* Box 2: Approved */}
+                                        <div style={{
+                                          background: '#ffffff',
+                                          border: '1px solid #e2e8f0',
+                                          borderRadius: 8,
+                                          padding: '14px 16px',
+                                          display: 'flex',
+                                          flexDirection: 'column',
+                                          gap: 6,
+                                        }}>
+                                          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                            {c.approved_at ? new Date(c.approved_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.approved_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                          </div>
+                                          <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                            Complaint Approved
+                                          </div>
+                                        </div>
+
+                                        {/* Box 3: Mission Order Created */}
+                                        {c.mission_order_created_at && (
+                                          <div style={{
+                                            background: '#ffffff',
+                                            border: '1px solid #e2e8f0',
+                                            borderRadius: 8,
+                                            padding: '14px 16px',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: 6,
+                                          }}>
+                                            <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                              {new Date(c.mission_order_created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.mission_order_created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                            </div>
+                                            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                              Mission Order Created
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            ))
+                          )}
                         </tbody>
                       </table>
                     </div>
                   </div>
+                </div>
+              ) : tab === 'for-inspection' ? (
+                <div style={{ display: 'grid', gap: 20 }}>
+                  {filteredComplaints.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                      {loading ? 'Loading…' : 'No records found for this tab.'}
+                    </div>
+                  ) : (
+                    complaintsByDay.sortedKeys.map((dayKey) => {
+                      const dayGroup = complaintsByDay.groups[dayKey];
+                      const label = dayGroup?.label || dayKey;
+                      const count = dayGroup?.items?.length || 0;
+                      if (count === 0) return null;
+
+                      return (
+                        <div
+                          key={`day-card-${dayKey}`}
+                          style={{
+                            background: '#ffffff',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 14,
+                            boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                            overflow: 'hidden',
+                            transition: 'box-shadow 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                          }}
+                        >
+                          {/* Day Header */}
+                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                              {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
+                            </h3>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
+                              <span>{count} Pending Signature{count !== 1 ? 's' : ''}</span>
+                            </div>
+                          </div>
+
+                          {/* Table for this day */}
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                  <th style={{ width: 40, padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: 12, color: '#64748b' }}></th>
+                                  <th style={{ width: 150, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                                  <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspection Date</th>
+                                  <th style={{ width: 140, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspectors</th>
+                                  <th style={{ width: 120, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Signed?</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {dayGroup.items.map((c) => (
+                                  <React.Fragment key={c.complaint_id}>
+                                    <tr
+                                      style={{
+                                        cursor: 'pointer',
+                                        borderBottom: '1px solid #e2e8f0',
+                                        transition: 'background-color 0.2s ease',
+                                        position: 'relative',
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = '#f8fafc';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = '#ffffff';
+                                      }}
+                                    >
+                                      <td style={{ padding: '12px', textAlign: 'center' }}>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedComplaintId(expandedComplaintId === c.complaint_id ? null : c.complaint_id);
+                                          }}
+                                          style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            fontSize: 18,
+                                            padding: 0,
+                                            color: '#64748b',
+                                            transition: 'transform 0.2s ease',
+                                            transform: expandedComplaintId === c.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)',
+                                          }}
+                                        >
+                                          ▼
+                                        </button>
+                                      </td>
+                                      <td onClick={() => createMissionOrder(c.complaint_id, 'for-inspection')}>
+                                        <span style={{
+                                          display: 'inline-block',
+                                          padding: '6px 10px',
+                                          borderRadius: 999,
+                                          background: '#f3e8ff',
+                                          color: '#7c3aed',
+                                          border: '1px solid #d8b4fe',
+                                          fontWeight: 800,
+                                          fontSize: 12,
+                                          textTransform: 'capitalize',
+                                          whiteSpace: 'nowrap'
+                                        }}>
+                                          {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                                        </span>
+                                      </td>
+                                      <td onClick={() => createMissionOrder(c.complaint_id, 'for-inspection')}>
+                                        <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                        <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                      </td>
+                                      <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                        {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                      </td>
+                                      <td>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 30, alignItems: 'center', fontSize: 12 }}>
+                                          {(c.inspector_names || []).length === 0 ? (
+                                            <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                          ) : (
+                                            (c.inspector_names || []).map((name, idx) => (
+                                              <span
+                                                key={`${c.complaint_id}-${idx}`}
+                                                style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}
+                                              >
+                                                {name}
+                                              </span>
+                                            ))
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td>
+                                        <button
+                                          type="button"
+                                          style={{
+                                            padding: '6px 12px',
+                                            borderRadius: 6,
+                                            border: 'none',
+                                            background: '#10b981',
+                                            color: '#ffffff',
+                                            fontWeight: 700,
+                                            fontSize: 12,
+                                            cursor: 'pointer',
+                                            transition: 'background-color 0.2s ease',
+                                          }}
+                                          onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = '#059669';
+                                          }}
+                                          onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = '#10b981';
+                                          }}
+                                        >
+                                          Archive
+                                        </button>
+                                      </td>
+                                    </tr>
+                                    {expandedComplaintId === c.complaint_id && (
+                                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                        <td colSpan="6" style={{ padding: '16px 24px' }}>
+                                          {/* Progress Timeline */}
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                            {/* Box 1: Submitted */}
+                                            <div style={{
+                                              background: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              borderRadius: 8,
+                                              padding: '14px 16px',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              gap: 6,
+                                            }}>
+                                              <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                {c.created_at ? new Date(c.created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                              </div>
+                                              <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                Complaint Submitted by <span style={{ fontWeight: 700 }}>{c.reporter_email || 'No email provided'}</span>
+                                              </div>
+                                            </div>
+
+                                            {/* Box 2: Approved */}
+                                            <div style={{
+                                              background: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              borderRadius: 8,
+                                              padding: '14px 16px',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              gap: 6,
+                                            }}>
+                                              <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                {c.approved_at ? new Date(c.approved_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.approved_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                              </div>
+                                              <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                Complaint Approved
+                                              </div>
+                                            </div>
+
+                                            {/* Box 3: Pre-Approval */}
+                                            <div style={{
+                                              background: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              borderRadius: 8,
+                                              padding: '14px 16px',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              gap: 6,
+                                            }}>
+                                              <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                {c.mission_order_created_at ? new Date(c.mission_order_created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.mission_order_created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                              </div>
+                                              <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                Mission Order Pre-Approved by Director
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               ) : (
                 <div style={{ display: 'grid', gap: 20 }}>
@@ -930,11 +1460,11 @@ export default function DashboardHeadInspector() {
                                       <button
                                         type="button"
                                         className="dash-btn"
-                                        onClick={() => createMissionOrder(c.complaint_id)}
+                                        onClick={() => createMissionOrder(c.complaint_id, tab)}
                                         disabled={creatingForId === c.complaint_id}
-                                      >
+                                        >
                                         {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
-                                      </button>
+                                        </button>
                                     </td>
                                     <td>
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>

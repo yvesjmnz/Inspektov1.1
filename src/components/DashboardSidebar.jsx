@@ -191,6 +191,13 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
     }
 
     if (path === '/dashboard/head-inspector') {
+      // Check hash first (from mission-order back button), then query param
+      if (hash) {
+        if (hash === 'todo') return 'Draft';
+        if (hash === 'results') return 'Director Approval';
+        if (hash === 'for-inspection') return 'Secretary Approval';
+        if (hash === 'revisions') return 'Mission Order History';
+      }
       if (tab === 'todo') return 'Draft';
       if (tab === 'results') return 'Director Approval';
       if (tab === 'for-inspection') return 'Secretary Approval';
