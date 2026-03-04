@@ -118,7 +118,7 @@ function App() {
         // If there is no session, redirect to login for protected routes.
         if (!user) {
           if (path !== '/login') {
-            window.location.replace('/login');
+            window.location.replace('/login?force=1');
             return;
           }
         }
@@ -134,7 +134,7 @@ function App() {
           // If user is not authorized for this route, send them to a safe page.
           // If not logged in -> login, else -> no-permission.
           if (!user) {
-            window.location.replace('/login');
+            window.location.replace('/login?force=1');
             return;
           }
           setCurrentPage('no-permission');

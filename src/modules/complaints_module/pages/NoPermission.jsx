@@ -15,7 +15,7 @@ export default function NoPermission() {
               please sign in with an authorized account or contact an administrator.
             </p>
             <div style={{ marginTop: 18, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <a className="pill-btn pill-primary" href="/login">Go to Login</a>
+              <a className="pill-btn pill-primary" href="/login?force=1">Go to Login</a>
               <a className="pill-btn pill-outline" href="/">Back to Home</a>
             </div>
           </div>

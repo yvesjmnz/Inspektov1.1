@@ -9,10 +9,60 @@ export default function Login() {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // If already logged in, go straight to role routing.
+  // If already logged in, only auto-route when the user is intentionally
+  // visiting /login (e.g., fresh open). If they were redirected here due to
+  // a permissions error, we should NOT auto-route; we should allow switching accounts.
   useEffect(() => {
     let mounted = true;
+
     (async () => {
+      const params = new URLSearchParams(window.location.search);
+      const force = params.get('force');
+
+      // When redirected to login with ?force=1, explicitly clear the old session.
+      // This prevents the auto-login loop when trying to switch accounts.
+      //
+      // NOTE: Some environments may keep stale tokens in storage even after signOut,
+      // so we also remove any persisted Supabase auth keys (best-effort) then reload.
+      if (force === '1') {
+        try {
+          await supabase.auth.signOut();
+        } catch {
+          // ignore
+        }
+
+        try {
+          const removeSupabaseAuthKeys = (storage) => {
+            if (!storage) return;
+            const keys = [];
+            for (let i = 0; i < storage.length; i += 1) {
+              const k = storage.key(i);
+              if (!k) continue;
+              // Supabase stores auth under keys like: sb-<project-ref>-auth-token
+              if (k.startsWith('sb-') && k.endsWith('-auth-token')) keys.push(k);
+            }
+            keys.forEach((k) => {
+              try {
+                storage.removeItem(k);
+              } catch {
+                // ignore
+              }
+            });
+          };
+
+          removeSupabaseAuthKeys(window.localStorage);
+          removeSupabaseAuthKeys(window.sessionStorage);
+        } catch {
+          // ignore
+        }
+
+        if (!mounted) return;
+
+        // Reload back to clean /login (without force) so the sign-in form is usable.
+        window.location.replace('/login');
+        return;
+      }
+
       const { data } = await supabase.auth.getSession();
       if (!mounted) return;
       if (data?.session?.user) {
