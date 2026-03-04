@@ -128,8 +128,7 @@ export default function MissionOrderEditor() {
 
   const [dateOfInspection, setDateOfInspection] = useState('');
 
-  const [complaintExpanded, setComplaintExpanded] = useState(false);
-
+  
   const [docxPreviewOpen, setDocxPreviewOpen] = useState(false);
   const [docxPreviewError, setDocxPreviewError] = useState(false);
 
@@ -634,125 +633,159 @@ export default function MissionOrderEditor() {
               {toast ? <div className="dash-alert dash-alert-success" style={{ marginTop: 14 }}>{toast}</div> : null}
               {error ? <div className="dash-alert dash-alert-error" style={{ marginTop: 14 }}>{error}</div> : null}
 
-              <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
-                <KeyTile label="Inspectors" value={assignedInspectorNames || '—'} sub={assignedInspectorIds.length ? `${assignedInspectorIds.length} assigned` : 'None assigned'} />
-                <KeyTile label="Inspection Date" value={dateOfInspection ? formatDateHuman(dateOfInspection) : '—'} sub="Required" />
-                <KeyTile label="Issuance Date" value={missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'} sub={missionOrder?.date_of_issuance ? 'Set by Director' : 'Set on approval'} />
+              {/* Status Ribbon */}
+              <div
+                style={{
+                  marginTop: 12,
+                  display: 'flex',
+                  gap: 18,
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  padding: '8px 12px',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 12,
+                  background: '#f8fafc',
+                }}
+              >
+                {/* Inspectors */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                  <span aria-hidden="true" style={{ color: '#0b2249' }}>
+                    {/* User icon */}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M12 12c2.761 0 5-2.686 5-6s-2.239-5-5-5-5 2.686-5 6 2.239 5 5 5Zm0 2c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5Z" fill="#0b2249"/>
+                    </svg>
+                  </span>
+                  <span style={{ color: '#475569', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspectors:</span>
+                  <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 14 }}>{assignedInspectorNames || '—'}</span>
+                </div>
+
+                {/* Inspection Date */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                  <span aria-hidden="true" style={{ color: '#0b2249' }}>
+                    {/* Calendar icon */}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 1 1 2 0v1Zm13 7H4v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9ZM5 7h14V6H5v1Z" fill="#0b2249"/>
+                    </svg>
+                  </span>
+                  <span style={{ color: '#475569', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspection:</span>
+                  <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 14 }}>{dateOfInspection ? formatDateHuman(dateOfInspection) : '—'}</span>
+                </div>
+
+                {/* Issuance Date */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                  <span aria-hidden="true" style={{ color: '#0b2249' }}>
+                    {/* Calendar icon (reuse) */}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 1 1 2 0v1Zm13 7H4v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9ZM5 7h14V6H5v1Z" fill="#0b2249"/>
+                    </svg>
+                  </span>
+                  <span style={{ color: '#475569', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Issuance:</span>
+                  <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 14 }}>{missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'}</span>
+                </div>
               </div>
 
-              <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
-                <Panel title="Quick Inputs" right={isReadOnly ? <span style={{ fontWeight: 900, fontSize: 12, color: '#64748b' }}>Read-only</span> : null}>
-                  <div style={{ display: 'grid', gap: 14 }}>
-                    <div>
-                      <label className="mo-label" htmlFor="dateInspection" style={{ fontSize: 13 }}>Date of Inspection</label>
-                      <input
-                        id="dateInspection"
-                        type="date"
-                        value={dateOfInspection}
-                        onChange={(e) => setDateOfInspection(e.target.value)}
-                        disabled={loading || isReadOnly}
-                        className="mo-title"
-                        style={{ fontSize: 16, fontWeight: 900, height: 46, borderRadius: 14 }}
-                      />
-                    </div>
+              <Panel title="Mission Order Details" right={isReadOnly ? <span style={{ fontWeight: 900, fontSize: 12, color: '#64748b' }}>Read-only</span> : null}>
+                <div style={{ display: 'grid', gap: 16 }}>
+                  {/* 1) Inspectors (editable) */}
+                  <div>
+                    <div style={{ fontWeight: 900, fontSize: 13, color: '#0f172a' }}>Inspectors</div>
+                    {!isReadOnly ? (
+                      <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
+                        <select
+                          className="mo-select"
+                          value={selectedInspectorId}
+                          onChange={(e) => setSelectedInspectorId(e.target.value)}
+                          disabled={loading}
+                          style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', height: 46, fontWeight: 900, fontSize: 15 }}
+                        >
+                          <option value="">Select inspector…</option>
+                          {inspectors.map((ins) => (
+                            <option key={ins.id} value={ins.id}>
+                              {ins.full_name || ins.id}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="button" className="dash-btn" onClick={addInspector} disabled={loading || !selectedInspectorId}>
+                          Add
+                        </button>
+                      </div>
+                    ) : null}
 
-                    <div>
-                      <div style={{ fontWeight: 900, fontSize: 13, color: '#0f172a' }}>Inspectors</div>
-
-                      {!isReadOnly ? (
-                        <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
-                          <select
-                            className="mo-select"
-                            value={selectedInspectorId}
-                            onChange={(e) => setSelectedInspectorId(e.target.value)}
-                            disabled={loading}
-                            style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', height: 46, fontWeight: 900, fontSize: 15 }}
-                          >
-                            <option value="">Select inspector…</option>
-                            {inspectors.map((ins) => (
-                              <option key={ins.id} value={ins.id}>
-                                {ins.full_name || ins.id}
-                              </option>
-                            ))}
-                          </select>
-                          <button type="button" className="dash-btn" onClick={addInspector} disabled={loading || !selectedInspectorId}>
-                            Add
-                          </button>
-                        </div>
-                      ) : null}
-
-                      {assignedInspectorIds.length > 0 ? (
-                        <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          {assignedInspectorIds.map((id) => {
-                            const ins = inspectors.find((x) => x.id === id);
-                            const label = ins?.full_name || id;
-                            return (
-                              <button
-                                key={id}
-                                type="button"
-                                className="mo-chip"
-                                title={isReadOnly ? '' : 'Click to remove'}
-                                onClick={() => (isReadOnly ? null : removeInspector(id))}
-                                disabled={isReadOnly}
-                                style={{ fontSize: 14, fontWeight: 1000 }}
-                              >
-                                <span className="mo-chip-label">{label}</span>
-                                {!isReadOnly ? <span aria-hidden="true" className="mo-chip-x">×</span> : null}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>No inspectors assigned yet.</div>
-                      )}
-                    </div>
-                  </div>
-                </Panel>
-
-                <Panel
-                  title="Business & Complaint"
-                  right={
-                    complaint?.id ? (
-                      <button
-                        type="button"
-                        className="dash-btn"
-                        onClick={() => setComplaintExpanded((v) => !v)}
-                        style={{ background: '#fff', border: '1px solid #e2e8f0' }}
-                      >
-                        {complaintExpanded ? 'Hide Details' : 'Show Details'}
-                      </button>
-                    ) : null
-                  }
-                >
-                  <div style={{ display: 'grid', gap: 10 }}>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Business</div>
-                      <div style={{ fontSize: 18, fontWeight: 1000, color: '#0f172a', marginTop: 6 }}>{complaint?.business_name || '—'}</div>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: '#475569', marginTop: 6 }}>{complaint?.business_address || '—'}</div>
-                    </div>
-
-                    {complaintExpanded ? (
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Complaint Details</div>
-                        <div style={{ marginTop: 8, whiteSpace: 'pre-wrap', fontSize: 15, fontWeight: 800, color: '#0f172a', lineHeight: 1.65 }}>
-                          {complaint?.complaint_description || '—'}
-                        </div>
-                        {complaint?.id ? (
-                          <div style={{ marginTop: 12 }}>
-                            <a className="dash-btn" href={`/complaints/view?id=${complaint.id}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-                              Open Full Complaint
-                            </a>
-                          </div>
-                        ) : null}
+                    {assignedInspectorIds.length > 0 ? (
+                      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {assignedInspectorIds.map((id) => {
+                          const ins = inspectors.find((x) => x.id === id);
+                          const label = ins?.full_name || id;
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              className="mo-chip"
+                              title={isReadOnly ? '' : 'Click to remove'}
+                              onClick={() => (isReadOnly ? null : removeInspector(id))}
+                              disabled={isReadOnly}
+                              style={{ fontSize: 14, fontWeight: 1000 }}
+                            >
+                              <span className="mo-chip-label">{label}</span>
+                              {!isReadOnly ? <span aria-hidden="true" className="mo-chip-x">×</span> : null}
+                            </button>
+                          );
+                        })}
                       </div>
                     ) : (
-                      <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>
-                        Details hidden to reduce clutter.
-                      </div>
+                      <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>No inspectors assigned yet.</div>
                     )}
                   </div>
-                </Panel>
-              </div>
+
+                  {/* 2) Business name (read-only) */}
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Business</div>
+                    <div style={{ fontSize: 18, fontWeight: 1000, color: '#0f172a', marginTop: 6 }}>{complaint?.business_name || '—'}</div>
+                  </div>
+
+                  {/* 3) Business address (read-only) */}
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#475569', marginTop: 0 }}>{complaint?.business_address || '—'}</div>
+                  </div>
+
+                  {/* 4) Complaint details (read-only) */}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Complaint Details</div>
+                    <div style={{ marginTop: 8, whiteSpace: 'pre-wrap', fontSize: 15, fontWeight: 800, color: '#0f172a', lineHeight: 1.65 }}>
+                      {complaint?.complaint_description || '—'}
+                    </div>
+                    {complaint?.id ? (
+                      <div style={{ marginTop: 12 }}>
+                        <a className="dash-btn" href={`/complaints/view?id=${complaint.id}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                          Open Full Complaint
+                        </a>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {/* 5) Date of inspection (editable) */}
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
+                    <label className="mo-label" htmlFor="dateInspection" style={{ fontSize: 13 }}>Date of Inspection</label>
+                    <input
+                      id="dateInspection"
+                      type="date"
+                      value={dateOfInspection}
+                      onChange={(e) => setDateOfInspection(e.target.value)}
+                      disabled={loading || isReadOnly}
+                      className="mo-title"
+                      style={{ fontSize: 16, fontWeight: 900, height: 46, borderRadius: 14 }}
+                    />
+                  </div>
+
+                  {/* 6) Date of issuance (read-only) */}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 12 }}>Date of Issuance</div>
+                    <div style={{ marginTop: 6, fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
+                      {missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'}
+                    </div>
+                  </div>
+                </div>
+              </Panel>
 
               {/* Unified DOCX actions inside the Preview panel header */}
               <div style={{ marginTop: 14, display: 'grid', gap: 14 }}>
