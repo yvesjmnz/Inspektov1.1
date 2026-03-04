@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { MapContainer, Marker, TileLayer } from 'react-leaflet';
+import L from 'leaflet';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
 import { supabase } from '../../../lib/supabase';
@@ -50,6 +52,16 @@ export default function InspectionSlipCreate() {
     cellphone: '',
     email: '',
   });
+
+  // Inspector device location (captured via browser geolocation)
+  const [inspectorLocation, setInspectorLocation] = useState({
+    lat: null,
+    lng: null,
+    accuracy: null,
+    capturedAt: null,
+  });
+  const [locationError, setLocationError] = useState('');
+  const [locationBusy, setLocationBusy] = useState(false);
 
   // Owner type affects autofill behavior for owner name fields
   const [ownerType, setOwnerType] = useState('sole'); // 'sole' | 'corp'
@@ -1008,6 +1020,58 @@ export default function InspectionSlipCreate() {
 
   const INSPECTION_BUCKET = 'inspection';
 
+  const requestInspectorLocation = () => {
+    if (!('geolocation' in navigator)) {
+      setLocationError('Geolocation is not supported by this browser/device.');
+      return Promise.resolve(null);
+    }
+
+    setLocationError('');
+    setLocationBusy(true);
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const accuracy = pos.coords.accuracy;
+          const capturedAt = new Date().toISOString();
+
+          setInspectorLocation({ lat, lng, accuracy, capturedAt });
+          setLocationBusy(false);
+          resolve({ lat, lng, accuracy, capturedAt });
+        },
+        (err) => {
+          const message =
+            err.code === err.PERMISSION_DENIED
+              ? 'Location permission was denied. Please enable it in your browser settings.'
+              : err.code === err.POSITION_UNAVAILABLE
+                ? 'Location is unavailable. Please try again.'
+                : 'Location request timed out. Please try again.';
+
+          setLocationError(message);
+          setLocationBusy(false);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      );
+    });
+  };
+
+  const inspectorLeafletIcon = useMemo(
+    () =>
+      L.icon({
+        iconUrl:
+          'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41],
+      }),
+    []
+  );
+
   const uploadToInspectionBucket = async ({ path, file, contentType }) => {
     const { error: upErr } = await supabase.storage
       .from(INSPECTION_BUCKET)
@@ -1135,6 +1199,12 @@ export default function InspectionSlipCreate() {
         owner_name: toOwnerNameString() || null,
         business_address: businessDetails.address || null,
 
+        // Inspector device location
+        inspector_lat: inspectorLocation.lat,
+        inspector_lng: inspectorLocation.lng,
+        inspector_location_accuracy_m: inspectorLocation.accuracy,
+        inspector_location_captured_at: inspectorLocation.capturedAt,
+
         business_permit_status: toDbStatus(checklist.business_permit),
         cctv_status: toDbStatus(checklist.with_cctv),
         signage_status: toDbStatus(checklist.signage_2sqm),
@@ -1201,6 +1271,9 @@ export default function InspectionSlipCreate() {
       const n = Number(String(businessDetails.estimatedAreaSqm || '').trim());
       if (!Number.isFinite(n) || n <= 0) missing.push('Estimated Area (SQM)');
     }
+
+    // Inspector device location required
+    if (inspectorLocation.lat == null || inspectorLocation.lng == null) missing.push('Inspector Device Location');
 
     // Photo evidence required (at least 1)
     if (!Array.isArray(evidencePhotos) || evidencePhotos.length === 0) missing.push('Photo Evidence');
@@ -1646,7 +1719,90 @@ export default function InspectionSlipCreate() {
                   <div className="is-card">
                     <div className="is-section-head">
                       <div>
-                        <p className="is-section-title">Step 1: Validate Business Permit</p>
+                        <p className="is-section-title">Step 1: Inspector Device Location</p>
+                        <p className="is-section-sub">
+                          Capture your current location to verify you are on-site during the inspection.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Device Location</label>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            className="mo-btn mo-btn-primary is-btn-primary"
+                            onClick={requestInspectorLocation}
+                            disabled={locationBusy || isCompleted}
+                            title="Capture current device location"
+                          >
+                            {locationBusy ? 'Capturing…' : 'Capture Location'}
+                          </button>
+
+                          {inspectorLocation.lat != null && inspectorLocation.lng != null ? (
+                            <span className="small-pill">✓ Location captured</span>
+                          ) : (
+                            <span className="small-pill">Not set</span>
+                          )}
+                        </div>
+
+                        {locationError ? (
+                          <div className="mo-alert mo-alert-error" style={{ marginTop: 10 }}>
+                            {locationError}
+                          </div>
+                        ) : null}
+
+                        <div className="mo-meta" style={{ marginTop: 10 }}>
+                          {inspectorLocation.lat != null && inspectorLocation.lng != null ? (
+                            <>
+                              Accuracy: {inspectorLocation.accuracy != null ? `±${Math.round(inspectorLocation.accuracy)}m` : '—'}
+                              {inspectorLocation.capturedAt ? ` | Captured: ${new Date(inspectorLocation.capturedAt).toLocaleString()}` : ''}
+                            </>
+                          ) : (
+                            <>Capture your location and verify it on the map. This will be saved with the inspection slip.</>
+                          )}
+                        </div>
+
+                        {inspectorLocation.lat != null && inspectorLocation.lng != null ? (
+                          <div
+                            className="map-box"
+                            style={{
+                              height: 320,
+                              width: '100%',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: 12,
+                              overflow: 'hidden',
+                              background: '#fff',
+                              marginTop: 10,
+                            }}
+                          >
+                            <MapContainer
+                              center={[inspectorLocation.lat, inspectorLocation.lng]}
+                              zoom={18}
+                              style={{ height: '100%', width: '100%' }}
+                              scrollWheelZoom={false}
+                            >
+                              <TileLayer
+                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                              />
+                              <Marker
+                                position={[inspectorLocation.lat, inspectorLocation.lng]}
+                                title="Inspector Location"
+                                icon={inspectorLeafletIcon}
+                              />
+                            </MapContainer>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="is-card">
+                    <div className="is-section-head">
+                      <div>
+                        <p className="is-section-title">Step 2: Validate Business Permit</p>
                         <p className="is-section-sub">Select owner type, then search a registered business to autofill.</p>
                       </div>
                     </div>
