@@ -419,13 +419,20 @@ export default function DashboardHeadInspector() {
 
       // Keep the creation template aligned with the editor's default template.
       // Use placeholders so MissionOrderEditor can auto-inject locked spans for inspectors/business fields.
+      const complaintSubmittedDate = (() => {
+        const dtRaw = row?.created_at || complaint?.created_at;
+        const dt = dtRaw ? new Date(dtRaw) : null;
+        if (!dt || Number.isNaN(dt.getTime())) return '[INSERT DATE]';
+        return dt.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase();
+      })();
+
       const content = [
         '<div style="font-family: \"Times New Roman\", Times, serif; line-height: 1.25; font-size: 12px; color: #000;">',
         '<p style="text-align:center; font-weight: 800; letter-spacing: 0.5px; margin: 0 0 10px 0;">MISSION ORDER</p>',
         '<p style="margin: 0 0 14px 0;"><strong>TO:</strong>&nbsp; FIELD INSPECTOR [INSPECTOR NAME]</p>',
         '<p style="margin: 0 0 12px 0;"><strong>SUBJECT:</strong>&nbsp; TO CONDUCT INSPECTION ON THE BUSINESS ESTABLISHMENT IDENTIFIED AS [BUSINESS NAME], WITH ADDRESS AT [ADDRESS].</p>',
         '<p style="margin: 0 0 12px 0; text-align: justify;">',
-        'THE CONDUCT OF THIS INSPECTION IS DEEMED NECESSARY IN VIEW OF THE LETTER-COMPLAINT RECEIVED VIA E-MAIL DATED [INSERT DATE] FROM A CONCERNED CITIZEN REGARDING THE OPERATION OF THE ABOVE-MENTIONED BUSINESS ESTABLISHMENT. COMPLAINT DETAILS: ',
+        `THE CONDUCT OF THIS INSPECTION IS DEEMED NECESSARY IN VIEW OF THE LETTER-COMPLAINT RECEIVED VIA INSPEKTO COMPLAINT MANAGEMENT SYSTEM DATED ${complaintSubmittedDate} FROM A CONCERNED CITIZEN REGARDING THE OPERATION OF THE ABOVE-MENTIONED BUSINESS ESTABLISHMENT. COMPLAINT DETAILS: `,
         complaintDesc || '',
         '</p>',
         '<table style="width: 100%; border-collapse: collapse; margin: 8px 0 14px 0;">',

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { saveAs } from 'file-saver';
 import DashboardSidebar from '../../../components/DashboardSidebar';
 import { supabase } from '../../../lib/supabase';
@@ -119,12 +119,19 @@ export default function MissionOrderEditor() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
 
+  // Debounce DOCX regeneration to avoid generating on every single add/remove click.
+  const autoRegenTimerRef = useRef(null);
+
   const [missionOrder, setMissionOrder] = useState(null);
   const [complaint, setComplaint] = useState(null);
 
   const [inspectors, setInspectors] = useState([]);
   const [assignedInspectorIds, setAssignedInspectorIds] = useState([]);
   const [selectedInspectorId, setSelectedInspectorId] = useState('');
+
+  const [ordinances, setOrdinances] = useState([]);
+  const [assignedOrdinanceIds, setAssignedOrdinanceIds] = useState([]);
+  const [selectedOrdinanceId, setSelectedOrdinanceId] = useState('');
 
   const [dateOfInspection, setDateOfInspection] = useState('');
 
@@ -229,6 +236,29 @@ export default function MissionOrderEditor() {
       if (assignedError) throw assignedError;
       setAssignedInspectorIds(Array.from(new Set((assignedRows || []).map((r) => r.inspector_id).filter(Boolean))));
 
+      const { data: ordinancesData, error: ordError } = await supabase
+        .from('ordinances')
+        .select('id, code_number, title, description, created_at')
+        .order('code_number', { ascending: true });
+      if (ordError) throw ordError;
+      setOrdinances(ordinancesData || []);
+
+      const { data: assignedOrdRows, error: assignedOrdError } = await supabase
+        .from('mission_order_ordinances')
+        .select('ordinance_id, created_at')
+        .eq('mission_order_id', missionOrderId)
+        .order('created_at', { ascending: true });
+      if (assignedOrdError) throw assignedOrdError;
+      setAssignedOrdinanceIds(Array.from(new Set((assignedOrdRows || []).map((r) => r.ordinance_id).filter(Boolean))));
+
+      // Keep the local list of ordinances in sync even if ordinances were created while this page is open.
+      // (Needed for DOCX + chips labeling.)
+      setOrdinances((prev) => {
+        const next = ordinancesData || [];
+        const prevLen = (prev || []).length;
+        return prevLen === next.length ? prev : next;
+      });
+
       // If doc exists, default open the preview panel (reduces clicks)
       if (mo?.generated_docx_url) {
         setDocxPreviewOpen(true);
@@ -239,6 +269,8 @@ export default function MissionOrderEditor() {
       setComplaint(null);
       setInspectors([]);
       setAssignedInspectorIds([]);
+      setOrdinances([]);
+      setAssignedOrdinanceIds([]);
     } finally {
       setLoading(false);
     }
@@ -256,6 +288,20 @@ export default function MissionOrderEditor() {
       .filter(Boolean)
       .join(', ');
   }, [assignedInspectorIds, inspectors]);
+
+  const assignedOrdinanceLabels = useMemo(() => {
+    const uniqueIds = Array.from(new Set(assignedOrdinanceIds.filter(Boolean)));
+    return uniqueIds
+      .map((id) => {
+        const o = ordinances.find((x) => x.id === id);
+        if (!o) return null;
+        const code = o.code_number ? String(o.code_number).trim() : '';
+        const title = o.title ? String(o.title).trim() : '';
+        return code && title ? `${code} — ${title}` : code || title || id;
+      })
+      .filter(Boolean)
+      .join(', ');
+  }, [assignedOrdinanceIds, ordinances]);
 
   const canSave = !loading && !!missionOrderId && !isReadOnly;
   const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection;
@@ -363,6 +409,9 @@ export default function MissionOrderEditor() {
       setAssignedInspectorIds((prev) => Array.from(new Set([...prev, inspectorId])));
       setSelectedInspectorId('');
       setToast('Inspector added');
+
+      // Keep DOCX in sync if a doc already exists
+      maybeAutoRegenerateDocx();
     } catch (e) {
       setError(e?.message || 'Failed to add inspector.');
     }
@@ -384,16 +433,82 @@ export default function MissionOrderEditor() {
 
       setAssignedInspectorIds((prev) => prev.filter((id) => id !== inspectorId));
       setToast('Removed');
+
+      // Keep DOCX in sync if a doc already exists
+      maybeAutoRegenerateDocx();
     } catch (e) {
       setError(e?.message || 'Failed to remove inspector.');
     }
   };
 
-  const handleGenerateDocx = async () => {
-    if (!canGenerateDocx) return;
+  const addOrdinance = async () => {
+    if (!missionOrderId || !selectedOrdinanceId) return;
 
     setError('');
     setToast('');
+
+    try {
+      const ordinanceId = selectedOrdinanceId;
+
+      const { data: existing, error: existingError } = await supabase
+        .from('mission_order_ordinances')
+        .select('id')
+        .eq('mission_order_id', missionOrderId)
+        .eq('ordinance_id', ordinanceId)
+        .limit(1);
+      if (existingError) throw existingError;
+      if (existing && existing.length > 0) {
+        setToast('Already added');
+        return;
+      }
+
+      const { error: insertError } = await supabase
+        .from('mission_order_ordinances')
+        .insert([{ mission_order_id: missionOrderId, ordinance_id: ordinanceId }]);
+      if (insertError) throw insertError;
+
+      setAssignedOrdinanceIds((prev) => Array.from(new Set([...prev, ordinanceId])));
+      setSelectedOrdinanceId('');
+      setToast('Ordinance added');
+
+      // Keep DOCX in sync if a doc already exists
+      maybeAutoRegenerateDocx();
+    } catch (e) {
+      setError(e?.message || 'Failed to add ordinance.');
+    }
+  };
+
+  const removeOrdinance = async (ordinanceId) => {
+    if (!missionOrderId) return;
+
+    setError('');
+    setToast('');
+
+    try {
+      const { error: delError } = await supabase
+        .from('mission_order_ordinances')
+        .delete()
+        .eq('mission_order_id', missionOrderId)
+        .eq('ordinance_id', ordinanceId);
+      if (delError) throw delError;
+
+      setAssignedOrdinanceIds((prev) => prev.filter((id) => id !== ordinanceId));
+      setToast('Removed');
+
+      // Keep DOCX in sync if a doc already exists
+      maybeAutoRegenerateDocx();
+    } catch (e) {
+      setError(e?.message || 'Failed to remove ordinance.');
+    }
+  };
+
+  const handleGenerateDocx = async (opts = {}) => {
+    const silent = !!opts.silent;
+
+    if (!canGenerateDocx) return;
+
+    setError('');
+    if (!silent) setToast('');
     setGeneratingDocx(true);
 
     try {
@@ -453,14 +568,88 @@ export default function MissionOrderEditor() {
       if (signTplErr) throw signTplErr;
       if (!signedTemplate?.signedUrl) throw new Error('Failed to create signed URL for mission order template.');
 
+      // Re-fetch inspector assignments to avoid stale React state (auto-regenerate runs right after setState).
+      const { data: assignedRows, error: assignedError } = await supabase
+        .from('mission_order_assignments')
+        .select('inspector_id, assigned_at')
+        .eq('mission_order_id', missionOrderId)
+        .order('assigned_at', { ascending: true });
+      if (assignedError) throw assignedError;
+
+      const assignedInspectorIdsFresh = Array.from(new Set((assignedRows || []).map((r) => r.inspector_id).filter(Boolean)));
+
+      // If inspector profiles aren't loaded yet (or missing), fetch names directly.
+      const missingInspectorIds = assignedInspectorIdsFresh.filter((id) => !inspectors.find((x) => x.id === id));
+      const { data: inspectorProfilesFresh, error: inspectorProfilesErr } = missingInspectorIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', missingInspectorIds)
+        : { data: [], error: null };
+      if (inspectorProfilesErr) throw inspectorProfilesErr;
+
+      const inspectorNameById = new Map([
+        ...(inspectors || []).map((p) => [p.id, p.full_name]),
+        ...(inspectorProfilesFresh || []).map((p) => [p.id, p.full_name]),
+      ]);
+
+      const assignedInspectorNamesFresh = assignedInspectorIdsFresh
+        .map((id) => inspectorNameById.get(id))
+        .filter(Boolean)
+        .join(', ');
+
+      // Fetch assigned ordinances for this mission order and format them for the template.
+      const { data: assignedOrdRows, error: assignedOrdError } = await supabase
+        .from('mission_order_ordinances')
+        .select('ordinance_id, created_at')
+        .eq('mission_order_id', missionOrderId)
+        .order('created_at', { ascending: true });
+      if (assignedOrdError) throw assignedOrdError;
+
+      const assignedOrdIds = Array.from(new Set((assignedOrdRows || []).map((r) => r.ordinance_id).filter(Boolean)));
+      const ordById = new Map((ordinances || []).map((o) => [o.id, o]));
+
+      // If some ordinance IDs aren't in state (rare), fetch them.
+      const missingOrdIds = assignedOrdIds.filter((id) => !ordById.has(id));
+      const { data: missingOrds, error: missingOrdsErr } = missingOrdIds.length
+        ? await supabase
+            .from('ordinances')
+            .select('id, code_number, title, description')
+            .in('id', missingOrdIds)
+        : { data: [], error: null };
+      if (missingOrdsErr) throw missingOrdsErr;
+
+      (missingOrds || []).forEach((o) => ordById.set(o.id, o));
+
+      const ordinancesText = assignedOrdIds
+        .map((id) => {
+          const o = ordById.get(id);
+          if (!o) return null;
+          const code = o.code_number ? String(o.code_number).trim() : '';
+          const title = o.title ? String(o.title).trim() : '';
+          const desc = o.description ? String(o.description).trim() : '';
+
+          // Format like: "Ordinance No. 3532 (Title) - Description"
+          const head = code ? `Ordinance No. ${code}` : 'Ordinance';
+          const mid = title ? ` (${title})` : '';
+          const tail = desc ? ` - ${desc}` : '';
+          return `${head}${mid}${tail}`;
+        })
+        .filter(Boolean)
+        .join('\n');
+
+      const complaintDetailsForDocx = ordinancesText
+        ? `CITY ORDINANCES VIOLATED:\n${ordinancesText}`
+        : (c?.complaint_description || '—');
+
       const blob = await generateMissionOrderDocx({
         templateUrl: signedTemplate.signedUrl,
-        inspectors: assignedInspectorNames || '—',
+        inspectors: assignedInspectorNamesFresh || '—',
         date_of_inspection: fresh.date_of_inspection,
         date_of_issuance: fresh.date_of_issuance,
         business_name: c?.business_name,
         business_address: c?.business_address,
-        complaint_details: c?.complaint_description,
+        complaint_details: complaintDetailsForDocx,
         director_signature_url: directorSignatureUrl,
       });
 
@@ -469,7 +658,13 @@ export default function MissionOrderEditor() {
       const userId = userData?.user?.id;
       if (!userId) throw new Error('Not authenticated. Please login again.');
 
-      const fileName = buildMissionOrderDocxFileName({ business_name: c?.business_name, mission_order_id: fresh.id });
+      const nowIso = new Date().toISOString();
+
+      // Use a unique object path per generation to avoid CDN/browser/Office viewer caching
+      // when overwriting the same storage key.
+      const fileNameBase = buildMissionOrderDocxFileName({ business_name: c?.business_name, mission_order_id: fresh.id }).replace(/\.docx$/i, '');
+      const genStamp = String(nowIso).replace(/[:.]/g, '-');
+      const fileName = `${fileNameBase}-${genStamp}.docx`;
 
       const bucket = 'mission-orders';
       const objectPath = `${fresh.id}/${fileName}`;
@@ -485,8 +680,6 @@ export default function MissionOrderEditor() {
       const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(objectPath);
       const publicUrl = publicData?.publicUrl;
       if (!publicUrl) throw new Error('Failed to get public URL for uploaded DOCX.');
-
-      const nowIso = new Date().toISOString();
       const patch = {
         generated_docx_url: publicUrl,
         generated_docx_created_at: nowIso,
@@ -503,12 +696,41 @@ export default function MissionOrderEditor() {
       setDocxPreviewOpen(true);
       setDocxPreviewError(false);
 
-      setToast('DOCX ready');
+      if (!silent) setToast('DOCX ready');
     } catch (e) {
-      setError(e?.message || 'Failed to generate DOCX.');
+      // When auto-regenerating, don’t block the user with errors unless they explicitly clicked.
+      if (!silent) setError(e?.message || 'Failed to generate DOCX.');
+      if (!silent) setToast('');
     } finally {
       setGeneratingDocx(false);
     }
+  };
+
+  const maybeAutoRegenerateDocx = () => {
+    // Only regenerate if a document already exists AND regeneration is allowed in this state.
+    if (!missionOrder?.generated_docx_url) return;
+    if (!canGenerateDocx) return;
+
+    // If a regeneration is currently running, let it finish.
+    if (generatingDocx) return;
+
+    // Debounce: if multiple edits happen quickly, only regenerate once.
+    if (autoRegenTimerRef.current) {
+      clearTimeout(autoRegenTimerRef.current);
+      autoRegenTimerRef.current = null;
+    }
+
+    setToast('Updating document…');
+
+    autoRegenTimerRef.current = setTimeout(async () => {
+      autoRegenTimerRef.current = null;
+      try {
+        await handleGenerateDocx({ silent: true });
+        setToast('Document updated');
+      } catch {
+        setToast('Auto-update failed');
+      }
+    }, 1500);
   };
 
   const handleDownloadDocx = async () => {
@@ -545,7 +767,14 @@ export default function MissionOrderEditor() {
     }
   };
 
-  const officeViewerUrl = useMemo(() => buildOfficeViewerUrl(missionOrder?.generated_docx_url), [missionOrder?.generated_docx_url]);
+  const officeViewerUrl = useMemo(() => {
+    // Cache-bust viewer so iframe refreshes even if storage public URL doesn't change.
+    const u = buildOfficeViewerUrl(missionOrder?.generated_docx_url);
+    if (!u) return '';
+    const sep = u.includes('?') ? '&' : '?';
+    const v = encodeURIComponent(String(missionOrder?.generated_docx_created_at || missionOrder?.updated_at || Date.now()));
+    return `${u}${sep}v=${v}`;
+  }, [missionOrder?.generated_docx_url, missionOrder?.generated_docx_created_at, missionOrder?.updated_at]);
 
   return (
     <div className="dash-container" style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif' }}>
@@ -659,6 +888,18 @@ export default function MissionOrderEditor() {
                   <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 14 }}>{assignedInspectorNames || '—'}</span>
                 </div>
 
+                {/* Ordinances */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                  <span aria-hidden="true" style={{ color: '#0b2249' }}>
+                    {/* Document icon */}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M7 2h7l5 5v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V8h4.5L14 3.5ZM8 12h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Zm0 4h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Z" fill="#0b2249"/>
+                    </svg>
+                  </span>
+                  <span style={{ color: '#475569', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Ordinances:</span>
+                  <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 14 }}>{assignedOrdinanceLabels || '—'}</span>
+                </div>
+
                 {/* Inspection Date */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
                   <span aria-hidden="true" style={{ color: '#0b2249' }}>
@@ -734,6 +975,65 @@ export default function MissionOrderEditor() {
                       </div>
                     ) : (
                       <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>No inspectors assigned yet.</div>
+                    )}
+                  </div>
+
+                  {/* 2) City ordinances violated (editable) */}
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
+                    <div style={{ fontWeight: 900, fontSize: 13, color: '#0f172a' }}>City Ordinances Violated</div>
+                    {!isReadOnly ? (
+                      <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
+                        <select
+                          className="mo-select"
+                          value={selectedOrdinanceId}
+                          onChange={(e) => setSelectedOrdinanceId(e.target.value)}
+                          disabled={loading}
+                          style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', height: 46, fontWeight: 900, fontSize: 15 }}
+                        >
+                          <option value="">Select ordinance…</option>
+                          {ordinances.map((o) => {
+                            const code = o.code_number ? String(o.code_number).trim() : '';
+                            const title = o.title ? String(o.title).trim() : '';
+                            const label = code && title ? `${code} — ${title}` : code || title || o.id;
+                            return (
+                              <option key={o.id} value={o.id}>
+                                {label}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <button type="button" className="dash-btn" onClick={addOrdinance} disabled={loading || !selectedOrdinanceId}>
+                          Add
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {assignedOrdinanceIds.length > 0 ? (
+                      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {assignedOrdinanceIds.map((id) => {
+                          const o = ordinances.find((x) => x.id === id);
+                          const code = o?.code_number ? String(o.code_number).trim() : '';
+                          const title = o?.title ? String(o.title).trim() : '';
+                          const label = o ? (code && title ? `${code} — ${title}` : code || title || id) : id;
+                          const tip = !isReadOnly && o?.description ? o.description : (isReadOnly ? '' : 'Click to remove');
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              className="mo-chip"
+                              title={tip}
+                              onClick={() => (isReadOnly ? null : removeOrdinance(id))}
+                              disabled={isReadOnly}
+                              style={{ fontSize: 14, fontWeight: 1000 }}
+                            >
+                              <span className="mo-chip-label">{label}</span>
+                              {!isReadOnly ? <span aria-hidden="true" className="mo-chip-x">×</span> : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>No ordinances added yet.</div>
                     )}
                   </div>
 
