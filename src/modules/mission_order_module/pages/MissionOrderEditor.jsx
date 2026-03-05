@@ -684,8 +684,12 @@ export default function MissionOrderEditor() {
       if (uploadErr) throw uploadErr;
 
       const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(objectPath);
-      const publicUrl = publicData?.publicUrl;
-      if (!publicUrl) throw new Error('Failed to get public URL for uploaded DOCX.');
+      const baseUrl = publicData?.publicUrl;
+      if (!baseUrl) throw new Error('Failed to get public URL for uploaded DOCX.');
+
+      // Cache-bust the *document URL* itself so Office viewer refetches after overwrites.
+      const publicUrl = `${baseUrl}?v=${encodeURIComponent(nowIso)}`;
+
       const patch = {
         generated_docx_url: publicUrl,
         generated_docx_created_at: nowIso,
@@ -776,15 +780,7 @@ export default function MissionOrderEditor() {
     }
   };
 
-  const officeViewerUrl = useMemo(() => {
-    // Cache-bust viewer so iframe refreshes even if storage public URL doesn't change.
-    // We include both timestamp + a short random salt when doc is regenerated in this session.
-    const u = buildOfficeViewerUrl(missionOrder?.generated_docx_url);
-    if (!u) return '';
-    const sep = u.includes('?') ? '&' : '?';
-    const v = encodeURIComponent(String(missionOrder?.generated_docx_created_at || missionOrder?.updated_at || Date.now()));
-    return `${u}${sep}v=${v}`;
-  }, [missionOrder?.generated_docx_url, missionOrder?.generated_docx_created_at, missionOrder?.updated_at]);
+  const officeViewerUrl = useMemo(() => buildOfficeViewerUrl(missionOrder?.generated_docx_url), [missionOrder?.generated_docx_url]);
 
   return (
     <div className="dash-container" style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif' }}>
