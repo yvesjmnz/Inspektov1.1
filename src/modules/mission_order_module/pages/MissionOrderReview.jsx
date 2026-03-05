@@ -316,6 +316,89 @@ export default function MissionOrderReview() {
       const { error: updateError } = await supabase.from('mission_orders').update(patch).eq('id', missionOrderId);
       if (updateError) throw updateError;
 
+      // Automatic replacement: on approval, generate SIGNED DOCX and overwrite the previously generated UNSIGNED doc.
+      if (nextStatus === 'for inspection') {
+        const { data: fresh, error: freshErr } = await supabase
+          .from('mission_orders')
+          .select('id, complaint_id, status, director_signature_url, date_of_inspection, date_of_issuance')
+          .eq('id', missionOrderId)
+          .single();
+        if (freshErr) throw freshErr;
+
+        const { data: c, error: cErr } = await supabase
+          .from('complaints')
+          .select('id, business_name, business_address, complaint_description')
+          .eq('id', fresh.complaint_id)
+          .single();
+        if (cErr) throw cErr;
+
+        // If signature url points to private storage, attempt to sign. Best-effort.
+        let directorSignatureUrl = fresh?.director_signature_url || null;
+        try {
+          const u = String(directorSignatureUrl || '');
+          if (u && u.includes('/storage/v1/object/') && u.includes('/private/')) {
+            const m2 = u.match(/\/storage\/v1\/object\/private\/([^/]+)\/(.+)$/i);
+            if (m2) {
+              const bucket = m2[1];
+              const path = decodeURIComponent(m2[2]);
+              const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+              if (signed?.signedUrl) directorSignatureUrl = signed.signedUrl;
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        // Signed template
+        const templatePath = 'templates/MISSION-ORDER-TEMPLATE.docx';
+        const { data: signedTemplate, error: signTplErr } = await supabase.storage
+          .from('mission-orders')
+          .createSignedUrl(templatePath, 60);
+        if (signTplErr) throw signTplErr;
+        if (!signedTemplate?.signedUrl) throw new Error('Failed to create signed URL for mission order template.');
+
+        // Lazy import so we don’t pay docx bundle cost unless approving.
+        const { generateMissionOrderDocx } = await import('../lib/docx_template');
+
+        const blob = await generateMissionOrderDocx({
+          templateUrl: signedTemplate.signedUrl,
+          inspectors: assignedInspectorNames || '—',
+          date_of_inspection: fresh.date_of_inspection,
+          date_of_issuance: fresh.date_of_issuance,
+          business_name: c?.business_name,
+          business_address: c?.business_address,
+          complaint_details: c?.complaint_description,
+          director_signature_url: directorSignatureUrl,
+        });
+
+        const bucket = 'mission-orders';
+        const objectPath = `${fresh.id}/MISSION-ORDER.docx`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from(bucket)
+          .upload(objectPath, blob, {
+            contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            upsert: true,
+          });
+        if (uploadErr) throw uploadErr;
+
+        const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+        const publicUrl = publicData?.publicUrl;
+        if (!publicUrl) throw new Error('Failed to get public URL for uploaded DOCX.');
+
+        const nowIso2 = new Date().toISOString();
+        const { error: patchDocErr } = await supabase
+          .from('mission_orders')
+          .update({
+            generated_docx_url: publicUrl,
+            generated_docx_created_at: nowIso2,
+            generated_docx_created_by: userId,
+            updated_at: nowIso2,
+          })
+          .eq('id', fresh.id);
+        if (patchDocErr) throw patchDocErr;
+      }
+
       setMissionOrder((prev) => ({ ...(prev || {}), ...patch }));
       setToast(nextStatus === 'for inspection' ? 'Approved' : 'Rejected');
       await load();
@@ -342,7 +425,16 @@ export default function MissionOrderReview() {
     await updateMissionOrderDecision('cancelled');
   };
 
-  const officeViewerUrl = useMemo(() => buildOfficeViewerUrl(missionOrder?.generated_docx_url), [missionOrder?.generated_docx_url]);
+  const officeViewerUrl = useMemo(() => {
+    const u = buildOfficeViewerUrl(missionOrder?.generated_docx_url);
+    if (!u) return '';
+
+    // Cache-bust: Office viewer + browser can keep showing the old doc when the storage object is overwritten.
+    // We append a version derived from generated_docx_created_at/updated_at so the iframe reloads.
+    const sep = u.includes('?') ? '&' : '?';
+    const v = encodeURIComponent(String(missionOrder?.generated_docx_created_at || missionOrder?.updated_at || Date.now()));
+    return `${u}${sep}v=${v}`;
+  }, [missionOrder?.generated_docx_url, missionOrder?.generated_docx_created_at, missionOrder?.updated_at]);
 
   return (
     <div className="dash-container" style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif' }}>
@@ -499,6 +591,7 @@ export default function MissionOrderReview() {
                       ) : null}
 
                       <iframe
+                        key={officeViewerUrl}
                         title="DOCX Preview"
                         src={officeViewerUrl}
                         style={{ width: '100%', height: 560, border: '1px solid #e2e8f0', borderRadius: 14, background: '#fff' }}

@@ -306,7 +306,9 @@ export default function MissionOrderEditor() {
   const canSave = !loading && !!missionOrderId && !isReadOnly;
   const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection;
   const isDraft = String(status).toLowerCase() === 'draft';
-  const canGenerateDocx = !loading && !!missionOrderId && (isDraft || isApproved || isAwaitingSignature);
+  // Allow generating an UNSIGNED doc even after submit (issued), so the director can see the latest draft output.
+  // Director approval will overwrite it with the SIGNED template automatically.
+  const canGenerateDocx = !loading && !!missionOrderId && (isDraft || isSubmitted || isApproved || isAwaitingSignature);
 
   const saveMissionOrder = async () => {
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -561,7 +563,13 @@ export default function MissionOrderEditor() {
         // ignore
       }
 
-      const templatePath = 'templates/MISSION-ORDER-TEMPLATE.docx';
+      // Template selection:
+      // - Draft / Issued: UNSIGNED template
+      // - Approved / Awaiting Signature: SIGNED template
+      const templatePath = isCurrentlyDraft || freshStatus === 'issued'
+        ? 'templates/MISSION-ORDER-TEMPLATE-UNSIGNED.docx'
+        : 'templates/MISSION-ORDER-TEMPLATE.docx';
+
       const { data: signedTemplate, error: signTplErr } = await supabase.storage
         .from('mission-orders')
         .createSignedUrl(templatePath, 60);
@@ -660,14 +668,12 @@ export default function MissionOrderEditor() {
 
       const nowIso = new Date().toISOString();
 
-      // Use a unique object path per generation to avoid CDN/browser/Office viewer caching
-      // when overwriting the same storage key.
-      const fileNameBase = buildMissionOrderDocxFileName({ business_name: c?.business_name, mission_order_id: fresh.id }).replace(/\.docx$/i, '');
-      const genStamp = String(nowIso).replace(/[:.]/g, '-');
-      const fileName = `${fileNameBase}-${genStamp}.docx`;
+      // Stable object path per mission order.
+      // This enables Director approval to overwrite the UNSIGNED doc with the SIGNED one.
+      const fileName = buildMissionOrderDocxFileName({ business_name: c?.business_name, mission_order_id: fresh.id });
 
       const bucket = 'mission-orders';
-      const objectPath = `${fresh.id}/${fileName}`;
+      const objectPath = `${fresh.id}/MISSION-ORDER.docx`;
 
       const { error: uploadErr } = await supabase.storage
         .from(bucket)
@@ -696,7 +702,10 @@ export default function MissionOrderEditor() {
       setDocxPreviewOpen(true);
       setDocxPreviewError(false);
 
-      if (!silent) setToast('DOCX ready');
+      if (!silent) {
+        const wasUnsigned = isCurrentlyDraft || freshStatus === 'issued';
+        setToast(wasUnsigned ? 'Unsigned DOCX ready' : 'Signed DOCX ready');
+      }
     } catch (e) {
       // When auto-regenerating, don’t block the user with errors unless they explicitly clicked.
       if (!silent) setError(e?.message || 'Failed to generate DOCX.');
@@ -769,6 +778,7 @@ export default function MissionOrderEditor() {
 
   const officeViewerUrl = useMemo(() => {
     // Cache-bust viewer so iframe refreshes even if storage public URL doesn't change.
+    // We include both timestamp + a short random salt when doc is regenerated in this session.
     const u = buildOfficeViewerUrl(missionOrder?.generated_docx_url);
     if (!u) return '';
     const sep = u.includes('?') ? '&' : '?';
@@ -1150,6 +1160,7 @@ export default function MissionOrderEditor() {
                       ) : null}
 
                       <iframe
+                        key={officeViewerUrl}
                         title="DOCX Preview"
                         src={officeViewerUrl}
                         style={{ width: '100%', height: 560, border: '1px solid #e2e8f0', borderRadius: 14, background: '#fff' }}
