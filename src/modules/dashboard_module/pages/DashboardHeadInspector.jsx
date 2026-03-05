@@ -21,9 +21,13 @@ function statusBadgeClass(status) {
   // draft -> neutral/info
   // issued -> warning (queued for Director)
   // for inspection -> success (approved and actionable)
+  // awaiting_signature -> accent
+  // complete -> success
   // cancelled -> danger
   if (s === 'for inspection' || s === 'for_inspection') return 'status-badge status-success';
   if (s === 'issued') return 'status-badge status-warning';
+  if (s === 'awaiting_signature') return 'status-badge status-accent';
+  if (s === 'complete') return 'status-badge status-success';
   if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
   if (s === 'draft') return 'status-badge status-info';
 
@@ -223,7 +227,7 @@ export default function DashboardHeadInspector() {
       const { data: missionOrders, error: moError } = complaintIds.length
         ? await supabase
             .from('mission_orders')
-            .select('id, complaint_id, status, created_at, date_of_inspection')
+            .select('id, complaint_id, status, created_at, date_of_inspection, updated_at, secretary_signed_at')
             .in('complaint_id', complaintIds)
             .order('created_at', { ascending: false })
             .limit(500)
@@ -299,6 +303,8 @@ export default function DashboardHeadInspector() {
           mission_order_status: mo?.status || null,
           mission_order_created_at: mo?.created_at || null,
           date_of_inspection: mo?.date_of_inspection || null,
+          mission_order_updated_at: mo?.updated_at || null,
+          secretary_signed_at: mo?.secretary_signed_at || null,
           inspector_names: mo?.id ? inspectorNamesByMissionOrderId.get(mo.id) || [] : [],
         };
       });
@@ -380,6 +386,54 @@ export default function DashboardHeadInspector() {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+
+  const archiveMissionOrder = async (missionOrderId) => {
+    setError('');
+    setToast('');
+
+    if (!missionOrderId) {
+      setError('No Mission Order found for this record.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const nowIso = new Date().toISOString();
+
+      const patch = {
+        status: 'complete',
+        updated_at: nowIso,
+        secretary_signed_at: nowIso,
+      };
+
+      const { error: updateError } = await supabase
+        .from('mission_orders')
+        .update(patch)
+        .eq('id', missionOrderId);
+
+      if (updateError) throw updateError;
+
+      // Optimistic local update so it disappears from Awaiting Signature and appears in History.
+      setComplaints((prev) =>
+        (prev || []).map((r) =>
+          r.mission_order_id === missionOrderId
+            ? {
+                ...r,
+                mission_order_status: 'complete',
+                mission_order_updated_at: nowIso,
+                secretary_signed_at: nowIso,
+              }
+            : r
+        )
+      );
+
+      setToast('Mission order archived.');
+    } catch (e) {
+      setError(e?.message || 'Failed to archive mission order.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const createMissionOrder = async (complaintId, currentTab = 'todo') => {
     setError('');
@@ -503,7 +557,8 @@ export default function DashboardHeadInspector() {
       if (tab === 'todo') return !s || s === 'draft';
       if (tab === 'results') return s === 'issued' || s === 'for inspection' || s === 'for_inspection' || s === 'cancelled' || s === 'canceled';
       if (tab === 'for-inspection') return s === 'awaiting_signature';
-      if (tab === 'revisions') return s === 'cancelled' || s === 'canceled';
+      // Mission Order History: only completed/accomplished mission orders
+      if (tab === 'revisions') return s === 'complete';
       return true;
     });
 
@@ -1355,6 +1410,12 @@ export default function DashboardHeadInspector() {
                                             fontSize: 12,
                                             cursor: 'pointer',
                                             transition: 'background-color 0.2s ease',
+                                            opacity: loading ? 0.75 : 1,
+                                          }}
+                                          disabled={loading}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            archiveMissionOrder(c.mission_order_id);
                                           }}
                                           onMouseEnter={(e) => {
                                             e.currentTarget.style.background = '#059669';
@@ -1363,7 +1424,7 @@ export default function DashboardHeadInspector() {
                                             e.currentTarget.style.background = '#10b981';
                                           }}
                                         >
-                                          Archive
+                                          {loading ? 'Archiving…' : 'Archive'}
                                         </button>
                                       </td>
                                     </tr>
@@ -1408,7 +1469,7 @@ export default function DashboardHeadInspector() {
                                               </div>
                                             </div>
 
-                                            {/* Box 3: Pre-Approval */}
+                                            {/* Box 3: Mission Order Created */}
                                             <div style={{
                                               background: '#ffffff',
                                               border: '1px solid #e2e8f0',
@@ -1422,7 +1483,7 @@ export default function DashboardHeadInspector() {
                                                 {c.mission_order_created_at ? new Date(c.mission_order_created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.mission_order_created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
                                               </div>
                                               <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-                                                Mission Order Pre-Approved by Director
+                                                Mission Order Created
                                               </div>
                                             </div>
                                           </div>
@@ -1448,7 +1509,6 @@ export default function DashboardHeadInspector() {
                   ) : (
                     complaintsByDay.sortedKeys.map((dayKey) => {
                       const dayGroup = complaintsByDay.groups[dayKey];
-                      const label = dayGroup?.label || dayKey;
                       const count = dayGroup?.items?.length || 0;
                       if (count === 0) return null;
 
@@ -1475,9 +1535,9 @@ export default function DashboardHeadInspector() {
                             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                               {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
                             </h3>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
-                              <span>{count} {tab === 'issued' ? 'Issued' : tab === 'for-inspection' ? 'For Inspection' : 'For Revisions'}</span>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#10b981', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}></div>
+                              <span>{count} Completed Mission Order{count !== 1 ? 's' : ''}</span>
                             </div>
                           </div>
 
@@ -1486,58 +1546,176 @@ export default function DashboardHeadInspector() {
                             <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                               <thead>
                                 <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                                  <th style={{ width: 120 }}>Complaint ID</th>
-                                  <th>Business & Address</th>
-                                  <th style={{ width: 180 }}>MO Status</th>
-                                  <th style={{ width: 220 }}>Approved</th>
-                                  <th style={{ width: 220 }}>Submitted</th>
-                                  <th style={{ width: 220 }}>Action</th>
-                                  <th style={{ width: 260 }}>Inspectors</th>
+                                  <th style={{ width: 40, padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: 12, color: '#64748b' }}></th>
+                                  <th style={{ width: 150, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                                  <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspection Date</th>
+                                  <th style={{ width: 140, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspectors</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {dayGroup.items.map((c) => (
-                                  <tr key={c.complaint_id}>
-                                    <td title={c.complaint_id}>{String(c.complaint_id).slice(0, 8)}…</td>
-                                    <td>
-                                      <div className="dash-cell-title">{c.business_name || '—'}</div>
-                                      <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                      <div className="dash-cell-sub">{c.reporter_email || ''}</div>
-                                    </td>
-                                    <td>
-                                      <span className={statusBadgeClass(c.mission_order_status)}>
-                                        {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
-                                      </span>
-                                    </td>
-                                    <td>{c.approved_at ? new Date(c.approved_at).toLocaleString() : '—'}</td>
-                                    <td>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
-                                    <td>
-                                      <button
-                                        type="button"
-                                        className="dash-btn"
-                                        onClick={() => createMissionOrder(c.complaint_id, tab)}
-                                        disabled={creatingForId === c.complaint_id}
+                                  <React.Fragment key={`history-${c.complaint_id}`}>
+                                    <tr
+                                      style={{
+                                        cursor: 'pointer',
+                                        borderBottom: '1px solid #e2e8f0',
+                                        transition: 'background-color 0.2s ease',
+                                        position: 'relative',
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = '#f8fafc';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = '#ffffff';
+                                      }}
+                                    >
+                                      <td style={{ padding: '12px', textAlign: 'center' }}>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedComplaintId(expandedComplaintId === c.complaint_id ? null : c.complaint_id);
+                                          }}
+                                          style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            outline: 'none',
+                                            cursor: 'pointer',
+                                            padding: 0,
+                                            color: '#64748b',
+                                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                            transform: expandedComplaintId === c.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            width: 24,
+                                            height: 24,
+                                          }}
                                         >
-                                        {creatingForId === c.complaint_id ? 'Creating…' : c.mission_order_id ? 'Open MO' : 'Create MO'}
+                                          <svg width="20" height="20" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M80 160L256 320L432 160" stroke="currentColor" strokeWidth="40" strokeLinecap="round" strokeLinejoin="round"/>
+                                          </svg>
                                         </button>
-                                    </td>
-                                    <td>
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 30, alignItems: 'center' }}>
-                                        {(c.inspector_names || []).length === 0 ? (
-                                          <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
-                                        ) : (
-                                          (c.inspector_names || []).map((name, idx) => (
-                                            <span
-                                              key={`${c.complaint_id}-${idx}`}
-                                              style={{ padding: '6px 10px', borderRadius: 999, fontWeight: 800, border: '1px solid #e2e8f0', background: '#f8fafc' }}
-                                            >
-                                              {name}
-                                            </span>
-                                          ))
-                                        )}
-                                      </div>
-                                    </td>
-                                  </tr>
+                                      </td>
+                                      <td onClick={() => createMissionOrder(c.complaint_id, 'revisions')}>
+                                        <span className={statusBadgeClass(c.mission_order_status)}>
+                                          {c.mission_order_status ? formatStatus(c.mission_order_status) : 'No MO'}
+                                        </span>
+                                      </td>
+                                      <td onClick={() => createMissionOrder(c.complaint_id, 'revisions')}>
+                                        <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                        <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                      </td>
+                                      <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                        {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                      </td>
+                                      <td>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 30, alignItems: 'center', fontSize: 12 }}>
+                                          {(c.inspector_names || []).length === 0 ? (
+                                            <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                          ) : (
+                                            (c.inspector_names || []).map((name, idx) => (
+                                              <span
+                                                key={`${c.complaint_id}-${idx}`}
+                                                style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}
+                                              >
+                                                {name}
+                                              </span>
+                                            ))
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                    {expandedComplaintId === c.complaint_id && (
+                                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', animation: 'slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
+                                        <td colSpan="5" style={{ padding: '16px 24px' }}>
+                                          {/* Progress Timeline */}
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                            {/* Box 1: Submitted */}
+                                            <div style={{
+                                              background: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              borderRadius: 8,
+                                              padding: '14px 16px',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              gap: 6,
+                                            }}>
+                                              <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                {c.created_at ? new Date(c.created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                              </div>
+                                              <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                Complaint Submitted by <span style={{ fontWeight: 700 }}>{c.reporter_email || 'No email provided'}</span>
+                                              </div>
+                                            </div>
+
+                                            {/* Box 2: Approved */}
+                                            <div style={{
+                                              background: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              borderRadius: 8,
+                                              padding: '14px 16px',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              gap: 6,
+                                            }}>
+                                              <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                {c.approved_at ? new Date(c.approved_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.approved_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                                              </div>
+                                              <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                Complaint Approved
+                                              </div>
+                                            </div>
+
+                                            {/* Box 3: Mission Order Created */}
+                                            {c.mission_order_created_at && (
+                                              <div style={{
+                                                background: '#ffffff',
+                                                border: '1px solid #e2e8f0',
+                                                borderRadius: 8,
+                                                padding: '14px 16px',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                gap: 6,
+                                              }}>
+                                                <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                  {new Date(c.mission_order_created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.mission_order_created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                                </div>
+                                                <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                  Mission Order Created
+                                                </div>
+                                              </div>
+                                            )}
+
+                                            {/* Box 4: Signed by Secretary */}
+                                            <div style={{
+                                              background: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              borderRadius: 8,
+                                              padding: '14px 16px',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              gap: 6,
+                                            }}>
+                                              <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                {(() => {
+                                                  // Prefer explicit signed timestamp if present in the row; fallback to MO created_at.
+                                                  const dtRaw = c.secretary_signed_at || c.mission_order_updated_at || c.mission_order_created_at;
+                                                  const dt = dtRaw ? new Date(dtRaw) : null;
+                                                  if (!dt || Number.isNaN(dt.getTime())) return 'Signed by Secretary';
+                                                  return `${dt.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })} ${dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+                                                })()}
+                                              </div>
+                                              <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                Mission Order Signed by Secretary
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
                                 ))}
                               </tbody>
                             </table>
