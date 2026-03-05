@@ -116,7 +116,7 @@ export default function DashboardInspector() {
         .from('mission_orders')
         .select('id, title, status, complaint_id, created_at, submitted_at, updated_at')
         .in('id', missionOrderIds)
-        .in('status', ['for inspection', 'for_inspection', 'For Inspection', 'completed', 'Completed']);
+        .in('status', ['for inspection', 'for_inspection', 'For Inspection', 'completed', 'Completed', 'complete', 'Complete']);
 
       if (moError) throw moError;
 
@@ -747,10 +747,6 @@ export default function DashboardInspector() {
                     })
                   )
                 ) : null}
-              </div>
-
-              <div className="dash-note">
-                Completed inspections move to Inspection History automatically. Opening a completed slip is view-only.
               </div>
             </div>
           </div>

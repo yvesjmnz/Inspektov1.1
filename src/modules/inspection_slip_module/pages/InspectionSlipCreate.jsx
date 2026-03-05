@@ -394,8 +394,10 @@ export default function InspectionSlipCreate() {
         }
 
         // Basic active status gate (keep aligned with existing workflow)
+        // Allow inspections while MO is actionable (for inspection), and allow opening/viewing
+        // even after Head Inspector archives it as complete.
         const s = String(mo?.status || '').toLowerCase();
-        if (s !== 'for inspection') {
+        if (s !== 'for inspection' && s !== 'for_inspection' && s !== 'complete') {
           throw new Error('This mission order is not active for inspection.');
         }
 
