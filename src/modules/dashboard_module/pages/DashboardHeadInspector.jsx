@@ -227,7 +227,7 @@ export default function DashboardHeadInspector() {
       const { data: missionOrders, error: moError } = complaintIds.length
         ? await supabase
             .from('mission_orders')
-            .select('id, complaint_id, status, created_at, date_of_inspection, updated_at, secretary_signed_at')
+            .select('id, complaint_id, status, created_at, date_of_inspection, updated_at, secretary_signed_at, director_preapproved_at')
             .in('complaint_id', complaintIds)
             .order('created_at', { ascending: false })
             .limit(500)
@@ -305,6 +305,7 @@ export default function DashboardHeadInspector() {
           date_of_inspection: mo?.date_of_inspection || null,
           mission_order_updated_at: mo?.updated_at || null,
           secretary_signed_at: mo?.secretary_signed_at || null,
+          director_preapproved_at: mo?.director_preapproved_at || null,
           inspector_names: mo?.id ? inspectorNamesByMissionOrderId.get(mo.id) || [] : [],
         };
       });
@@ -1688,7 +1689,27 @@ export default function DashboardHeadInspector() {
                                               </div>
                                             )}
 
-                                            {/* Box 4: Signed by Secretary */}
+                                            {/* Box 4: Pre-Approved by Director */}
+                                            {c.director_preapproved_at && (
+                                              <div style={{
+                                                background: '#ffffff',
+                                                border: '1px solid #e2e8f0',
+                                                borderRadius: 8,
+                                                padding: '14px 16px',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                gap: 6,
+                                              }}>
+                                                <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                  {new Date(c.director_preapproved_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(c.director_preapproved_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                                </div>
+                                                <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                                  Mission Order Pre-Approved by Director
+                                                </div>
+                                              </div>
+                                            )}
+
+                                            {/* Box 5: Signed by Secretary */}
                                             <div style={{
                                               background: '#ffffff',
                                               border: '1px solid #e2e8f0',

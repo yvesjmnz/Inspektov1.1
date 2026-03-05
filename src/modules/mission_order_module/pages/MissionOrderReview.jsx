@@ -169,7 +169,7 @@ export default function MissionOrderReview() {
 
       const { data: mo, error: moError } = await supabase
         .from('mission_orders')
-        .select('id, complaint_id, status, director_comment, director_signature_url, date_of_inspection, date_of_issuance, template_name, generated_docx_url, created_at, updated_at, submitted_at')
+        .select('id, complaint_id, status, director_comment, director_signature_url, date_of_inspection, date_of_issuance, template_name, generated_docx_url, created_at, updated_at, submitted_at, director_preapproved_at')
         .eq('id', missionOrderId)
         .single();
       if (moError) throw moError;
@@ -306,7 +306,7 @@ export default function MissionOrderReview() {
         reviewed_at: nowIso,
         reviewed_by: userId,
         updated_at: nowIso,
-        ...(nextStatus === 'for inspection' ? { date_of_issuance: nowIso.slice(0, 10) } : {}),
+        ...(nextStatus === 'for inspection' ? { date_of_issuance: nowIso.slice(0, 10), director_preapproved_at: nowIso } : {}),
       };
 
       if (nextStatus === 'cancelled' && !String(directorComment || '').trim()) {
