@@ -13,9 +13,15 @@ import {
  * useNotifications Hook
  * 
  * Manages notification state and lifecycle for React components.
- * Handles real-time updates, pagination, and user interactions.
+ * Handles real-time updates via Supabase subscriptions, pagination, and user interactions.
  * 
  * SOLID: Single Responsibility - only manages notification UI state
+ * 
+ * Features:
+ * - Real-time INSERT/UPDATE/DELETE events
+ * - Optimistic UI updates
+ * - Automatic unread count sync
+ * - Fallback polling support
  */
 
 export function useNotifications(userId, options = {}) {
@@ -30,6 +36,7 @@ export function useNotifications(userId, options = {}) {
   const [error, setError] = useState(null);
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(0);
+  const [isConnected, setIsConnected] = useState(true);
 
   const unsubscribeRef = useRef(null);
   const pollIntervalRef = useRef(null);
@@ -74,18 +81,23 @@ export function useNotifications(userId, options = {}) {
   const handleMarkAsRead = useCallback(
     async (notificationId) => {
       try {
-        await markAsRead(notificationId);
+        // Optimistic update
         setNotifications((prev) =>
           prev.map((n) =>
             n.id === notificationId ? { ...n, status: 'read' } : n
           )
         );
         setUnreadCount((prev) => Math.max(0, prev - 1));
+
+        // Persist to database
+        await markAsRead(notificationId);
       } catch (err) {
         console.error('Failed to mark notification as read:', err);
+        // Revert optimistic update on error
+        await loadUnread();
       }
     },
-    []
+    [loadUnread]
   );
 
   // Mark all unread as read
@@ -97,29 +109,39 @@ export function useNotifications(userId, options = {}) {
     if (unreadIds.length === 0) return;
 
     try {
-      await markMultipleAsRead(unreadIds);
+      // Optimistic update
       setNotifications((prev) =>
         prev.map((n) =>
           unreadIds.includes(n.id) ? { ...n, status: 'read' } : n
         )
       );
       setUnreadCount(0);
+
+      // Persist to database
+      await markMultipleAsRead(unreadIds);
     } catch (err) {
       console.error('Failed to mark all as read:', err);
+      // Revert optimistic update on error
+      await loadUnread();
     }
-  }, [notifications]);
+  }, [notifications, loadUnread]);
 
   // Archive notification
   const handleArchive = useCallback(async (notificationId) => {
     try {
-      await archiveNotification(notificationId);
+      // Optimistic update
       setNotifications((prev) =>
         prev.filter((n) => n.id !== notificationId)
       );
+
+      // Persist to database
+      await archiveNotification(notificationId);
     } catch (err) {
       console.error('Failed to archive notification:', err);
+      // Revert optimistic update on error
+      await loadUnread();
     }
-  }, []);
+  }, [loadUnread]);
 
   // Refresh unread count
   const refreshCount = useCallback(async () => {
@@ -133,17 +155,58 @@ export function useNotifications(userId, options = {}) {
     }
   }, [userId]);
 
+  // Handle real-time subscription events
+  const handleRealtimeEvent = useCallback(
+    (payload) => {
+      const { event, new: newNotif, old: oldNotif } = payload;
+
+      switch (event) {
+        case 'INSERT':
+          // Add new notification to the top
+          setNotifications((prev) => [newNotif, ...prev]);
+          setUnreadCount((prev) => prev + 1);
+          break;
+
+        case 'UPDATE':
+          // Update existing notification
+          setNotifications((prev) =>
+            prev.map((n) => (n.id === newNotif.id ? newNotif : n))
+          );
+          // Adjust unread count if status changed
+          if (oldNotif?.status === 'unread' && newNotif?.status !== 'unread') {
+            setUnreadCount((prev) => Math.max(0, prev - 1));
+          } else if (oldNotif?.status !== 'unread' && newNotif?.status === 'unread') {
+            setUnreadCount((prev) => prev + 1);
+          }
+          break;
+
+        case 'DELETE':
+          // Remove deleted notification
+          setNotifications((prev) =>
+            prev.filter((n) => n.id !== oldNotif.id)
+          );
+          if (oldNotif?.status === 'unread') {
+            setUnreadCount((prev) => Math.max(0, prev - 1));
+          }
+          break;
+
+        default:
+          break;
+      }
+    },
+    []
+  );
+
   // Set up real-time subscription
   useEffect(() => {
     if (!userId || !autoSubscribe || pollInterval) return;
 
     try {
-      unsubscribeRef.current = subscribeToNotifications(userId, (payload) => {
-        // Reload unread on any change
-        loadUnread();
-      });
+      unsubscribeRef.current = subscribeToNotifications(userId, handleRealtimeEvent);
+      setIsConnected(true);
     } catch (err) {
       console.error('Failed to subscribe to notifications:', err);
+      setIsConnected(false);
     }
 
     return () => {
@@ -151,7 +214,7 @@ export function useNotifications(userId, options = {}) {
         unsubscribeRef.current();
       }
     };
-  }, [userId, autoSubscribe, pollInterval, loadUnread]);
+  }, [userId, autoSubscribe, pollInterval, handleRealtimeEvent]);
 
   // Set up polling if specified
   useEffect(() => {
@@ -179,6 +242,7 @@ export function useNotifications(userId, options = {}) {
     loading,
     error,
     hasMore,
+    isConnected,
     loadMore,
     loadUnread,
     markAsRead: handleMarkAsRead,

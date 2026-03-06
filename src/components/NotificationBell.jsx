@@ -13,6 +13,7 @@ export default function NotificationBell({ userId }) {
     notifications,
     unreadCount,
     loading,
+    isConnected,
     markAsRead,
     markAllAsRead,
     archive,
@@ -58,7 +59,7 @@ export default function NotificationBell({ userId }) {
           e.currentTarget.style.color = '#0f172a';
         }}
         aria-label="Notifications"
-        title={`${unreadCount} unread notifications`}
+        title={`${unreadCount} unread notifications${!isConnected ? ' (offline)' : ''}`}
       >
         {/* Bell SVG Icon */}
         <svg
@@ -95,6 +96,21 @@ export default function NotificationBell({ userId }) {
           >
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
+        )}
+        {!isConnected && (
+          <span
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              right: 0,
+              width: 8,
+              height: 8,
+              background: '#f59e0b',
+              borderRadius: '50%',
+              border: '2px solid #fff',
+            }}
+            title="Offline - notifications will sync when online"
+          />
         )}
       </button>
 

@@ -278,8 +278,9 @@ export async function getUnreadCount(userId) {
 
 /**
  * Subscribe to real-time notification updates for a user
+ * Handles INSERT, UPDATE, DELETE events with proper payload structure
  * @param {string} userId - User ID
- * @param {Function} callback - Called when notifications change
+ * @param {Function} callback - Called when notifications change with { event, new, old }
  * @returns {Function} Unsubscribe function
  */
 export function subscribeToNotifications(userId, callback) {
@@ -288,25 +289,168 @@ export function subscribeToNotifications(userId, callback) {
   }
 
   const channel = supabase
-    .channel(`notifications:${userId}`)
+    .channel(`notifications:${userId}`, {
+      config: {
+        broadcast: { self: true },
+      },
+    })
     .on(
       'postgres_changes',
       {
-        event: '*',
+        event: 'INSERT',
         schema: 'public',
         table: 'notifications',
         filter: `user_id=eq.${userId}`,
       },
       (payload) => {
-        callback(payload);
+        callback({
+          event: 'INSERT',
+          new: payload.new,
+          old: null,
+        });
       }
     )
-    .subscribe();
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload) => {
+        callback({
+          event: 'UPDATE',
+          new: payload.new,
+          old: payload.old,
+        });
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload) => {
+        callback({
+          event: 'DELETE',
+          new: null,
+          old: payload.old,
+        });
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log(`Real-time notifications subscribed for user ${userId}`);
+      } else if (status === 'CLOSED') {
+        console.log(`Real-time notifications unsubscribed for user ${userId}`);
+      }
+    });
 
   // Return unsubscribe function
   return () => {
     supabase.removeChannel(channel);
   };
+}
+
+/**
+ * Batch create notifications for multiple users
+ * Useful for broadcasting notifications to multiple recipients
+ * @param {Array<Object>} notifications - Array of notification objects
+ * @returns {Promise<Array>} Created notifications
+ */
+export async function createBatchNotifications(notifications) {
+  if (!Array.isArray(notifications) || notifications.length === 0) {
+    throw new Error('notifications must be a non-empty array');
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('notifications')
+      .insert(
+        notifications.map((n) => ({
+          user_id: n.userId,
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          metadata: n.metadata || {},
+          status: NOTIFICATION_STATUSES.UNREAD,
+          created_at: new Date().toISOString(),
+          read_at: null,
+        }))
+      )
+      .select();
+
+    if (error) throw error;
+
+    // Send push notifications for each
+    const pushPromises = notifications
+      .filter((n) => n.fcmToken)
+      .map((n) =>
+        sendPushNotification({
+          fcmToken: n.fcmToken,
+          title: n.title,
+          message: n.message,
+          data: { type: n.type, ...n.metadata },
+        })
+      );
+
+    if (pushPromises.length > 0) {
+      await Promise.allSettled(pushPromises);
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('Failed to create batch notifications:', err);
+    throw err;
+  }
+}
+
+/**
+ * Delete notification (hard delete)
+ * @param {string} notificationId - Notification ID
+ * @returns {Promise<void>}
+ */
+export async function deleteNotification(notificationId) {
+  if (!notificationId) throw new Error('notificationId is required');
+
+  try {
+    const { error } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('id', notificationId);
+
+    if (error) throw error;
+  } catch (err) {
+    console.error('Failed to delete notification:', err);
+    throw err;
+  }
+}
+
+/**
+ * Get notification by ID
+ * @param {string} notificationId - Notification ID
+ * @returns {Promise<Object>} Notification object
+ */
+export async function getNotificationById(notificationId) {
+  if (!notificationId) throw new Error('notificationId is required');
+
+  try {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('id', notificationId)
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error('Failed to fetch notification:', err);
+    throw err;
+  }
 }
 
 export { NOTIFICATION_TYPES, NOTIFICATION_STATUSES };
