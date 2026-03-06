@@ -874,13 +874,15 @@ export default function MissionOrderEditor() {
                   marginTop: 12,
                   marginBottom: 14,
                   display: 'flex',
-                  gap: 18,
+                  gap: 28,
                   alignItems: 'center',
                   flexWrap: 'wrap',
-                  padding: '8px 12px',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 12,
-                  background: '#f8fafc',
+                  padding: '14px 16px',
+                  border: '1px solid #0b2249',
+                  borderRadius: 14,
+                  background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                  color: '#fff',
+                  boxShadow: '0 8px 16px rgba(2,6,23,0.25)'
                 }}
               >
                 {/* Inspectors */}
@@ -891,8 +893,8 @@ export default function MissionOrderEditor() {
                       <path d="M12 12c2.761 0 5-2.686 5-6s-2.239-5-5-5-5 2.686-5 6 2.239 5 5 5Zm0 2c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5Z" fill="#0b2249"/>
                     </svg>
                   </span>
-                  <span style={{ color: '#475569', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspectors:</span>
-                  <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 14 }}>{assignedInspectorNames || '—'}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspectors:</span>
+                  <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>{assignedInspectorNames || '—'}</span>
                 </div>
 
                 {/* Ordinances */}
@@ -903,8 +905,8 @@ export default function MissionOrderEditor() {
                       <path d="M7 2h7l5 5v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V8h4.5L14 3.5ZM8 12h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Zm0 4h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Z" fill="#0b2249"/>
                     </svg>
                   </span>
-                  <span style={{ color: '#475569', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Ordinances:</span>
-                  <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 14 }}>{assignedOrdinanceLabels || '—'}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Ordinances:</span>
+                  <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>{assignedOrdinanceLabels || '—'}</span>
                 </div>
 
                 {/* Inspection Date */}
@@ -915,8 +917,8 @@ export default function MissionOrderEditor() {
                       <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 1 1 2 0v1Zm13 7H4v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9ZM5 7h14V6H5v1Z" fill="#0b2249"/>
                     </svg>
                   </span>
-                  <span style={{ color: '#475569', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspection:</span>
-                  <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 14 }}>{dateOfInspection ? formatDateHuman(dateOfInspection) : '—'}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspection Date:</span>
+                  <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>{dateOfInspection ? formatDateHuman(dateOfInspection) : '—'}</span>
                 </div>
 
                 {/* Issuance Date */}
@@ -927,8 +929,8 @@ export default function MissionOrderEditor() {
                       <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 1 1 2 0v1Zm13 7H4v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9ZM5 7h14V6H5v1Z" fill="#0b2249"/>
                     </svg>
                   </span>
-                  <span style={{ color: '#475569', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Issuance:</span>
-                  <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 14 }}>{missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Issuance</span>
+                  <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>{missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'}</span>
                 </div>
               </div>
 
