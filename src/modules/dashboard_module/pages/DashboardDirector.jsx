@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import NotificationBell from '../../../components/NotificationBell';
+import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
 import './Dashboard.css';
 
 function formatStatus(status) {
@@ -261,6 +263,18 @@ export default function DashboardDirector() {
   const closePreview = () => setPreviewImage(null);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const currentYear = new Date().getFullYear();
+  const [currentUserId, setCurrentUserId] = useState(null);
+
+  // Get current user on mount
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData?.user?.id) {
+        setCurrentUserId(userData.user.id);
+      }
+    };
+    getCurrentUser();
+  }, []);
 
   const handleLogout = async () => {
     setError('');
@@ -897,6 +911,23 @@ export default function DashboardDirector() {
         patch.declined_at = null;
         // clear any previous decline comment
         patch.decline_comment = null;
+
+        // Notify Head Inspector when complaint is approved
+        try {
+          const { data: complaint } = await supabase
+            .from('complaints')
+            .select('business_name')
+            .eq('id', complaintId)
+            .single();
+
+          await notifyHeadInspectorComplaintApproved(
+            complaintId,
+            complaint?.business_name || 'Unknown Business'
+          );
+        } catch (notifErr) {
+          console.error('Failed to send notification:', notifErr);
+          // Don't fail the approval if notification fails
+        }
       } else if (status === 'declined') {
         patch.declined_by = user.id;
         patch.declined_at = nowIso;
@@ -1059,7 +1090,9 @@ export default function DashboardDirector() {
               <h2 className="dash-title">{pageMeta.title}</h2>
               <p className="dash-subtitle">{pageMeta.subtitle}</p>
             </div>
-            <div className="dash-actions"></div>
+            <div className="dash-actions">
+              <NotificationBell userId={currentUserId} />
+            </div>
           </div>
 
           {(tab === 'history' || tab === 'mission-orders-history') && (

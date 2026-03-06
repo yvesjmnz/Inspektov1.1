@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import NotificationBell from '../../../components/NotificationBell';
 import './Dashboard.css';
 
 function formatStatus(status) {
@@ -41,6 +42,18 @@ export default function DashboardInspector() {
   const [assigned, setAssigned] = useState([]);
   const [history, setHistory] = useState([]);
   const [navCollapsed, setNavCollapsed] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
+
+  // Get current user ID for notifications
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData?.user?.id) {
+        setCurrentUserId(userData.user.id);
+      }
+    };
+    getCurrentUser();
+  }, []);
 
   const handleLogout = async () => {
     setError('');
@@ -491,7 +504,9 @@ export default function DashboardInspector() {
                     inspection details.
                   </p>
                 </div>
-                <div className="dash-actions"></div>
+                <div className="dash-actions">
+                  <NotificationBell userId={currentUserId} />
+                </div>
               </div>
 
               <div className="dash-toolbar">

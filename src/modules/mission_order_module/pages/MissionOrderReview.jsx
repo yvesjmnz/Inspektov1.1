@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import DashboardSidebar from '../../../components/DashboardSidebar';
 import { supabase } from '../../../lib/supabase';
+import { notifyHeadInspectorMissionOrderApproved, notifyHeadInspectorMissionOrderRejected, notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import '../../dashboard_module/pages/Dashboard.css';
 import '../pages/MissionOrderEditor.css';
 
@@ -400,6 +401,30 @@ export default function MissionOrderReview() {
       }
 
       setMissionOrder((prev) => ({ ...(prev || {}), ...patch }));
+      
+      // Notify Head Inspector and Inspectors of approval or rejection
+      try {
+        const businessName = complaint?.business_name || 'Unknown Business';
+        if (nextStatus === 'for inspection') {
+          // Notify head inspector of approval
+          await notifyHeadInspectorMissionOrderApproved(missionOrderId, businessName);
+          
+          // Notify assigned inspectors when mission order is approved
+          if (assignedInspectorIds.length > 0) {
+            await notifyInspectorsMissionOrderAssigned(
+              missionOrderId,
+              assignedInspectorIds,
+              businessName
+            );
+          }
+        } else if (nextStatus === 'cancelled') {
+          await notifyHeadInspectorMissionOrderRejected(missionOrderId, businessName, directorComment);
+        }
+      } catch (notifErr) {
+        console.error('Failed to send notification:', notifErr);
+        // Don't fail the decision if notification fails
+      }
+      
       setToast(nextStatus === 'for inspection' ? 'Approved' : 'Rejected');
       await load();
     } catch (e) {

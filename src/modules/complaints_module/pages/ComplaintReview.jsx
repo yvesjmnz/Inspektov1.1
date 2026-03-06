@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import DashboardSidebar from '../../../components/DashboardSidebar';
+import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
 import '../../dashboard_module/pages/Dashboard.css';
 
 function formatStatus(status) {
@@ -236,6 +237,19 @@ export default function ComplaintReview() {
         .eq('id', complaintId);
 
       if (updateError) throw updateError;
+
+      // Notify Head Inspector when complaint is approved
+      if (status === 'approved') {
+        try {
+          await notifyHeadInspectorComplaintApproved(
+            complaintId,
+            complaint?.business_name || 'Unknown Business'
+          );
+        } catch (notifErr) {
+          console.error('Failed to send notification:', notifErr);
+          // Don't fail the approval if notification fails
+        }
+      }
 
       setToast(status === 'approved' ? 'Complaint approved.' : 'Complaint declined.');
       await load();

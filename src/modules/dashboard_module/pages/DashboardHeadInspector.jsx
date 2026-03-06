@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import NotificationBell from '../../../components/NotificationBell';
+import { notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import './Dashboard.css';
 
 function formatStatus(status) {
@@ -175,6 +177,18 @@ export default function DashboardHeadInspector() {
   const [creatingForId, setCreatingForId] = useState(null);
   const [toast, setToast] = useState('');
   const [expandedComplaintId, setExpandedComplaintId] = useState(null);
+  const [currentUserId, setCurrentUserId] = useState(null);
+
+  // Get current user ID for notifications
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData?.user?.id) {
+        setCurrentUserId(userData.user.id);
+      }
+    };
+    getCurrentUser();
+  }, []);
 
   const handleLogout = async () => {
     setError('');
@@ -709,7 +723,9 @@ export default function DashboardHeadInspector() {
                   <h2 className="dash-title">{pageMeta.title}</h2>
                   <p className="dash-subtitle">{pageMeta.subtitle}</p>
                 </div>
-                <div className="dash-actions"></div>
+                <div className="dash-actions">
+                  <NotificationBell userId={currentUserId} />
+                </div>
               </div>
 
               

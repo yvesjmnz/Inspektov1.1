@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { saveAs } from 'file-saver';
 import DashboardSidebar from '../../../components/DashboardSidebar';
 import { supabase } from '../../../lib/supabase';
+import { notifyDirectorMissionOrderSubmitted, notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import { buildMissionOrderDocxFileName, generateMissionOrderDocx } from '../lib/docx_template';
 import '../../dashboard_module/pages/Dashboard.css';
 import './MissionOrderEditor.css';
@@ -370,6 +371,19 @@ export default function MissionOrderEditor() {
         submitted_at: nowIso,
         updated_at: nowIso,
       }));
+
+      // Notify Director when mission order is submitted
+      try {
+        await notifyDirectorMissionOrderSubmitted(
+          missionOrderId,
+          missionOrder?.complaint_id,
+          complaint?.business_name || 'Unknown Business'
+        );
+      } catch (notifErr) {
+        console.error('Failed to send notification:', notifErr);
+        // Don't fail the submission if notification fails
+      }
+
       setToast('Submitted');
     } catch (e) {
       setError(e?.message || 'Failed to submit to Director.');
