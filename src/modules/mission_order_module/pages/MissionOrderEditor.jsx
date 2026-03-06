@@ -667,6 +667,7 @@ export default function MissionOrderEditor() {
       const blob = await generateMissionOrderDocx({
         templateUrl: signedTemplate.signedUrl,
         inspectors: assignedInspectorNamesFresh || '—',
+        date_of_complaint: complaint?.created_at,
         date_of_inspection: fresh.date_of_inspection,
         date_of_issuance: fresh.date_of_issuance,
         business_name: c?.business_name,

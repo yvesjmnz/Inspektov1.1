@@ -29,12 +29,13 @@ export function buildMissionOrderDocxFileName({ business_name, mission_order_id 
 
 // Generate a DOCX using a .docx template with handlebars-like placeholders
 // Required template placeholders:
-//   {{inspectors}}, {{date_of_inspection}}, {{date_of_issuance}},
+//   {{inspectors}}, {{date_of_complaint}}, {{date_of_inspection}}, {{date_of_issuance}},
 //   {{business_name}}, {{business_address}}, {{complaint_details}}
 // Optional image placeholder (if present in template): {{director_signature}}
 export async function generateMissionOrderDocx({
   templateUrl = '/MISSION-ORDER-TEMPLATE.docx',
   inspectors,
+  date_of_complaint,
   date_of_inspection,
   date_of_issuance,
   business_name,
@@ -82,6 +83,7 @@ export async function generateMissionOrderDocx({
   // Prepare data map for placeholders
   const data = {
     inspectors: safeText(inspectors) || '—',
+    date_of_complaint: humanDateFromYmd(date_of_complaint),
     date_of_inspection: humanDateFromYmd(date_of_inspection),
     date_of_issuance: humanDateFromYmd(date_of_issuance),
     business_name: safeText(business_name) || '—',
