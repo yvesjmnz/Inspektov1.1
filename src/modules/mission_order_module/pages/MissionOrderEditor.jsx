@@ -872,6 +872,7 @@ export default function MissionOrderEditor() {
               <div
                 style={{
                   marginTop: 12,
+                  marginBottom: 14,
                   display: 'flex',
                   gap: 18,
                   alignItems: 'center',
@@ -939,11 +940,11 @@ export default function MissionOrderEditor() {
                     {!isReadOnly ? (
                       <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
                         <select
-                          className="mo-select"
+                          className="mo-select mo-input-editable"
                           value={selectedInspectorId}
                           onChange={(e) => setSelectedInspectorId(e.target.value)}
                           disabled={loading}
-                          style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', height: 46, fontWeight: 900, fontSize: 15 }}
+                          style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', background: '#f8fafc', height: 46, fontWeight: 900, fontSize: 15 }}
                         >
                           <option value="">Select inspector…</option>
                           {inspectors.map((ins) => (
@@ -983,18 +984,61 @@ export default function MissionOrderEditor() {
                       <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>No inspectors assigned yet.</div>
                     )}
                   </div>
+                  
+                  {/* 2) Business name (read-only) */}
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
+                    <label className="mo-label" htmlFor="businessName" style={{ fontSize: 13 }}>Business Name (Read Only)</label>
+                    <input
+                      id="businessName"
+                      className="mo-input-readonly"
+                      readOnly
+                      value={complaint?.business_name || ''}
+                      style={{ width: '100%', height: 46, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '0 12px', fontWeight: 700, color: '#94a3b8', fontSize: 16 }}
+                    />
+                  </div>
 
+                  {/* 3) Business address (read-only) */}
+                  <div>
+                    <label className="mo-label" htmlFor="businessAddress" style={{ fontSize: 13 }}>Business Address (Read Only)</label>
+                    <input
+                      id="businessAddress"
+                      className="mo-input-readonly"
+                      readOnly
+                      value={complaint?.business_address || ''}
+                      style={{ width: '100%', height: 46, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '0 12px', fontWeight: 700, color: '#94a3b8', fontSize: 16 }}
+                    />
+                  </div>
+
+                  {/* 4) Complaint details (read-only) */}
+                  <div>
+                    <label className="mo-label" htmlFor="complaintDetails" style={{ fontSize: 13 }}>Complaint Details (Read Only)</label>
+                    <textarea
+                      id="complaintDetails"
+                      readOnly
+                      className="mo-input-readonly"
+                      value={complaint?.complaint_description || ''}
+                      style={{ width: '100%', minHeight: 110, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '10px 12px', fontWeight: 700, color: '#94a3b8', fontSize: 15, lineHeight: 1.5, resize: 'vertical' }}
+                    />
+                    {complaint?.id ? (
+                      <div style={{ marginTop: 12 }}>
+                        <a className="dash-btn" href={`/complaints/view?id=${complaint.id}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                          Open Full Complaint
+                        </a>
+                      </div>
+                    ) : null}
+                  </div>
+                  
                   {/* 2) City ordinances violated (editable) */}
                   <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
                     <div style={{ fontWeight: 900, fontSize: 13, color: '#0f172a' }}>City Ordinances Violated</div>
                     {!isReadOnly ? (
                       <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
                         <select
-                          className="mo-select"
+                          className="mo-select mo-input-editable"
                           value={selectedOrdinanceId}
                           onChange={(e) => setSelectedOrdinanceId(e.target.value)}
                           disabled={loading}
-                          style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', height: 46, fontWeight: 900, fontSize: 15 }}
+                          style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', background: '#f8fafc', height: 46, fontWeight: 900, fontSize: 15 }}
                         >
                           <option value="">Select ordinance…</option>
                           {ordinances.map((o) => {
@@ -1043,51 +1087,29 @@ export default function MissionOrderEditor() {
                     )}
                   </div>
 
-                  {/* 2) Business name (read-only) */}
-                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
-                    <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Business</div>
-                    <div style={{ fontSize: 18, fontWeight: 1000, color: '#0f172a', marginTop: 6 }}>{complaint?.business_name || '—'}</div>
-                  </div>
-
-                  {/* 3) Business address (read-only) */}
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: '#475569', marginTop: 0 }}>{complaint?.business_address || '—'}</div>
-                  </div>
-
-                  {/* 4) Complaint details (read-only) */}
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Complaint Details</div>
-                    <div style={{ marginTop: 8, whiteSpace: 'pre-wrap', fontSize: 15, fontWeight: 800, color: '#0f172a', lineHeight: 1.65 }}>
-                      {complaint?.complaint_description || '—'}
+                  {/* Dates side-by-side */}
+                  <div className="mo-row-2" style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div>
+                      <label className="mo-label" htmlFor="dateInspection" style={{ fontSize: 13 }}>Date of Inspection</label>
+                      <input
+                        id="dateInspection"
+                        type="date"
+                        value={dateOfInspection}
+                        onChange={(e) => setDateOfInspection(e.target.value)}
+                        disabled={loading || isReadOnly}
+                        className="mo-title mo-input-editable"
+                        style={{ fontSize: 16, fontWeight: 900, height: 46, borderRadius: 14, background: '#f8fafc', border: '1px solid #e2e8f0', padding: '0 12px' }}
+                      />
                     </div>
-                    {complaint?.id ? (
-                      <div style={{ marginTop: 12 }}>
-                        <a className="dash-btn" href={`/complaints/view?id=${complaint.id}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-                          Open Full Complaint
-                        </a>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {/* 5) Date of inspection (editable) */}
-                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
-                    <label className="mo-label" htmlFor="dateInspection" style={{ fontSize: 13 }}>Date of Inspection</label>
-                    <input
-                      id="dateInspection"
-                      type="date"
-                      value={dateOfInspection}
-                      onChange={(e) => setDateOfInspection(e.target.value)}
-                      disabled={loading || isReadOnly}
-                      className="mo-title"
-                      style={{ fontSize: 16, fontWeight: 900, height: 46, borderRadius: 14 }}
-                    />
-                  </div>
-
-                  {/* 6) Date of issuance (read-only) */}
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 12 }}>Date of Issuance</div>
-                    <div style={{ marginTop: 6, fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
-                      {missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'}
+                    <div>
+                      <label className="mo-label" htmlFor="dateIssuance" style={{ fontSize: 13 }}>Date of Issuance</label>
+                      <input
+                        id="dateIssuance"
+                        className="mo-input-readonly"
+                        value={missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'}
+                        readOnly
+                        style={{ width: '100%', height: 46, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '0 12px', fontWeight: 700, color: '#94a3b8', fontSize: 16 }}
+                      />
                     </div>
                   </div>
                 </div>
