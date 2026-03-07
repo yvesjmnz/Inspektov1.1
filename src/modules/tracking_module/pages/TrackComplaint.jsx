@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
-import { getComplaintById } from '../../../lib/complaints';
+import { getComplaintById, getComplaintTracking } from '../../../lib/complaints';
 import './TrackComplaint.css';
 
 function formatStatus(status) {
@@ -51,6 +51,7 @@ export default function TrackComplaint() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [complaint, setComplaint] = useState(null);
+  const [related, setRelated] = useState({ missionOrders: [], inspections: [] });
 
   const canSearch = useMemo(() => String(complaintId).trim().length > 0, [complaintId]);
 
@@ -70,8 +71,9 @@ export default function TrackComplaint() {
 
     try {
       setLoading(true);
-      const data = await getComplaintById(idForQuery);
-      setComplaint(data);
+      const data = await getComplaintTracking(idForQuery);
+      setComplaint(data.complaint);
+      setRelated({ missionOrders: data.missionOrders, inspections: data.inspections });
     } catch (err) {
       setError(err?.message || 'Unable to find this complaint ID.');
     } finally {
@@ -134,20 +136,40 @@ export default function TrackComplaint() {
               {/* Vertical Complaint Progress */}
               {(() => {
                 const s = String(complaint.status || '').toLowerCase();
-                const currentStep = (() => {
-                  if (["approved", "declined"].includes(s)) return 2;
-                  if (["under_review", "under review", "in_progress", "in progress", "processing"].includes(s)) return 1;
-                  return 0; // submitted/new/pending/default
-                })();
+                // Related entities
+                const missionOrders = related.missionOrders || [];
+                const inspections = related.inspections || [];
 
-                const receivedDate = complaint.created_at ? new Date(complaint.created_at).toLocaleString() : '—';
-                const reviewDate = complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—';
-                const decisionDate = (() => {
-                  if (s === 'approved') return complaint.approved_at ? new Date(complaint.approved_at).toLocaleString() : (complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—');
-                  if (s === 'declined') return complaint.declined_at ? new Date(complaint.declined_at).toLocaleString() : (complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—');
-                  return '—';
-                })();
-                const decisionLabel = s === 'approved' ? 'Approved' : s === 'declined' ? 'Declined' : 'Pending';
+                // Helper dates
+                const receivedDate = complaint.created_at ? new Date(complaint.created_at) : null;
+                const reviewDate = complaint.updated_at ? new Date(complaint.updated_at) : null;
+                const approvedDate = complaint.approved_at ? new Date(complaint.approved_at) : null;
+                const declinedDate = complaint.declined_at ? new Date(complaint.declined_at) : null;
+
+                // Decision state
+                const isDecided = ['approved', 'declined', 'rejected'].includes(s);
+                const isDeclined = ['declined', 'rejected', 'invalid'].includes(s);
+                const decisionLabel = s === 'approved' ? 'Approved' : isDeclined ? 'Declined' : 'Pending';
+                const decisionDate = isDecided ? (approvedDate || declinedDate || reviewDate) : null;
+
+                // Inspection step is driven by inspection_reports presence and status
+                const hasAnyInspection = inspections.length > 0;
+                const latestInspection = hasAnyInspection ? inspections[inspections.length - 1] : null;
+                const inspectionStatus = latestInspection ? String(latestInspection.status || '').toLowerCase() : '';
+                const inspectionCompleted = inspectionStatus === 'completed';
+                const inspectionStartedAt = latestInspection?.created_at ? new Date(latestInspection.created_at) : null;
+                const inspectionCompletedAt = latestInspection?.completed_at ? new Date(latestInspection.completed_at) : null;
+
+                // Resolution step rules:
+                // - If declined: resolution is case closed at decision date.
+                // - Else if inspection completed: resolution by inspection completion.
+                // - Else terminal complaint states also considered resolved.
+                const isResolved = isDeclined || inspectionCompleted || ['resolved', 'closed', 'completed', 'done'].includes(s);
+                const resolutionDate = isDeclined ? (declinedDate || reviewDate) : (inspectionCompletedAt || approvedDate || declinedDate || null);
+                const resolutionLabel = isDeclined ? 'Case Closed' : (inspectionCompleted ? 'Inspection Completed' : (s === 'approved' ? 'Approved' : 'Pending'));
+
+                // Utility to render date nicely
+                const fmt = (d) => (d ? d.toLocaleString() : '—');
 
                 return (
                   <div className="progress-card">
@@ -162,29 +184,61 @@ export default function TrackComplaint() {
                         <div className="vtl-content">
                           <div className="vtl-title">Complaint Received</div>
                           <div className="vtl-desc">Your complaint has been logged in our system</div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{receivedDate}</span></div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(receivedDate)}</span></div>
                         </div>
                       </div>
 
                       {/* Step 2 - Under Review */}
-                      <div className={`vtl-step ${["approved", "declined"].includes(s) ? 'completed' : 'active'}`}>
-                        <div className="vtl-marker">{["approved", "declined"].includes(s) ? '✓' : 2}</div>
+                      <div className={`vtl-step ${isDecided ? 'completed' : 'active'}`}>
+                        <div className="vtl-marker">{isDecided ? '✓' : 2}</div>
                         <div className="vtl-content">
                           <div className="vtl-title">Under Review</div>
                           <div className="vtl-desc">Director is reviewing your complaint</div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{currentStep === 1 ? 'Pending Review' : (currentStep > 1 ? 'Completed' : 'Queued')}</span></div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{reviewDate}</span></div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{isDecided ? 'Completed' : 'In Progress'}</span></div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(reviewDate)}</span></div>
                         </div>
                       </div>
 
                       {/* Step 3 - Decision Made */}
-                      <div className={`vtl-step ${["approved","declined"].includes(s) ? 'active' : (currentStep > 2 ? 'completed' : 'inactive')}`}>
-                        <div className="vtl-marker">{["approved","declined"].includes(s) ? (s === 'approved' ? '✓' : '✕') : 3}</div>
+                      <div className={`vtl-step ${isDecided ? 'completed' : 'inactive'}`}>
+                        <div className="vtl-marker">{isDecided ? (s === 'approved' ? '✓' : '✕') : 3}</div>
                         <div className="vtl-content">
                           <div className="vtl-title">Decision Made</div>
-                          <div className="vtl-desc">Final decision has been issued</div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${s === 'approved' ? 'status-approved' : s === 'declined' ? 'status-declined' : ''}`}>{decisionLabel}</span></div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Decision Date:</span> <span className="vtl-detail-value">{decisionDate}</span></div>
+                          <div className="vtl-desc">Director's decision has been issued</div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${s === 'approved' ? 'status-approved' : (s === 'declined' || s === 'rejected') ? 'status-declined' : ''}`}>{decisionLabel}</span></div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Decision Date:</span> <span className="vtl-detail-value">{fmt(decisionDate)}</span></div>
+                          {isDeclined ? (
+                            <div className="vtl-detail"><span className="vtl-detail-label">Note:</span> <span className="vtl-detail-value">Your complaint did not meet the criteria for further action. No inspection will take place.</span></div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Step 4 - Inspection (MO Workflow + Inspection Workflow) */}
+                      <div className={`vtl-step ${isDeclined ? 'inactive' : (inspectionCompleted ? 'completed' : (hasAnyInspection ? 'active' : (isDecided && s === 'approved' ? 'active' : 'inactive')))}`}>
+                        <div className="vtl-marker">{isDeclined ? 4 : (inspectionCompleted ? '✓' : 4)}</div>
+                        <div className="vtl-content">
+                          <div className="vtl-title">Inspection</div>
+                          <div className="vtl-desc">MO Workflow + Inspection Workflow</div>
+                          {isDeclined ? (
+                            <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">Not applicable</span></div>
+                          ) : (
+                            <>
+                              <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{inspectionCompleted ? 'Completed' : (hasAnyInspection ? 'In Progress' : (isDecided && s === 'approved' ? 'Scheduled' : '—'))}</span></div>
+                              <div className="vtl-detail"><span className="vtl-detail-label">Started:</span> <span className="vtl-detail-value">{fmt(inspectionStartedAt)}</span></div>
+                              <div className="vtl-detail"><span className="vtl-detail-label">Completed:</span> <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span></div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Step 5 - Resolution */}
+                      <div className={`vtl-step ${isResolved ? 'active' : 'inactive'}`}>
+                        <div className="vtl-marker">{isResolved ? '✓' : 5}</div>
+                        <div className="vtl-content">
+                          <div className="vtl-title">Resolution</div>
+                          <div className="vtl-desc">{isDeclined ? 'Case closed — no inspection will take place.' : 'Summary of findings without disclosing internal assessments'}</div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{isResolved ? resolutionLabel : 'Pending'}</span></div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(resolutionDate)}</span></div>
                         </div>
                       </div>
                     </div>

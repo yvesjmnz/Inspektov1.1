@@ -963,9 +963,11 @@ export default function ComplaintForm({ verifiedEmail }) {
                       placeholder="Full business address"
                       className="form-input"
                       readOnly={!!formData.business_pk}
+                      disabled={!!formData.business_pk}
+                      aria-readonly={formData.business_pk ? 'true' : 'false'}
                       required
                     />
-                  </div>
+                                      </div>
 
                   <div className="form-group">
                     <label htmlFor="reporter_email">Your Email</label>

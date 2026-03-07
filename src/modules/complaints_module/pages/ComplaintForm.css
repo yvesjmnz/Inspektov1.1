@@ -86,6 +86,24 @@
   color: #0f172a;
 }
 
+/* Gray, read-only style for disabled/readonly fields (match email appearance) */
+.form-input[disabled],
+.form-input[readonly],
+.form-textarea[disabled],
+.form-textarea[readonly] {
+  background: #f1f5f9; /* slate-100 */
+  color: #64748b;      /* slate-500 */
+  cursor: not-allowed;
+}
+
+.form-input[disabled]:focus,
+.form-input[readonly]:focus,
+.form-textarea[disabled]:focus,
+.form-textarea[readonly]:focus {
+  border-color: #cbd5e1;
+  box-shadow: none;
+}
+
 .form-textarea {
   resize: vertical;
 }
