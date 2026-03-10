@@ -7,7 +7,7 @@ import './Dashboard.css';
 function formatStatus(status) {
   if (!status) return 'Unknown';
   const s = String(status).toLowerCase().trim();
-  if (s === 'cancelled' || s === 'canceled') return 'Rejected';
+  if (s === 'cancelled' || s === 'canceled') return 'Cancelled';
   if (s === 'for inspection' || s === 'for_inspection') return 'Pre-Approved';
   return String(status)
     .replace(/_/g, ' ')
@@ -41,7 +41,7 @@ function statusBadgeClass(status) {
 
 function getInitialTab() {
   const hash = window.location.hash.slice(1);
-  const validTabs = ['todo', 'results', 'for-inspection', 'revisions'];
+  const validTabs = ['todo', 'results', 'inspection', 'for-inspection', 'revisions'];
   return validTabs.includes(hash) ? hash : 'todo';
 }
 
@@ -157,6 +157,10 @@ export default function DashboardHeadInspector() {
       results: {
         title: '(Director Approval) Mission Order',
         subtitle: 'Track mission orders issued and approved or rejected by the Director.',
+      },
+      inspection: {
+        title: '(Inspection) Mission Order',
+        subtitle: 'See mission orders marked for inspection and those cancelled by the Director.',
       },
       'for-inspection': {
         title: '(Secretary Approval) Mission Order',
@@ -570,7 +574,8 @@ export default function DashboardHeadInspector() {
     const byTab = (complaints || []).filter((c) => {
       const s = normalize(c.mission_order_status);
       if (tab === 'todo') return !s || s === 'draft';
-      if (tab === 'results') return s === 'issued' || s === 'for inspection' || s === 'for_inspection' || s === 'cancelled' || s === 'canceled';
+      if (tab === 'results') return s === 'issued' || s === 'rejected';
+      if (tab === 'inspection') return (c.secretary_signed_at) || s === 'cancelled' || s === 'canceled';
       if (tab === 'for-inspection') return s === 'awaiting_signature';
       // Mission Order History: only completed/accomplished mission orders
       if (tab === 'revisions') return s === 'complete';
@@ -670,6 +675,14 @@ export default function DashboardHeadInspector() {
                     <img src="/ui_icons/mo.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Director Approval</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'inspection' ? 'active' : ''}`} onClick={() => setTab('inspection')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/inspection.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspection</span>
                 </button>
               </li>
               <li>
@@ -922,7 +935,7 @@ export default function DashboardHeadInspector() {
                       <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#ef4444' }}>
                         {complaints.filter((c) => {
                           const s = String(c.mission_order_status || '').toLowerCase();
-                          return s === 'cancelled' || s === 'canceled';
+                          return s === 'rejected';
                         }).length} items
                       </div>
                     </div>
@@ -940,7 +953,7 @@ export default function DashboardHeadInspector() {
                         <tbody>
                           {complaints.filter((c) => {
                             const s = String(c.mission_order_status || '').toLowerCase();
-                            return s === 'cancelled' || s === 'canceled';
+                            return s === 'rejected';
                           }).length === 0 ? (
                             <tr>
                               <td colSpan="5" style={{ textAlign: 'center', padding: 32, color: '#475569' }}>
@@ -950,7 +963,7 @@ export default function DashboardHeadInspector() {
                           ) : (
                             complaints.filter((c) => {
                               const s = String(c.mission_order_status || '').toLowerCase();
-                              return s === 'cancelled' || s === 'canceled';
+                              return s === 'rejected';
                             }).map((c) => (
                               <React.Fragment key={`rejected-${c.complaint_id}`}>
                                 <tr
@@ -1268,6 +1281,83 @@ export default function DashboardHeadInspector() {
                                   </tr>
                                 )}
                               </React.Fragment>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ) : tab === 'inspection' ? (
+                <div style={{ display: 'grid', gap: 20 }}>
+                  <div
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 14,
+                      boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                      <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Inspection</h3>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6 }}>
+                        {filteredComplaints.length} {filteredComplaints.length === 1 ? 'Item' : 'Items'}
+                      </div>
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                            <th style={{ width: 160 }}>MO Status</th>
+                            <th>Business & Address</th>
+                            <th style={{ width: 200 }}>Inspection Date</th>
+                            <th style={{ width: 200 }}>Inspectors</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredComplaints.length === 0 ? (
+                            <tr>
+                              <td colSpan="4" style={{ textAlign: 'center', padding: 32, color: '#475569' }}>
+                                {loading ? 'Loading…' : 'No records found for this tab.'}
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredComplaints.map((c) => (
+                              <tr
+                                key={`insp-${c.complaint_id}`}
+                                style={{ borderBottom: '1px solid #e2e8f0', cursor: c.mission_order_id ? 'pointer' : 'default' }}
+                                title={c.mission_order_id ? 'View mission order' : 'No mission order available'}
+                                onClick={() => {
+                                  if (c.mission_order_id) {
+                                    window.location.assign(`/mission-order/review?id=${c.mission_order_id}`);
+                                  }
+                                }}
+                              >
+                                <td style={{ padding: '12px' }}>
+                                  <span className={statusBadgeClass(c.mission_order_status)}>{formatStatus(c.mission_order_status)}</span>
+                                </td>
+                                <td style={{ padding: '12px' }}>
+                                  <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                  <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                </td>
+                                <td style={{ padding: '12px' }}>
+                                  {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                </td>
+                                <td style={{ padding: '12px' }}>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                    {(c.inspector_names || []).length === 0 ? (
+                                      <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                    ) : (
+                                      (c.inspector_names || []).map((name, idx) => (
+                                        <span key={`${c.complaint_id}-${idx}`} style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}>
+                                          {name}
+                                        </span>
+                                      ))
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
                             ))
                           )}
                         </tbody>

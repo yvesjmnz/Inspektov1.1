@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
+import { cancelInspection as cancelInspectionApi } from '../../../lib/api';
 import './Dashboard.css';
 
 function formatStatus(status) {
@@ -73,7 +74,7 @@ export default function DashboardDirector() {
   const getInitialTab = () => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
-    if (tabParam && ['general', 'queue', 'mission-orders', 'mission-orders-history', 'history'].includes(tabParam)) {
+    if (tabParam && ['general', 'queue', 'mission-orders', 'inspection', 'mission-orders-history', 'history'].includes(tabParam)) {
       return tabParam;
     }
     return 'general';
@@ -104,6 +105,10 @@ export default function DashboardDirector() {
       'mission-orders-history': {
         title: 'Mission Order History',
         subtitle: 'Browse all mission orders and track their status.',
+      },
+      inspection: {
+        title: 'Inspections',
+        subtitle: 'View mission orders scheduled for inspection and manage actions.',
       },
     };
 
@@ -392,6 +397,9 @@ export default function DashboardDirector() {
           const endExclusive = new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), appliedRange.end.getDate() + 1);
           query = query.gte('submitted_at', start.toISOString()).lt('submitted_at', endExclusive.toISOString());
         }
+      } else if (tab === 'inspection') {
+        // Director Inspection tab: show MOs marked for inspection
+        query = query.in('status', ['for inspection', 'for_inspection']);
       }
 
       const searchVal = search.trim();
@@ -412,7 +420,7 @@ export default function DashboardDirector() {
   };
 
   useEffect(() => {
-    if (tab === 'mission-orders' || tab === 'mission-orders-history') {
+    if (tab === 'mission-orders' || tab === 'mission-orders-history' || tab === 'inspection') {
       loadMissionOrders();
     } else if (tab === 'general') {
       // Load both datasets for the overview
@@ -1049,6 +1057,14 @@ export default function DashboardDirector() {
                 </button>
               </li>
               <li>
+                <button type="button" className={`dash-nav-item ${tab === 'inspection' ? 'active' : ''}`} onClick={() => setTab('inspection')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/inspection.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspection</span>
+                </button>
+              </li>
+              <li>
                 <button type="button" className={`dash-nav-item ${tab === 'mission-orders-history' ? 'active' : ''}`} onClick={() => setTab('mission-orders-history')}>
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
@@ -1600,6 +1616,107 @@ export default function DashboardDirector() {
                                 <a className="dash-btn" href={`/mission-order/review?id=${mo.id}`}>
                                   Review MO
                                 </a>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : tab === 'inspection' ? (
+            <div style={{ display: 'grid', gap: 20 }}>
+              {filteredMissionOrders.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                  {loading ? 'Loading…' : 'No inspections found.'}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 14,
+                    boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                    overflow: 'hidden',
+                    transition: 'box-shadow 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                  }}
+                >
+                  {/* Header */}
+                  <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Inspections</h3>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
+                      <span>{filteredMissionOrders.length} {filteredMissionOrders.length === 1 ? 'Record' : 'Records'}</span>
+                    </div>
+                  </div>
+
+                  {/* Table */}
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                          <th style={{ width: 120 }}>MO ID</th>
+                          <th>Title</th>
+                          <th style={{ width: 180 }}>Status</th>
+                          <th style={{ width: 220 }}>Submitted</th>
+                          <th style={{ width: 260 }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredMissionOrders.map((mo) => (
+                          <tr
+                            key={mo.id}
+                            style={{
+                              cursor: 'default',
+                              borderBottom: '1px solid #e2e8f0',
+                              transition: 'background-color 0.2s ease',
+                              position: 'relative',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = '#f8fafc';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = '#ffffff';
+                            }}
+                          >
+                            <td style={{ padding: '12px' }} title={mo.id}>{String(mo.id).slice(0, 8)}…</td>
+                            <td style={{ padding: '12px' }}>
+                              <div className="dash-cell-title">{mo.title || 'Mission Order'}</div>
+                              <div className="dash-cell-sub">Complaint: {mo.complaint_id ? String(mo.complaint_id).slice(0, 8) + '…' : '—'}</div>
+                            </td>
+                            <td style={{ padding: '12px' }}>
+                              <span className={statusBadgeClass(mo.status)}>{formatStatus(mo.status)}</span>
+                            </td>
+                            <td style={{ padding: '12px' }}>{formatDateNoSeconds(mo.submitted_at)}</td>
+                            <td style={{ padding: '12px' }}>
+                              <div className="dash-row-actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <button
+                                  className="dash-btn"
+                                  onClick={async () => {
+                                    try {
+                                      if (!window.confirm('Cancel this inspection?')) return;
+                                      setLoading(true);
+                                      await cancelInspectionApi(mo.id);
+                                      // Refresh list and provide minimal feedback
+                                      await loadMissionOrders();
+                                      alert('Inspection cancelled.');
+                                    } catch (e) {
+                                      alert(e?.message || 'Failed to cancel inspection.');
+                                    } finally {
+                                      setLoading(false);
+                                    }
+                                  }}
+                                >
+                                  Cancel inspection
+                                </button>
                               </div>
                             </td>
                           </tr>
