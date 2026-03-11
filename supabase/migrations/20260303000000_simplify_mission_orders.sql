@@ -22,7 +22,10 @@ ALTER TABLE mission_orders
   ADD COLUMN IF NOT EXISTS template_name TEXT NOT NULL DEFAULT 'MISSION-ORDER-TEMPLATE',
   ADD COLUMN IF NOT EXISTS generated_docx_url TEXT,
   ADD COLUMN IF NOT EXISTS generated_docx_created_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS generated_docx_created_by UUID;
+  ADD COLUMN IF NOT EXISTS generated_docx_created_by UUID,
+  ADD COLUMN IF NOT EXISTS secretary_signed_attachment_url TEXT,
+  ADD COLUMN IF NOT EXISTS secretary_signed_attachment_uploaded_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS secretary_signed_attachment_uploaded_by UUID;
 
 COMMENT ON COLUMN mission_orders.date_of_inspection IS 'Head inspector-entered date of inspection.';
 COMMENT ON COLUMN mission_orders.date_of_issuance IS 'Head inspector-entered date of issuance.';
@@ -30,6 +33,9 @@ COMMENT ON COLUMN mission_orders.template_name IS 'Name/key of the mission order
 COMMENT ON COLUMN mission_orders.generated_docx_url IS 'Storage URL to the generated mission order DOCX.';
 COMMENT ON COLUMN mission_orders.generated_docx_created_at IS 'When the DOCX was generated.';
 COMMENT ON COLUMN mission_orders.generated_docx_created_by IS 'User who generated the DOCX.';
+COMMENT ON COLUMN mission_orders.secretary_signed_attachment_url IS 'Storage URL to the secretary-signed attachment (PDF or image) uploaded during archiving.';
+COMMENT ON COLUMN mission_orders.secretary_signed_attachment_uploaded_at IS 'When the secretary-signed attachment was uploaded.';
+COMMENT ON COLUMN mission_orders.secretary_signed_attachment_uploaded_by IS 'User who uploaded the secretary-signed attachment.';
 
 -- Helpful indexes
 CREATE INDEX IF NOT EXISTS idx_mission_orders_complaint_id ON mission_orders (complaint_id);

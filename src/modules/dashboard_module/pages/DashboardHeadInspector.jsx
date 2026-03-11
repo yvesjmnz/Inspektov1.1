@@ -462,7 +462,7 @@ export default function DashboardHeadInspector() {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
 
-  const archiveMissionOrder = async (missionOrderId) => {
+  const archiveMissionOrder = async (missionOrderId, file) => {
     setError('');
     setToast('');
 
@@ -471,14 +471,61 @@ export default function DashboardHeadInspector() {
       return;
     }
 
+    if (!file) {
+      setError('Please upload a PDF or PNG before archiving.');
+      return;
+    }
+
+    const isAllowed =
+      file.type === 'application/pdf' ||
+      file.type === 'image/png' ||
+      // Some browsers may leave file.type empty; fall back to extension check.
+      /\.(pdf|png)$/i.test(file.name || '');
+
+    if (!isAllowed) {
+      setError('Invalid file type. Please upload a PDF or PNG.');
+      return;
+    }
+
+    // 10MB guardrail (adjust if needed)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File is too large. Maximum allowed size is 10MB.');
+      return;
+    }
+
     try {
       setLoading(true);
       const nowIso = new Date().toISOString();
+
+      // 1) Upload attachment to Supabase Storage
+      // Bucket name: 'mission-orders' (must exist in Supabase Storage)
+      // Path: mission-orders/<missionOrderId>/secretary-signed/<timestamp>_<filename>
+      const safeName = String(file.name || 'attachment')
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .slice(0, 120);
+
+      const storagePath = `mission-orders/${missionOrderId}/secretary-signed/${Date.now()}_${safeName}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from('mission-orders')
+        .upload(storagePath, file, { upsert: true, contentType: file.type || undefined });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: publicUrlData } = supabase.storage.from('mission-orders').getPublicUrl(storagePath);
+      const attachmentUrl = publicUrlData?.publicUrl || null;
+
+      // 2) Patch mission order as archived/complete + store attachment URL
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData?.user?.id || null;
 
       const patch = {
         status: 'complete',
         updated_at: nowIso,
         secretary_signed_at: nowIso,
+        secretary_signed_attachment_url: attachmentUrl,
+        secretary_signed_attachment_uploaded_at: nowIso,
+        secretary_signed_attachment_uploaded_by: userId,
       };
 
       const { error: updateError } = await supabase
@@ -502,7 +549,7 @@ export default function DashboardHeadInspector() {
         )
       );
 
-      setToast('Mission order archived.');
+      setToast('Mission order archived (attachment uploaded).');
     } catch (e) {
       setError(e?.message || 'Failed to archive mission order.');
     } finally {
@@ -1899,34 +1946,57 @@ export default function DashboardHeadInspector() {
                                         </div>
                                       </td>
                                       <td>
-                                        <button
-                                          type="button"
+                                        <label
+                                          title="Upload signed attachment (PDF/PNG) and archive"
                                           style={{
-                                            padding: '6px 12px',
-                                            borderRadius: 6,
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            width: 40,
+                                            height: 32,
+                                            borderRadius: 8,
                                             border: 'none',
                                             background: '#10b981',
-                                            color: '#ffffff',
-                                            fontWeight: 700,
-                                            fontSize: 12,
-                                            cursor: 'pointer',
-                                            transition: 'background-color 0.2s ease',
+                                            cursor: loading ? 'not-allowed' : 'pointer',
+                                            transition: 'background-color 0.2s ease, transform 0.15s ease',
                                             opacity: loading ? 0.75 : 1,
-                                          }}
-                                          disabled={loading}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            archiveMissionOrder(c.mission_order_id);
                                           }}
                                           onMouseEnter={(e) => {
                                             e.currentTarget.style.background = '#059669';
+                                            e.currentTarget.style.transform = 'translateY(-1px)';
                                           }}
                                           onMouseLeave={(e) => {
                                             e.currentTarget.style.background = '#10b981';
+                                            e.currentTarget.style.transform = 'translateY(0)';
+                                          }}
+                                          onClick={(e) => {
+                                            // Prevent row expansion/click
+                                            e.stopPropagation();
+                                            if (loading) {
+                                              e.preventDefault();
+                                            }
                                           }}
                                         >
-                                          {loading ? 'Archiving…' : 'Archive'}
-                                        </button>
+                                          {/* Simple upload icon (inline SVG) */}
+                                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                            <path d="M12 3V15" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+                                            <path d="M7 8L12 3L17 8" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                            <path d="M4 14V20H20V14" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                          </svg>
+                                          <input
+                                            type="file"
+                                            accept="application/pdf,image/png,.pdf,.png"
+                                            style={{ display: 'none' }}
+                                            disabled={loading}
+                                            onChange={(e) => {
+                                              const file = e.target.files && e.target.files[0];
+                                              // Reset input so selecting the same file again triggers onChange
+                                              e.target.value = '';
+                                              if (!file) return;
+                                              archiveMissionOrder(c.mission_order_id, file);
+                                            }}
+                                          />
+                                        </label>
                                       </td>
                                     </tr>
                                     {expandedComplaintId === c.complaint_id && (

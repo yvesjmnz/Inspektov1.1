@@ -45,7 +45,6 @@ export default function DashboardInspector() {
   const [tab, setTab] = useState(getInitialTab); // assigned | history
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
 
   const [userLabel, setUserLabel] = useState('');
   const [assigned, setAssigned] = useState([]);
@@ -136,7 +135,7 @@ export default function DashboardInspector() {
       // The inspector dashboard is driven by inspection_reports.status only.
       const { data: moRows, error: moError } = await supabase
         .from('mission_orders')
-        .select('id, title, complaint_id, created_at, submitted_at, updated_at')
+        .select('id, title, complaint_id, created_at, submitted_at, updated_at, date_of_inspection')
         .in('id', missionOrderIds);
 
       if (moError) throw moError;
@@ -230,6 +229,7 @@ export default function DashboardInspector() {
             mission_order_title: mo.title,
             mission_order_submitted_at: mo.submitted_at,
             mission_order_updated_at: mo.updated_at,
+            date_of_inspection: mo.date_of_inspection,
             assigned_at: assignedAtByMissionOrderId.get(id),
             complaint_id: mo.complaint_id,
             business_name: c.business_name,
@@ -242,6 +242,11 @@ export default function DashboardInspector() {
           };
         })
         .sort((a, b) => {
+          const tA = a.date_of_inspection ? new Date(a.date_of_inspection).getTime() : 0;
+          const tB = b.date_of_inspection ? new Date(b.date_of_inspection).getTime() : 0;
+          if (tA && tB) return tA - tB;
+          if (tA && !tB) return -1;
+          if (!tA && tB) return 1;
           const atA = a.assigned_at ? new Date(a.assigned_at).getTime() : 0;
           const atB = b.assigned_at ? new Date(b.assigned_at).getTime() : 0;
           return atB - atA;
@@ -311,31 +316,9 @@ export default function DashboardInspector() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredAssigned = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return assigned;
+  const filteredAssigned = useMemo(() => assigned, [assigned]);
 
-    return assigned.filter((r) => {
-      const hay = [r.business_name, r.business_address, r.complaint_id, r.mission_order_id, r.mission_order_title]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [assigned, search]);
-
-  const filteredHistory = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return history;
-
-    return history.filter((r) => {
-      const hay = [r.business_name, r.business_address, r.complaint_id, r.mission_order_id, r.mission_order_title]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [history, search]);
+  const filteredHistory = useMemo(() => history, [history]);
 
   // Group inspection history by day (like Director dashboard)
   const historyByDay = useMemo(() => {
@@ -402,6 +385,9 @@ export default function DashboardInspector() {
               </div>
             </div>
             <ul className="dash-nav" style={{ flex: 1 }}>
+              <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspection</span>
+              </li>
               <li>
                 <button
                   type="button"
@@ -414,7 +400,7 @@ export default function DashboardInspector() {
                     style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                   >
                     <img
-                      src="/ui_icons/menu.png"
+                      src="/ui_icons/inspection.png"
                       alt=""
                       style={{
                         width: 22,
@@ -427,7 +413,7 @@ export default function DashboardInspector() {
                     />
                   </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>
-                    Assigned Inspections
+                    Inspections
                   </span>
                 </button>
               </li>
@@ -519,19 +505,6 @@ export default function DashboardInspector() {
                 </div>
               </div>
 
-              <div className="dash-toolbar">
-                <input
-                  className="dash-input"
-                  type="text"
-                  placeholder="Search by business name/address, complaint ID, or mission order ID..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-                <button className="dash-btn" type="button" onClick={loadAssigned} disabled={loading}>
-                  {loading ? 'Refreshing…' : 'Refresh'}
-                </button>
-              </div>
-
               {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
               <div style={{ display: 'grid', gap: 20 }}>
@@ -569,17 +542,7 @@ export default function DashboardInspector() {
                       {/* Header */}
                       <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
                         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Assigned Inspections</h3>
-                        <div
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 600,
-                            color: '#E5E7EB',
-                            marginTop: 6,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                          }}
-                        >
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
                           <span>{filteredAssigned.length} {filteredAssigned.length === 1 ? 'Inspection' : 'Inspections'}</span>
                         </div>
@@ -590,71 +553,77 @@ export default function DashboardInspector() {
                         <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead>
                             <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                              <th style={{ width: 110 }}>MO ID</th>
-                              <th>Business</th>
-                              <th style={{ width: 180 }}>Inspection Status</th>
-                              <th style={{ width: 200 }}>Assigned</th>
-                              <th style={{ width: 200 }}>Updated</th>
-                              <th style={{ width: 190 }}>Inspection Slip</th>
+                              <th style={{ width: 170, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION STATUS</th>
+                              <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>BUSINESS & ADDRESS</th>
+                              <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION DATE</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {filteredAssigned.map((r) => (
-                              <tr
-                                key={r.mission_order_id}
-                                style={{
-                                  cursor: 'pointer',
-                                  borderBottom: '1px solid #e2e8f0',
-                                  transition: 'background-color 0.2s ease',
-                                  position: 'relative',
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.background = '#f8fafc';
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.background = '#ffffff';
-                                }}
-                              >
-                                <td style={{ padding: '12px' }} title={r.mission_order_id}>
-                                  {String(r.mission_order_id).slice(0, 8)}…
-                                </td>
-                                <td style={{ padding: '12px' }}>
-                                  <div className="dash-cell-title">{r.business_name || '—'}</div>
-                                  <div className="dash-cell-sub">{r.business_address || ''}</div>
-                                  <div className="dash-cell-sub">
-                                    Complaint: {r.complaint_id ? String(r.complaint_id).slice(0, 8) + '…' : '—'}
-                                  </div>
-                                </td>
-                                <td style={{ padding: '12px' }}>
-                                  <span className={statusBadgeClass(r.inspection_status)}>
-                                    {formatStatus(r.inspection_status)}
-                                  </span>
-                                </td>
-                                <td style={{ padding: '12px' }}>
-                                  {r.assigned_at ? new Date(r.assigned_at).toLocaleString() : '—'}
-                                </td>
-                                <td style={{ padding: '12px' }}>
-                                  {r.mission_order_updated_at ? new Date(r.mission_order_updated_at).toLocaleString() : '—'}
-                                </td>
-                                <td style={{ padding: '12px' }}>
-                                  <a
-                                    className="dash-btn"
-                                    href={
-                                      r.inspection_report_id
-                                        ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
-                                        : `/inspection-slip/create?missionOrderId=${r.mission_order_id}`
-                                    }
-                                  >
-                                    {(() => {
-                                      const s = String(r.inspection_status || '').toLowerCase();
-                                      if (s === 'in progress' || s === 'in_progress') return 'Continue';
-                                      if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 'Start Inspection';
-                                      return 'Open';
-                                    })()}
-                                  </a>
-                                </td>
-                              </tr>
-                            ))}
+                            {filteredAssigned.map((r) => {
+                              const today = new Date();
+                              const insp = r.date_of_inspection ? new Date(r.date_of_inspection) : null;
+                              const isToday =
+                                !!insp &&
+                                insp.getFullYear() === today.getFullYear() &&
+                                insp.getMonth() === today.getMonth() &&
+                                insp.getDate() === today.getDate();
+
+                              const href =
+                                r.inspection_report_id
+                                  ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
+                                  : `/inspection-slip/create?missionOrderId=${r.mission_order_id}`;
+
+                              // Row should be clickable only on the scheduled inspection date.
+                              // Exception: allow in-progress inspections to be continued regardless of date.
+                              const statusLower = String(r.inspection_status || '').toLowerCase();
+                              const isInProgress = statusLower === 'in progress' || statusLower === 'in_progress';
+
+                              const isRowEnabled = isInProgress || isToday;
+
+                              
+                              return (
+                                <tr
+                                  key={r.mission_order_id}
+                                  style={{
+                                    cursor: isRowEnabled ? 'pointer' : 'not-allowed',
+                                    borderBottom: '1px solid #e2e8f0',
+                                    transition: 'background-color 0.2s ease, opacity 0.2s ease',
+                                    position: 'relative',
+                                    opacity: isRowEnabled ? 1 : 0.45,
+                                    filter: isRowEnabled ? 'none' : 'grayscale(0.35)',
+                                  }}
+                                  title={
+                                    isRowEnabled
+                                      ? 'Open inspection'
+                                      : 'This inspection will be available on its scheduled inspection date.'
+                                  }
+                                  onClick={() => {
+                                    if (!isRowEnabled) return;
+                                    window.location.assign(href);
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    if (!isRowEnabled) return;
+                                    e.currentTarget.style.background = '#f8fafc';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = '#ffffff';
+                                  }}
+                                >
+                                  <td style={{ padding: '12px' }}>
+                                    <span className={statusBadgeClass(r.inspection_status)} style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
+                                      {formatStatus(r.inspection_status)}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '12px' }}>
+                                    <div className="dash-cell-title">{r.business_name || '—'}</div>
+                                    <div className="dash-cell-sub">{r.business_address || ''}</div>
+                                  </td>
+                                  <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                    {r.date_of_inspection ? new Date(r.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                  </td>
+                                                                  </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -704,28 +673,10 @@ export default function DashboardInspector() {
                             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                               {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
                             </h3>
-                            <div
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 600,
-                                color: '#E5E7EB',
-                                marginTop: 6,
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  width: 12,
-                                  height: 12,
-                                  borderRadius: '50%',
-                                  background: '#22c55e',
-                                  flexShrink: 0,
-                                }}
-                              ></div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#22c55e', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
                               <span>
-                                {itemCount} completed inspection{itemCount === 1 ? '' : 's'}
+                                {itemCount} Completed Inspection{itemCount === 1 ? '' : 's'}
                               </span>
                             </div>
                           </div>
@@ -735,29 +686,30 @@ export default function DashboardInspector() {
                             <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                               <thead>
                                 <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                                  <th style={{ width: 110 }}>MO ID</th>
-                                  <th>Business</th>
-                                  <th style={{ width: 200 }}>Completed</th>
-                                  <th style={{ width: 190 }}>Inspection Slip</th>
+                                  <th style={{ width: 170, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION STATUS</th>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>BUSINESS & ADDRESS</th>
+                                  <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION DATE</th>
+                                  <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>COMPLETED DATE</th>
+                                  <th style={{ width: 190, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION SLIP</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {dayGroup.items.map((r) => (
                                   <tr key={`hist-${r.mission_order_id}`} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                    <td style={{ padding: '12px' }} title={r.mission_order_id}>
-                                      {String(r.mission_order_id).slice(0, 8)}…
+                                    <td style={{ padding: '12px' }}>
+                                      <span className={statusBadgeClass(r.inspection_status)} style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
+                                        {formatStatus(r.inspection_status)}
+                                      </span>
                                     </td>
                                     <td style={{ padding: '12px' }}>
                                       <div className="dash-cell-title">{r.business_name || '—'}</div>
                                       <div className="dash-cell-sub">{r.business_address || ''}</div>
-                                      <div className="dash-cell-sub">
-                                        Complaint: {r.complaint_id ? String(r.complaint_id).slice(0, 8) + '…' : '—'}
-                                      </div>
                                     </td>
-                                    <td style={{ padding: '12px' }}>
-                                      {r.inspection_completed_at
-                                        ? new Date(r.inspection_completed_at).toLocaleString()
-                                        : '—'}
+                                    <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                      {r.date_of_inspection ? new Date(r.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                    </td>
+                                    <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                      {r.inspection_completed_at ? new Date(r.inspection_completed_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
                                     </td>
                                     <td style={{ padding: '12px' }}>
                                       <a

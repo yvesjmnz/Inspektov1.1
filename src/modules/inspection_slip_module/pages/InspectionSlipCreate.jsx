@@ -26,6 +26,11 @@ export default function InspectionSlipCreate() {
 
   const [missionOrder, setMissionOrder] = useState(null);
   const [complaint, setComplaint] = useState(null);
+  const [signedAttachmentUrl, setSignedAttachmentUrl] = useState('');
+  const [signedAttachmentMeta, setSignedAttachmentMeta] = useState({
+    uploadedAt: null,
+    uploadedBy: null,
+  });
 
   const [inspectionReportId, setInspectionReportId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -373,7 +378,9 @@ export default function InspectionSlipCreate() {
 
         const { data: mo, error: moError } = await supabase
           .from('mission_orders')
-          .select('id, title, content, status, complaint_id, created_at, updated_at, submitted_at')
+          .select(
+            'id, title, content, status, complaint_id, created_at, updated_at, submitted_at, secretary_signed_attachment_url, secretary_signed_attachment_uploaded_at, secretary_signed_attachment_uploaded_by'
+          )
           .eq('id', missionOrderId)
           .single();
 
@@ -402,6 +409,11 @@ export default function InspectionSlipCreate() {
         }
 
         setMissionOrder(mo);
+        setSignedAttachmentUrl(mo?.secretary_signed_attachment_url || '');
+        setSignedAttachmentMeta({
+          uploadedAt: mo?.secretary_signed_attachment_uploaded_at || null,
+          uploadedBy: mo?.secretary_signed_attachment_uploaded_by || null,
+        });
 
         // If the URL explicitly references a specific inspection report (e.g., from history),
         // ALWAYS load that exact report and NEVER create a new draft row.
@@ -1605,82 +1617,66 @@ export default function InspectionSlipCreate() {
                     </div>
 
                     <div className="mo-meta" style={{ marginTop: 12 }}>
-                      Mission order preview is read-only for inspectors.
+                      Signed attachment uploaded by the Head Inspector.
                     </div>
 
                     <div
-                      className="mo-editor-wrap"
-                      aria-label="Mission Order Preview"
-                      style={{ marginTop: 12, background: '#fff' }}
+                      style={{
+                        marginTop: 12,
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 12,
+                        background: '#ffffff',
+                        overflow: 'hidden',
+                      }}
                     >
-                      <div
-                        className="mo-editor-preview"
-                        dangerouslySetInnerHTML={{
-                          __html: missionOrder?.content || '<p style="color:#64748b;">No content.</p>',
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="is-card">
-                    <div className="is-section-head">
-                      <div>
-                        <p className="is-section-title">Business / Complaint Details</p>
-                        <p className="is-section-sub">Details pulled from the linked complaint (if any).</p>
-                      </div>
-                    </div>
-
-                    <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                        <label>Business Name</label>
-                        <div style={{ fontWeight: 900, color: '#0f172a' }}>{complaint?.business_name || '—'}</div>
-                      </div>
-
-                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                        <label>Address</label>
-                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{complaint?.business_address || '—'}</div>
-                      </div>
-
-                      <div className="is-field">
-                        <label>Reporter Email</label>
-                        <div style={{ fontWeight: 800, color: '#0f172a' }}>{complaint?.reporter_email || '—'}</div>
-                      </div>
-
-                      <div className="is-field">
-                        <label>Complaint Status</label>
-                        <div style={statusBadgeStyle(complaint?.status)}>{formatStatus(complaint?.status)}</div>
-                      </div>
-
-                      <div className="is-field">
-                        <label>Submitted</label>
-                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                          {complaint?.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
+                      {!signedAttachmentUrl ? (
+                        <div className="mo-meta" style={{ padding: 12 }}>
+                          No signed attachment uploaded yet.
                         </div>
-                      </div>
-
-                      <div className="is-field">
-                        <label>Complaint ID</label>
-                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                          {complaint?.id ? `${String(complaint.id).slice(0, 8)}…` : '—'}
+                      ) : /\.pdf(\?|#|$)/i.test(String(signedAttachmentUrl)) ? (
+                        <iframe
+                          title="Signed Attachment (PDF)"
+                          src={signedAttachmentUrl}
+                          style={{ width: '100%', height: 560, border: 0, display: 'block' }}
+                        />
+                      ) : (
+                        <div style={{ padding: 12, background: '#0b1220' }}>
+                          <img
+                            src={signedAttachmentUrl}
+                            alt="Signed Attachment"
+                            style={{
+                              width: '100%',
+                              height: 'auto',
+                              maxHeight: 720,
+                              objectFit: 'contain',
+                              display: 'block',
+                              borderRadius: 10,
+                              background: '#0b1220',
+                            }}
+                          />
                         </div>
-                      </div>
-                    </div>
+                      )}
 
-                    <div className="is-field" style={{ marginTop: 12 }}>
-                      <label>Complaint Description</label>
-                      <div
-                        style={{
-                          border: '1px solid #e2e8f0',
-                          borderRadius: 10,
-                          padding: 12,
-                          background: '#f8fafc',
-                          whiteSpace: 'pre-wrap',
-                          color: '#0f172a',
-                          fontWeight: 700,
-                        }}
-                      >
-                        {complaint?.complaint_description || '—'}
-                      </div>
+                      {signedAttachmentUrl ? (
+                        <div style={{ padding: 12, borderTop: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <a
+                              href={signedAttachmentUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mo-link"
+                              style={{ fontWeight: 900 }}
+                            >
+                              Open in new tab
+                            </a>
+                            <span style={{ color: '#64748b', fontWeight: 700, fontSize: 12 }}>
+                              {signedAttachmentMeta.uploadedAt
+                                ? `Uploaded: ${new Date(signedAttachmentMeta.uploadedAt).toLocaleString()}`
+                                : ''}
+                            </span>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -1715,7 +1711,8 @@ export default function InspectionSlipCreate() {
                       </div>
                     )}
                   </div>
-                </>
+
+                                  </>
               ) : activeTab === 'inspection' && !isCompleted ? (
                 <>
                   <div className="is-card">
