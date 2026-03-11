@@ -7,8 +7,16 @@ import './Dashboard.css';
 function formatStatus(status) {
   if (!status) return 'Unknown';
   const s = String(status).toLowerCase().trim();
+
+  // inspection_reports statuses
+  if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 'Pending Inspection';
+  if (s === 'in progress' || s === 'in_progress') return 'In Progress';
+  if (s === 'completed') return 'Completed';
+
+  // mission_orders statuses
   if (s === 'cancelled' || s === 'canceled') return 'Cancelled';
   if (s === 'for inspection' || s === 'for_inspection') return 'Pre-Approved';
+
   return String(status)
     .replace(/_/g, ' ')
     .trim()
@@ -17,7 +25,12 @@ function formatStatus(status) {
 }
 
 function statusBadgeClass(status) {
-  const s = String(status || '').toLowerCase();
+  const s = String(status || '').toLowerCase().trim();
+
+  // inspection_reports status color coding
+  if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 'status-badge status-warning';
+  if (s === 'in progress' || s === 'in_progress') return 'status-badge status-info';
+  if (s === 'completed') return 'status-badge status-success';
 
   // Mission order status color coding (source of truth: DB check constraint)
   // draft -> neutral/info
@@ -33,7 +46,7 @@ function statusBadgeClass(status) {
   if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
   if (s === 'draft') return 'status-badge status-info';
 
-  // No mission order yet
+  // No status yet
   if (!s) return 'status-badge status-info';
 
   return 'status-badge';
@@ -41,7 +54,7 @@ function statusBadgeClass(status) {
 
 function getInitialTab() {
   const hash = window.location.hash.slice(1);
-  const validTabs = ['todo', 'results', 'inspection', 'for-inspection', 'revisions'];
+  const validTabs = ['todo', 'results', 'inspection', 'inspection-history', 'for-inspection', 'revisions'];
   return validTabs.includes(hash) ? hash : 'todo';
 }
 
@@ -160,7 +173,11 @@ export default function DashboardHeadInspector() {
       },
       inspection: {
         title: '(Inspection) Mission Order',
-        subtitle: 'See mission orders marked for inspection and those cancelled by the Director.',
+        subtitle: 'Track inspection workflow using inspection report statuses.',
+      },
+      'inspection-history': {
+        title: 'Inspection History',
+        subtitle: 'History for all completed inspections (from inspection reports).',
       },
       'for-inspection': {
         title: '(Secretary Approval) Mission Order',
@@ -277,6 +294,44 @@ export default function DashboardHeadInspector() {
 
       if (assignmentError) throw assignmentError;
 
+      // Load latest inspection report status per mission order (for Inspection tab UI).
+      // There may be multiple reports per MO (multiple inspectors / retries). We choose a single
+      // representative status using priority: in progress > pending inspection > completed.
+      const { data: reportRows, error: reportErr } = missionOrderIds.length
+        ? await supabase
+            .from('inspection_reports')
+            .select('mission_order_id, status, updated_at, created_at, completed_at')
+            .in('mission_order_id', missionOrderIds)
+            .order('updated_at', { ascending: false })
+            .limit(2000)
+        : { data: [], error: null };
+
+      if (reportErr) throw reportErr;
+
+      const normalizeInspectionStatus = (v) => String(v || '').toLowerCase().trim();
+      const inspectionPriority = (v) => {
+        const s = normalizeInspectionStatus(v);
+        if (s === 'in progress' || s === 'in_progress') return 3;
+        if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 2;
+        if (s === 'completed' || s === 'complete') return 1;
+        return 0;
+      };
+
+      const inspectionStatusByMissionOrderId = new Map();
+      for (const r of reportRows || []) {
+        const moId = r?.mission_order_id;
+        if (!moId) continue;
+        const cur = inspectionStatusByMissionOrderId.get(moId);
+        if (!cur) {
+          inspectionStatusByMissionOrderId.set(moId, r?.status || null);
+          continue;
+        }
+        // Keep the highest priority status across reports for this MO.
+        if (inspectionPriority(r?.status) > inspectionPriority(cur)) {
+          inspectionStatusByMissionOrderId.set(moId, r?.status || null);
+        }
+      }
+
       const inspectorIds = Array.from(
         new Set((assignmentRows || []).map((a) => a?.inspector_id).filter(Boolean))
       );
@@ -319,6 +374,7 @@ export default function DashboardHeadInspector() {
           created_at: c.created_at,
           mission_order_id: mo?.id || null,
           mission_order_status: mo?.status || null,
+          inspection_status: mo?.id ? inspectionStatusByMissionOrderId.get(mo.id) || null : null,
           mission_order_created_at: mo?.created_at || null,
           date_of_inspection: mo?.date_of_inspection || null,
           mission_order_updated_at: mo?.updated_at || null,
@@ -579,6 +635,8 @@ export default function DashboardHeadInspector() {
       if (tab === 'for-inspection') return s === 'awaiting_signature';
       // Mission Order History: only completed/accomplished mission orders
       if (tab === 'revisions') return s === 'complete';
+      // inspection-history is driven by a separate query
+      if (tab === 'inspection-history') return false;
       return true;
     });
 
@@ -624,6 +682,121 @@ export default function DashboardHeadInspector() {
     const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
     return { groups, sortedKeys };
   }, [filteredComplaints, tab]);
+
+  const [inspectionHistory, setInspectionHistory] = useState([]);
+
+  const loadInspectionHistory = async () => {
+    setError('');
+    setLoading(true);
+
+    try {
+      // 1) Load completed inspection reports
+      const { data: reportRows, error: reportErr } = await supabase
+        .from('inspection_reports')
+        .select('id, mission_order_id, status, completed_at, updated_at, created_at')
+        .eq('status', 'completed')
+        .order('completed_at', { ascending: false })
+        .limit(1000);
+
+      if (reportErr) throw reportErr;
+
+      const missionOrderIds = Array.from(new Set((reportRows || []).map((r) => r?.mission_order_id).filter(Boolean)));
+
+      // 2) Load mission orders to resolve complaint_id
+      const { data: moRows, error: moErr } = missionOrderIds.length
+        ? await supabase
+            .from('mission_orders')
+            .select('id, complaint_id')
+            .in('id', missionOrderIds)
+        : { data: [], error: null };
+
+      if (moErr) throw moErr;
+
+      const moById = new Map((moRows || []).map((m) => [m.id, m]));
+
+      const complaintIds = Array.from(new Set((moRows || []).map((m) => m?.complaint_id).filter(Boolean)));
+
+      // 3) Load complaints for business info
+      const { data: complaintRows, error: cErr } = complaintIds.length
+        ? await supabase
+            .from('complaints')
+            .select('id, business_name, business_address')
+            .in('id', complaintIds)
+        : { data: [], error: null };
+
+      if (cErr) throw cErr;
+
+      const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
+
+      const merged = (reportRows || []).map((r) => {
+        const mo = moById.get(r.mission_order_id) || {};
+        const c = complaintById.get(mo.complaint_id) || {};
+        return {
+          inspection_report_id: r.id,
+          mission_order_id: r.mission_order_id,
+          inspection_status: r.status,
+          inspection_completed_at: r.completed_at,
+          business_name: c.business_name,
+          business_address: c.business_address,
+          complaint_id: mo.complaint_id,
+        };
+      });
+
+      setInspectionHistory(merged);
+    } catch (e) {
+      setError(e?.message || 'Failed to load inspection history.');
+      setInspectionHistory([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load inspection history when opening the tab
+  useEffect(() => {
+    if (tab !== 'inspection-history') return;
+    loadInspectionHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  const filteredInspectionHistory = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return inspectionHistory;
+
+    return (inspectionHistory || []).filter((r) => {
+      const hay = [r.business_name, r.business_address, r.complaint_id, r.mission_order_id, r.inspection_report_id]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [inspectionHistory, search]);
+
+  const inspectionHistoryByDay = useMemo(() => {
+    if (tab !== 'inspection-history') return { groups: {}, sortedKeys: [] };
+
+    const groups = {};
+    for (const r of filteredInspectionHistory) {
+      const d = r.inspection_completed_at ? new Date(r.inspection_completed_at) : null;
+      const key = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10) : 'unknown';
+      if (!groups[key]) {
+        const label = d ? d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }) : 'Unknown Date';
+        groups[key] = { label, items: [] };
+      }
+      groups[key].items.push(r);
+    }
+
+    // Sort items within each day by completed_at desc
+    for (const key in groups) {
+      groups[key].items.sort((a, b) => {
+        const timeA = a.inspection_completed_at ? new Date(a.inspection_completed_at).getTime() : 0;
+        const timeB = b.inspection_completed_at ? new Date(b.inspection_completed_at).getTime() : 0;
+        return timeB - timeA;
+      });
+    }
+
+    const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
+    return { groups, sortedKeys };
+  }, [filteredInspectionHistory, tab]);
 
   return (
     <div className="dash-container">
@@ -678,14 +851,6 @@ export default function DashboardHeadInspector() {
                 </button>
               </li>
               <li>
-                <button type="button" className={`dash-nav-item ${tab === 'inspection' ? 'active' : ''}`} onClick={() => setTab('inspection')}>
-                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/inspection.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
-                  </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspection</span>
-                </button>
-              </li>
-              <li>
                 <button type="button" className={`dash-nav-item ${tab === 'for-inspection' ? 'active' : ''}`} onClick={() => setTab('for-inspection')}>
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img src="/ui_icons/queue.png" alt="" style={{ width: 24, height: 24, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
@@ -701,7 +866,27 @@ export default function DashboardHeadInspector() {
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Mission Order History</span>
                 </button>
               </li>
-                          </ul>
+
+              <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspection</span>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'inspection' ? 'active' : ''}`} onClick={() => setTab('inspection')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/inspection.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspection</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'inspection-history' ? 'active' : ''}`} onClick={() => setTab('inspection-history')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspection History</span>
+                </button>
+              </li>
+            </ul>
             <button
               type="button"
               className="dash-nav-item"
@@ -1309,7 +1494,7 @@ export default function DashboardHeadInspector() {
                       <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                            <th style={{ width: 160 }}>MO Status</th>
+                            <th style={{ width: 160 }}>Inspection Status</th>
                             <th>Business & Address</th>
                             <th style={{ width: 200 }}>Inspection Date</th>
                             <th style={{ width: 200 }}>Inspectors</th>
@@ -1335,7 +1520,7 @@ export default function DashboardHeadInspector() {
                                 }}
                               >
                                 <td style={{ padding: '12px' }}>
-                                  <span className={statusBadgeClass(c.mission_order_status)}>{formatStatus(c.mission_order_status)}</span>
+                                  <span className={statusBadgeClass(c.inspection_status)}>{formatStatus(c.inspection_status)}</span>
                                 </td>
                                 <td style={{ padding: '12px' }}>
                                   <div className="dash-cell-title">{c.business_name || '—'}</div>
@@ -1365,6 +1550,93 @@ export default function DashboardHeadInspector() {
                     </div>
                   </div>
                 </div>
+              ) : tab === 'inspection-history' ? (
+                inspectionHistoryByDay.sortedKeys.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                    {loading ? 'Loading…' : 'No inspection history found.'}
+                  </div>
+                ) : (
+                  inspectionHistoryByDay.sortedKeys.map((dayKey) => {
+                    const dayGroup = inspectionHistoryByDay.groups[dayKey];
+                    const label = dayGroup?.label || dayKey;
+                    const itemCount = dayGroup?.items?.length || 0;
+                    if (itemCount === 0) return null;
+
+                    return (
+                      <div
+                        key={`insp-hist-day-${dayKey}`}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 14,
+                          boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                          overflow: 'hidden',
+                          transition: 'box-shadow 0.2s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                        }}
+                      >
+                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                            {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
+                          </h3>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
+                            <span>{itemCount} completed inspection{itemCount === 1 ? '' : 's'}</span>
+                          </div>
+                        </div>
+
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                <th style={{ width: 110 }}>MO ID</th>
+                                <th>Business</th>
+                                <th style={{ width: 200 }}>Completed</th>
+                                <th style={{ width: 190 }}>Inspection Slip</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dayGroup.items.map((r) => (
+                                <tr key={`insp-hist-${r.inspection_report_id}`} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                  <td style={{ padding: '12px' }} title={r.mission_order_id}>
+                                    {r.mission_order_id ? `${String(r.mission_order_id).slice(0, 8)}…` : '—'}
+                                  </td>
+                                  <td style={{ padding: '12px' }}>
+                                    <div className="dash-cell-title">{r.business_name || '—'}</div>
+                                    <div className="dash-cell-sub">{r.business_address || ''}</div>
+                                    <div className="dash-cell-sub">Complaint: {r.complaint_id ? `${String(r.complaint_id).slice(0, 8)}…` : '—'}</div>
+                                  </td>
+                                  <td style={{ padding: '12px' }}>
+                                    {r.inspection_completed_at ? new Date(r.inspection_completed_at).toLocaleString() : '—'}
+                                  </td>
+                                  <td style={{ padding: '12px' }}>
+                                    <a
+                                      className="dash-btn"
+                                      href={
+                                        r.inspection_report_id && r.mission_order_id
+                                          ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
+                                          : r.mission_order_id
+                                            ? `/inspection-slip/create?missionOrderId=${r.mission_order_id}`
+                                            : '#'
+                                      }
+                                    >
+                                      View
+                                    </a>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
               ) : tab === 'for-inspection' ? (
                 <div style={{ display: 'grid', gap: 20 }}>
                   {filteredComplaints.length === 0 ? (

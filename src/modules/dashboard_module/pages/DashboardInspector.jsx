@@ -5,11 +5,18 @@ import './Dashboard.css';
 
 function formatStatus(status) {
   if (!status) return 'Unknown';
-  const s = String(status || '').toLowerCase();
-  // MO status rename: completed -> for inspection
-  if (s === 'completed' || s === 'for_inspection' || s === 'for inspection') return 'For Inspection';
 
-  return String(status)
+  const raw = String(status || '').trim();
+  const s = raw.toLowerCase();
+
+  // Inspector dashboard is driven purely by inspection_reports.status.
+  // Accepted workflow states (in order): Pending Inspection -> In Progress -> Complete
+  if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 'Pending Inspection';
+  if (s === 'in progress' || s === 'in_progress') return 'In Progress';
+  if (s === 'completed' || s === 'complete') return 'Complete';
+
+  // Fallback formatting
+  return raw
     .replace(/_/g, ' ')
     .trim()
     .replace(/\s+/g, ' ')
@@ -18,10 +25,12 @@ function formatStatus(status) {
 
 function statusBadgeClass(status) {
   const s = String(status || '').toLowerCase();
-  if (['completed', 'approved'].includes(s)) return 'status-badge status-success';
-  if (['cancelled', 'declined', 'rejected', 'invalid'].includes(s)) return 'status-badge status-danger';
-  if (['issued', 'submitted', 'pending', 'new'].includes(s)) return 'status-badge status-warning';
-  if (['on hold', 'on_hold', 'hold'].includes(s)) return 'status-badge status-info';
+
+  // Color coding for inspection report statuses
+  if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 'status-badge status-warning';
+  if (s === 'in progress' || s === 'in_progress') return 'status-badge status-info';
+  if (s === 'completed' || s === 'complete') return 'status-badge status-success';
+
   return 'status-badge';
 }
 
@@ -123,19 +132,17 @@ export default function DashboardInspector() {
       }
 
       // 2) Load mission orders for my assignments.
-      // We keep the "for inspection" gate for Assigned, but we ALSO allow "completed" so items can move to History.
-      // (Otherwise, once MO status changes after submission, the MO disappears and can never show in history.)
+      // IMPORTANT: Do NOT gate this dashboard by mission_orders.status anymore.
+      // The inspector dashboard is driven by inspection_reports.status only.
       const { data: moRows, error: moError } = await supabase
         .from('mission_orders')
-        .select('id, title, status, complaint_id, created_at, submitted_at, updated_at')
-        .in('id', missionOrderIds)
-        .in('status', ['for inspection', 'for_inspection', 'For Inspection', 'completed', 'Completed', 'complete', 'Complete']);
+        .select('id, title, complaint_id, created_at, submitted_at, updated_at')
+        .in('id', missionOrderIds);
 
       if (moError) throw moError;
 
-      // Keep the same order as assignments, but drop any mission orders not matching the status filter.
-      const filteredMissionOrderIds = new Set((moRows || []).map((m) => m?.id).filter(Boolean));
-      const visibleMissionOrderIds = missionOrderIds.filter((id) => filteredMissionOrderIds.has(id));
+      // Keep the same order as assignments.
+      const visibleMissionOrderIds = missionOrderIds;
 
       if (visibleMissionOrderIds.length === 0) {
         setAssigned([]);
@@ -161,10 +168,10 @@ export default function DashboardInspector() {
       // Helpers must be defined BEFORE we use them.
       const statusLower = (s) => String(s || '').toLowerCase().trim();
 
-      // Treat multiple variants as "completed" (DB values can vary across environments)
+      // Inspection status is only based on inspection_reports.status
       const isCompletedStatus = (s) => {
         const v = statusLower(s);
-        return v === 'completed' || v === 'complete' || v === 'done' || v === 'finished' || v === 'submitted';
+        return v === 'complete' || v === 'completed';
       };
 
       // 4) Load inspection report status per mission order, to split Pending vs History.
@@ -221,7 +228,6 @@ export default function DashboardInspector() {
           return {
             mission_order_id: id,
             mission_order_title: mo.title,
-            mission_order_status: mo.status,
             mission_order_submitted_at: mo.submitted_at,
             mission_order_updated_at: mo.updated_at,
             assigned_at: assignedAtByMissionOrderId.get(id),
@@ -241,9 +247,13 @@ export default function DashboardInspector() {
           return atB - atA;
         });
 
-      const pendingList = mergedAll.filter((r) => !isCompletedStatus(r.inspection_status));
+      // Assigned tab should only show inspections that exist and are actionable.
+      // If there is no inspection_report row yet, it should not appear here.
+      const pendingList = mergedAll.filter(
+        (r) => r.inspection_report_id && !isCompletedStatus(r.inspection_status)
+      );
       const historyList = mergedAll
-        .filter((r) => isCompletedStatus(r.inspection_status))
+        .filter((r) => r.inspection_report_id && isCompletedStatus(r.inspection_status))
         .sort((a, b) => {
           const tA = a.inspection_completed_at ? new Date(a.inspection_completed_at).getTime() : 0;
           const tB = b.inspection_completed_at ? new Date(b.inspection_completed_at).getTime() : 0;
@@ -582,7 +592,7 @@ export default function DashboardInspector() {
                             <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
                               <th style={{ width: 110 }}>MO ID</th>
                               <th>Business</th>
-                              <th style={{ width: 160 }}>MO Status</th>
+                              <th style={{ width: 180 }}>Inspection Status</th>
                               <th style={{ width: 200 }}>Assigned</th>
                               <th style={{ width: 200 }}>Updated</th>
                               <th style={{ width: 190 }}>Inspection Slip</th>
@@ -616,8 +626,8 @@ export default function DashboardInspector() {
                                   </div>
                                 </td>
                                 <td style={{ padding: '12px' }}>
-                                  <span className={statusBadgeClass(r.mission_order_status)}>
-                                    {formatStatus(r.mission_order_status)}
+                                  <span className={statusBadgeClass(r.inspection_status)}>
+                                    {formatStatus(r.inspection_status)}
                                   </span>
                                 </td>
                                 <td style={{ padding: '12px' }}>
@@ -627,10 +637,20 @@ export default function DashboardInspector() {
                                   {r.mission_order_updated_at ? new Date(r.mission_order_updated_at).toLocaleString() : '—'}
                                 </td>
                                 <td style={{ padding: '12px' }}>
-                                  <a className="dash-btn" href={`/inspection-slip/create?missionOrderId=${r.mission_order_id}`}>
-                                    {String(r.inspection_status || '').toLowerCase() === 'in progress'
-                                      ? 'Continue'
-                                      : 'Start Inspection'}
+                                  <a
+                                    className="dash-btn"
+                                    href={
+                                      r.inspection_report_id
+                                        ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
+                                        : `/inspection-slip/create?missionOrderId=${r.mission_order_id}`
+                                    }
+                                  >
+                                    {(() => {
+                                      const s = String(r.inspection_status || '').toLowerCase();
+                                      if (s === 'in progress' || s === 'in_progress') return 'Continue';
+                                      if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 'Start Inspection';
+                                      return 'Open';
+                                    })()}
                                   </a>
                                 </td>
                               </tr>
