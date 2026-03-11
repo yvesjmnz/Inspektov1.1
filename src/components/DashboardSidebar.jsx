@@ -79,6 +79,16 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           href: '/dashboard/director?tab=mission-orders-history',
           section: null,
         },
+        {
+          label: 'Inspection',
+          section: 'INSPECTION',
+        },
+        {
+          label: 'Inspections',
+          icon: '/ui_icons/inspection.png',
+          href: '/dashboard/director?tab=inspection',
+          section: null,
+        },
       ];
     }
 
@@ -207,6 +217,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'history') return 'Complaint History';
       if (tab === 'mission-orders') return 'Review Mission Orders';
       if (tab === 'mission-orders-history') return 'Mission Order History';
+      if (tab === 'inspection') return 'Inspections';
       return 'Dashboard';
     }
 
