@@ -172,8 +172,8 @@ export default function DashboardHeadInspector() {
         subtitle: 'Track mission orders issued and approved or rejected by the Director.',
       },
       inspection: {
-        title: '(Inspection) Mission Order',
-        subtitle: 'Track inspection workflow using inspection report statuses.',
+        title: 'Inspections',
+        subtitle: 'Track ongoing inspections.',
       },
       'inspection-history': {
         title: 'Inspection History',
@@ -685,6 +685,23 @@ export default function DashboardHeadInspector() {
 
   const [inspectionHistory, setInspectionHistory] = useState([]);
 
+  const formatTimestampNoMs = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+
+    // UI requirement: no milliseconds.
+    // Use locale date + time with seconds (matches existing history view) without fractional seconds.
+    return d.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  };
+
   const loadInspectionHistory = async () => {
     setError('');
     setLoading(true);
@@ -702,11 +719,11 @@ export default function DashboardHeadInspector() {
 
       const missionOrderIds = Array.from(new Set((reportRows || []).map((r) => r?.mission_order_id).filter(Boolean)));
 
-      // 2) Load mission orders to resolve complaint_id
+      // 2) Load mission orders to resolve complaint_id and inspection date
       const { data: moRows, error: moErr } = missionOrderIds.length
         ? await supabase
             .from('mission_orders')
-            .select('id, complaint_id')
+            .select('id, complaint_id, date_of_inspection')
             .in('id', missionOrderIds)
         : { data: [], error: null };
 
@@ -728,6 +745,42 @@ export default function DashboardHeadInspector() {
 
       const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
 
+      // 4) Load inspector assignments + names (to match Inspections tab pills)
+      const { data: assignmentRows, error: assignmentErr } = missionOrderIds.length
+        ? await supabase
+            .from('mission_order_assignments')
+            .select('mission_order_id, inspector_id')
+            .in('mission_order_id', missionOrderIds)
+        : { data: [], error: null };
+
+      if (assignmentErr) throw assignmentErr;
+
+      const inspectorIds = Array.from(new Set((assignmentRows || []).map((a) => a?.inspector_id).filter(Boolean)));
+
+      const { data: profileRows, error: profileErr } = inspectorIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name, first_name, middle_name, last_name')
+            .in('id', inspectorIds)
+        : { data: [], error: null };
+
+      if (profileErr) throw profileErr;
+
+      const profileById = new Map((profileRows || []).map((p) => [p.id, p]));
+
+      const inspectorNamesByMissionOrderId = new Map();
+      (assignmentRows || []).forEach((a) => {
+        if (!a?.mission_order_id || !a?.inspector_id) return;
+        const p = profileById.get(a.inspector_id);
+        const displayName =
+          p?.full_name ||
+          [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') ||
+          String(a.inspector_id).slice(0, 8);
+        const arr = inspectorNamesByMissionOrderId.get(a.mission_order_id) || [];
+        arr.push(displayName);
+        inspectorNamesByMissionOrderId.set(a.mission_order_id, arr);
+      });
+
       const merged = (reportRows || []).map((r) => {
         const mo = moById.get(r.mission_order_id) || {};
         const c = complaintById.get(mo.complaint_id) || {};
@@ -735,10 +788,11 @@ export default function DashboardHeadInspector() {
           inspection_report_id: r.id,
           mission_order_id: r.mission_order_id,
           inspection_status: r.status,
+          inspection_date: mo?.date_of_inspection || null,
           inspection_completed_at: r.completed_at,
           business_name: c.business_name,
           business_address: c.business_address,
-          complaint_id: mo.complaint_id,
+          inspector_names: r?.mission_order_id ? inspectorNamesByMissionOrderId.get(r.mission_order_id) || [] : [],
         };
       });
 
@@ -875,7 +929,7 @@ export default function DashboardHeadInspector() {
                   <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img src="/ui_icons/inspection.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspection</span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspections</span>
                 </button>
               </li>
               <li>
@@ -1475,80 +1529,126 @@ export default function DashboardHeadInspector() {
                 </div>
               ) : tab === 'inspection' ? (
                 <div style={{ display: 'grid', gap: 20 }}>
-                  <div
-                    style={{
-                      background: '#ffffff',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 14,
-                      boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
-                      <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Inspection</h3>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6 }}>
-                        {filteredComplaints.length} {filteredComplaints.length === 1 ? 'Item' : 'Items'}
-                      </div>
-                    </div>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead>
-                          <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                            <th style={{ width: 160 }}>Inspection Status</th>
-                            <th>Business & Address</th>
-                            <th style={{ width: 200 }}>Inspection Date</th>
-                            <th style={{ width: 200 }}>Inspectors</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredComplaints.length === 0 ? (
-                            <tr>
-                              <td colSpan="4" style={{ textAlign: 'center', padding: 32, color: '#475569' }}>
-                                {loading ? 'Loading…' : 'No records found for this tab.'}
-                              </td>
-                            </tr>
-                          ) : (
-                            filteredComplaints.map((c) => (
-                              <tr
-                                key={`insp-${c.complaint_id}`}
-                                style={{ borderBottom: '1px solid #e2e8f0', cursor: c.mission_order_id ? 'pointer' : 'default' }}
-                                title={c.mission_order_id ? 'View mission order' : 'No mission order available'}
-                                onClick={() => {
-                                  if (c.mission_order_id) {
-                                    window.location.assign(`/mission-order/review?id=${c.mission_order_id}`);
-                                  }
-                                }}
-                              >
-                                <td style={{ padding: '12px' }}>
-                                  <span className={statusBadgeClass(c.inspection_status)}>{formatStatus(c.inspection_status)}</span>
-                                </td>
-                                <td style={{ padding: '12px' }}>
-                                  <div className="dash-cell-title">{c.business_name || '—'}</div>
-                                  <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                </td>
-                                <td style={{ padding: '12px' }}>
-                                  {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
-                                </td>
-                                <td style={{ padding: '12px' }}>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                    {(c.inspector_names || []).length === 0 ? (
-                                      <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
-                                    ) : (
-                                      (c.inspector_names || []).map((name, idx) => (
-                                        <span key={`${c.complaint_id}-${idx}`} style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}>
-                                          {name}
-                                        </span>
-                                      ))
-                                    )}
-                                  </div>
-                                </td>
+                  {(() => {
+                    const normalize = (v) => String(v || '').toLowerCase().trim();
+                    const pending = (filteredComplaints || [])
+                      .filter((c) => normalize(c.inspection_status) === 'pending inspection')
+                      .sort((a, b) => {
+                        const tA = a.date_of_inspection ? new Date(a.date_of_inspection).getTime() : 0;
+                        const tB = b.date_of_inspection ? new Date(b.date_of_inspection).getTime() : 0;
+                        return tA - tB;
+                      });
+
+                    const inProgress = (filteredComplaints || [])
+                      .filter((c) => normalize(c.inspection_status) === 'in progress')
+                      .sort((a, b) => {
+                        const tA = a.date_of_inspection ? new Date(a.date_of_inspection).getTime() : 0;
+                        const tB = b.date_of_inspection ? new Date(b.date_of_inspection).getTime() : 0;
+                        return tA - tB;
+                      });
+
+                    const Table = ({ title, rows, dotColor, countLabelSingular, countLabelPlural }) => (
+                      <div
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 14,
+                          boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>{title}</h3>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: dotColor, marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: dotColor, flexShrink: 0 }}></div>
+                            <span>{rows.length} {rows.length === 1 ? countLabelSingular : countLabelPlural}</span>
+                          </div>
+                        </div>
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION STATUS</th>
+                                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>BUSINESS & ADDRESS</th>
+                                <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION DATE</th>
+                                <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTORS</th>
                               </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                            </thead>
+                            <tbody>
+                              {rows.length === 0 ? (
+                                <tr>
+                                  <td colSpan="4" style={{ textAlign: 'center', padding: 24, color: '#475569' }}>
+                                    {loading ? 'Loading…' : 'No records found.'}
+                                  </td>
+                                </tr>
+                              ) : (
+                                rows.map((c) => (
+                                  <tr
+                                    key={`insp-${title}-${c.complaint_id}`}
+                                    style={{ borderBottom: '1px solid #e2e8f0', cursor: c.mission_order_id ? 'pointer' : 'default' }}
+                                    title={c.mission_order_id ? 'View mission order' : 'No mission order available'}
+                                    onClick={() => {
+                                      if (c.mission_order_id) {
+                                        window.location.assign(`/mission-order/review?id=${c.mission_order_id}`);
+                                      }
+                                    }}
+                                  >
+                                    <td style={{ padding: '12px' }}>
+                                      <span
+                                        className={statusBadgeClass(c.inspection_status)}
+                                        style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}
+                                      >
+                                        {formatStatus(c.inspection_status)}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '12px' }}>
+                                      <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                      <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                    </td>
+                                    <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                      {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                    </td>
+                                    <td style={{ padding: '12px' }}>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                        {(c.inspector_names || []).length === 0 ? (
+                                          <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                        ) : (
+                                          (c.inspector_names || []).map((name, idx) => (
+                                            <span key={`${c.complaint_id}-${idx}`} style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}>
+                                              {name}
+                                            </span>
+                                          ))
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+
+                    return (
+                      <>
+                        <Table
+                          title="Pending Inspection"
+                          rows={pending}
+                          dotColor="#F2B705"
+                          countLabelSingular="Pending Inspection"
+                          countLabelPlural="Pending Inspections"
+                        />
+                        <Table
+                          title="In Progress"
+                          rows={inProgress}
+                          dotColor="#60a5fa"
+                          countLabelSingular="Ongoing Inspection"
+                          countLabelPlural="Ongoing Inspections"
+                        />
+                      </>
+                    );
+                  })()}
                 </div>
               ) : tab === 'inspection-history' ? (
                 inspectionHistoryByDay.sortedKeys.length === 0 ? (
@@ -1556,86 +1656,108 @@ export default function DashboardHeadInspector() {
                     {loading ? 'Loading…' : 'No inspection history found.'}
                   </div>
                 ) : (
-                  inspectionHistoryByDay.sortedKeys.map((dayKey) => {
-                    const dayGroup = inspectionHistoryByDay.groups[dayKey];
-                    const label = dayGroup?.label || dayKey;
-                    const itemCount = dayGroup?.items?.length || 0;
-                    if (itemCount === 0) return null;
+                  <div style={{ display: 'grid', gap: 20 }}>
+                    {inspectionHistoryByDay.sortedKeys.map((dayKey) => {
+                      const dayGroup = inspectionHistoryByDay.groups[dayKey];
+                      const label = dayGroup?.label || dayKey;
+                      const itemCount = dayGroup?.items?.length || 0;
+                      if (itemCount === 0) return null;
 
-                    return (
-                      <div
-                        key={`insp-hist-day-${dayKey}`}
-                        style={{
-                          background: '#ffffff',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: 14,
-                          boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
-                          overflow: 'hidden',
-                          transition: 'box-shadow 0.2s ease',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
-                        }}
-                      >
-                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
-                          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
-                            {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
-                          </h3>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
-                            <span>{itemCount} completed inspection{itemCount === 1 ? '' : 's'}</span>
+                      return (
+                        <div
+                          key={`insp-hist-day-${dayKey}`}
+                          style={{
+                            background: '#ffffff',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 14,
+                            boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                            overflow: 'hidden',
+                            transition: 'box-shadow 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                          }}
+                        >
+                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                              {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
+                            </h3>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#22c55e', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
+                              <span>{itemCount} Completed Inspection{itemCount === 1 ? '' : 's'}</span>
+                            </div>
+                          </div>
+
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                  <th style={{ width: 170, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspection Status</th>
+                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                                  <th style={{ width: 210, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspection Date</th>
+                                  <th style={{ width: 210, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Completed Date</th>
+                                  <th style={{ width: 220, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspectors</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {dayGroup.items.map((r) => (
+                                  <tr
+                                    key={`insp-hist-${r.inspection_report_id}`}
+                                    style={{ borderBottom: '1px solid #e2e8f0', cursor: r.mission_order_id ? 'pointer' : 'default' }}
+                                    title={r.mission_order_id ? 'View mission order' : ''}
+                                    onClick={() => {
+                                      if (r.mission_order_id) {
+                                        window.location.assign(`/mission-order/review?id=${r.mission_order_id}`);
+                                      }
+                                    }}
+                                  >
+                                    <td style={{ padding: '12px' }}>
+                                      <span
+                                        className={statusBadgeClass(r.inspection_status)}
+                                        style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}
+                                      >
+                                        {formatStatus(r.inspection_status)}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '12px' }}>
+                                      <div className="dash-cell-title">{r.business_name || '—'}</div>
+                                      <div className="dash-cell-sub">{r.business_address || ''}</div>
+                                    </td>
+                                    <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                      {r.inspection_date ? new Date(r.inspection_date).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                    </td>
+                                    <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                      {r.inspection_completed_at ? new Date(r.inspection_completed_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                    </td>
+                                    <td style={{ padding: '12px' }}>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                        {(r.inspector_names || []).length === 0 ? (
+                                          <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                        ) : (
+                                          (r.inspector_names || []).map((name, idx) => (
+                                            <span
+                                              key={`${r.mission_order_id || r.inspection_report_id}-${idx}`}
+                                              style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              {name}
+                                            </span>
+                                          ))
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
-
-                        <div style={{ overflowX: 'auto' }}>
-                          <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                            <thead>
-                              <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                                <th style={{ width: 110 }}>MO ID</th>
-                                <th>Business</th>
-                                <th style={{ width: 200 }}>Completed</th>
-                                <th style={{ width: 190 }}>Inspection Slip</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {dayGroup.items.map((r) => (
-                                <tr key={`insp-hist-${r.inspection_report_id}`} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                  <td style={{ padding: '12px' }} title={r.mission_order_id}>
-                                    {r.mission_order_id ? `${String(r.mission_order_id).slice(0, 8)}…` : '—'}
-                                  </td>
-                                  <td style={{ padding: '12px' }}>
-                                    <div className="dash-cell-title">{r.business_name || '—'}</div>
-                                    <div className="dash-cell-sub">{r.business_address || ''}</div>
-                                    <div className="dash-cell-sub">Complaint: {r.complaint_id ? `${String(r.complaint_id).slice(0, 8)}…` : '—'}</div>
-                                  </td>
-                                  <td style={{ padding: '12px' }}>
-                                    {r.inspection_completed_at ? new Date(r.inspection_completed_at).toLocaleString() : '—'}
-                                  </td>
-                                  <td style={{ padding: '12px' }}>
-                                    <a
-                                      className="dash-btn"
-                                      href={
-                                        r.inspection_report_id && r.mission_order_id
-                                          ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
-                                          : r.mission_order_id
-                                            ? `/inspection-slip/create?missionOrderId=${r.mission_order_id}`
-                                            : '#'
-                                      }
-                                    >
-                                      View
-                                    </a>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    );
-                  })
+                      );
+                    })}
+                  </div>
                 )
               ) : tab === 'for-inspection' ? (
                 <div style={{ display: 'grid', gap: 20 }}>

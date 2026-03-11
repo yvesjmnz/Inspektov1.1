@@ -122,6 +122,24 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           section: null,
           tabName: 'revisions',
         },
+        {
+          label: 'Inspection',
+          section: 'INSPECTION',
+        },
+        {
+          label: 'Inspection',
+          icon: '/ui_icons/inspection.png',
+          href: '/dashboard/head-inspector',
+          section: null,
+          tabName: 'inspection',
+        },
+        {
+          label: 'Inspection History',
+          icon: '/ui_icons/history.png',
+          href: '/dashboard/head-inspector',
+          section: null,
+          tabName: 'inspection-history',
+        },
       ];
     }
 
@@ -173,6 +191,8 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (hash === 'results') return 'Director Approval';
       if (hash === 'for-inspection') return 'Secretary Approval';
       if (hash === 'revisions') return 'Mission Order History';
+      if (hash === 'inspection') return 'Inspection';
+      if (hash === 'inspection-history') return 'Inspection History';
       return 'Draft'; // default to Draft
     }
 
@@ -216,12 +236,12 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
 
   // Filter nav items based on current page
   const filteredNavItems = navItems.filter((item) => {
-    const path = window.location.pathname;
-    // Hide Dashboard item when on mission order page
-    if (path === '/mission-order' && item.label === 'Dashboard') {
-      return false;
-    }
-    return true;
+  const path = window.location.pathname;
+  // Hide Dashboard item when on mission order page
+  if (path === '/mission-order' && item.label === 'Dashboard') {
+  return false;
+  }
+  return true;
   });
 
   return (
