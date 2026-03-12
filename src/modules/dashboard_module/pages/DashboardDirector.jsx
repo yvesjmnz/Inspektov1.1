@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
 import { cancelInspection as cancelInspectionApi } from '../../../lib/api';
+import DirectorReports from './DirectorReports';
 import './Dashboard.css';
 
 function formatStatus(status) {
@@ -109,6 +110,10 @@ export default function DashboardDirector() {
       inspection: {
         title: 'Inspections',
         subtitle: 'View mission orders scheduled for inspection and manage actions.',
+      },
+      reports: {
+        title: 'Performance Report',
+        subtitle: 'Comprehensive metrics and analytics for decision-making.',
       },
     };
 
@@ -1076,6 +1081,18 @@ export default function DashboardDirector() {
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspections</span>
                 </button>
               </li>
+
+              <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Reports</span>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'reports' ? 'active' : ''}`} onClick={() => setTab('reports')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/document.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Performance Report</span>
+                </button>
+              </li>
                                                       </ul>
             <button
               type="button"
@@ -1435,7 +1452,9 @@ export default function DashboardDirector() {
 
           {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
-          {tab === 'general' ? (
+          {tab === 'reports' ? (
+            <DirectorReports />
+          ) : tab === 'general' ? (
             <div className="dash-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
               <div className="dash-tile">
                 <h3>Today's New Complaints</h3>

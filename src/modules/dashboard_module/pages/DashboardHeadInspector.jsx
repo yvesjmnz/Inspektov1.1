@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
+import HeadInspectorReports from './HeadInspectorReports';
 import './Dashboard.css';
 
 function formatStatus(status) {
@@ -54,7 +55,7 @@ function statusBadgeClass(status) {
 
 function getInitialTab() {
   const hash = window.location.hash.slice(1);
-  const validTabs = ['todo', 'results', 'inspection', 'inspection-history', 'for-inspection', 'revisions'];
+  const validTabs = ['todo', 'results', 'inspection', 'inspection-history', 'for-inspection', 'revisions', 'reports'];
   return validTabs.includes(hash) ? hash : 'todo';
 }
 
@@ -987,6 +988,18 @@ export default function DashboardHeadInspector() {
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspection History</span>
                 </button>
               </li>
+
+              <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Analytics</span>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'reports' ? 'active' : ''}`} onClick={() => setTab('reports')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/document.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Performance Report</span>
+                </button>
+              </li>
             </ul>
             <button
               type="button"
@@ -1031,7 +1044,9 @@ export default function DashboardHeadInspector() {
               {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
               {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
-              {tab === 'todo' ? (
+              {tab === 'reports' ? (
+                <HeadInspectorReports />
+              ) : tab === 'todo' ? (
                 <div style={{ display: 'grid', gap: 20 }}>
                   {filteredComplaints.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
