@@ -3,6 +3,7 @@ import { MapContainer, Marker, TileLayer, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/complaints';
 import { supabase } from '../../../lib/supabase';
+import { getNearbyBusinesses, formatDistance } from '../../../lib/complaints/nearbyBusinesses';
 import Header from '../../../components/Header.jsx';
 import Stepper from '../../../components/Stepper.jsx';
 import '../../../components/Stepper.css';
@@ -641,6 +642,39 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
   };
 
+  const findNearbyBusinesses = async () => {
+    setError(null);
+    setLoading(true);
+
+    try {
+      // Get user's current location
+      const coords = await requestDeviceLocation();
+      if (coords?.lat == null || coords?.lng == null) {
+        setError('Unable to get your location. Please enable location services.');
+        setLoading(false);
+        return;
+      }
+
+      // Find nearby businesses (500m radius)
+      const nearby = await getNearbyBusinesses(coords.lat, coords.lng, 200);
+
+      if (nearby.length === 0) {
+        setError('No businesses found within 200m of your location. Try searching manually.');
+        setLoading(false);
+        return;
+      }
+
+      // Display nearby businesses
+      setBusinesses(nearby);
+      setShowBusinessList(true);
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'Failed to find nearby businesses.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Check if manually entered address matches a database business
   useEffect(() => {
     if (!businessNotInDb || !formData.business_address || formData.business_pk) {
@@ -883,6 +917,19 @@ export default function ComplaintForm({ verifiedEmail }) {
                       className="form-input"
                       autoComplete="off"
                     />
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={findNearbyBusinesses}
+                        disabled={loading}
+                        className="btn btn-secondary"
+                        style={{ flex: 1 }}
+                      >
+                        {loading ? 'Finding nearby…' : '📍 Find Nearby Businesses'}
+                      </button>
+                      <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>or search above</span>
+                    </div>
 
                     {showBusinessList && businesses.length > 0 ? (
                       <div className="business-list">

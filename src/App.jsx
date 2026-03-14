@@ -19,6 +19,7 @@ import ComplaintReview from './modules/complaints_module/pages/ComplaintReview';
 import InspectionSlipCreate from './modules/inspection_slip_module/pages/InspectionSlipCreate';
 import LandingPage from './LandingPage';
 import ComplaintView from './modules/complaints_module/pages/ComplaintView';
+import BatchGeocodingAdmin from './modules/dashboard_module/pages/BatchGeocodingAdmin';
 import { supabase } from './lib/supabase';
 import './App.css';
 
@@ -78,6 +79,9 @@ function App() {
     if (path === '/complaints/view') return normalizedRole === 'director';
     if (path === '/complaint/review') return normalizedRole === 'director';
 
+    // Admin pages (director only)
+    if (path === '/admin/batch-geocoding') return normalizedRole === 'director';
+
     // Public routes
     return true;
   };
@@ -108,7 +112,8 @@ function App() {
         path === '/mission-order/review' ||
         path === '/complaints/view' ||
         path === '/complaint/review' ||
-        path === '/inspection-slip/create';
+        path === '/inspection-slip/create' ||
+        path === '/admin/batch-geocoding';
 
       let normalizedRole = null;
       if (isProtected) {
@@ -201,6 +206,8 @@ function App() {
         setCurrentPage('complaint-view');
       } else if (path === '/complaint/review') {
         setCurrentPage('complaint-review');
+      } else if (path === '/admin/batch-geocoding') {
+        setCurrentPage('batch-geocoding-admin');
       } else {
         setCurrentPage('home');
       }
@@ -252,6 +259,8 @@ function App() {
         return <ComplaintReview />;
       case 'no-permission':
         return <NoPermission />;
+      case 'batch-geocoding-admin':
+        return <BatchGeocodingAdmin />;
       default:
         return <LandingPage onOpenVerificationModal={() => setIsVerificationModalOpen(true)} />;
     }
