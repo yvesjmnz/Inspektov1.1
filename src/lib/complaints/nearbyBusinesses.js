@@ -36,44 +36,34 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
  * @returns {Promise<Array>} Array of nearby businesses sorted by distance
  */
 export async function getNearbyBusinesses(userLat, userLng, radiusMeters = 200) {
-  if (userLat == null || userLng == null) {
-    throw new Error('User location is required');
-  }
+  const latDelta = radiusMeters / 111320;
+  const lngDelta =
+    radiusMeters / (111320 * Math.cos((userLat * Math.PI) / 180));
 
-  try {
-    // Fetch all businesses (we'll filter by distance in JavaScript)
-    // This is simpler than using PostGIS if not available
-    const { data, error } = await supabase
-      .from('businesses')
-      .select('business_pk, business_name, business_address, business_lat, business_lng')
-      .not('business_lat', 'is', null)
-      .not('business_lng', 'is', null);
+  const { data, error } = await supabase
+    .from('businesses')
+    .select('business_pk, business_name, business_address, business_lat, business_lng')
+    .gte('business_lat', userLat - latDelta)
+    .lte('business_lat', userLat + latDelta)
+    .gte('business_lng', userLng - lngDelta)
+    .lte('business_lng', userLng + lngDelta);
 
-    if (error) throw error;
+  if (error) throw error;
 
-    if (!data || data.length === 0) {
-      return [];
-    }
+  const nearby = data
+    .map((b) => ({
+      ...b,
+      distance: calculateDistance(
+        userLat,
+        userLng,
+        b.business_lat,
+        b.business_lng
+      ),
+    }))
+    .filter((b) => b.distance <= radiusMeters)
+    .sort((a, b) => a.distance - b.distance);
 
-    // Calculate distance for each business and filter
-    const nearby = data
-      .map((business) => ({
-        ...business,
-        distance: calculateDistance(
-          userLat,
-          userLng,
-          business.business_lat,
-          business.business_lng
-        ),
-      }))
-      .filter((business) => business.distance <= radiusMeters)
-      .sort((a, b) => a.distance - b.distance); // Sort by distance (closest first)
-
-    return nearby;
-  } catch (error) {
-    console.error('Error fetching nearby businesses:', error);
-    throw error;
-  }
+  return nearby;
 }
 
 /**
