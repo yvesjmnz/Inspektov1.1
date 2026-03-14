@@ -56,7 +56,7 @@ export async function getComplaintTracking(complaintId) {
   // 2) Fetch mission orders linked to complaint
   const { data: missionOrders, error: moErr } = await supabase
     .from('mission_orders')
-    .select('id, status, submitted_at, updated_at, created_at')
+    .select('id, status, submitted_at, updated_at, created_at, director_preapproved_at')
     .eq('complaint_id', complaintId)
     .order('created_at', { ascending: true });
   if (moErr) throw new Error(moErr.message);
