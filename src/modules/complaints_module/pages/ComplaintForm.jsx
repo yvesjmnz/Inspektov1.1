@@ -864,6 +864,15 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
 
     try {
+      // Derive Violation tags from selected sub-categories
+      const selectedSubLabels = Object.entries(selectedSubcats || {}).flatMap(([catKey, subKeys]) => {
+        const arr = GUIDED_SUBCATS[catKey] || [];
+        const byKey = new Map(arr.map((s) => [s.key, s.label]));
+        return (subKeys || []).map((k) => byKey.get(k)).filter(Boolean);
+      });
+      const violationTags = selectedSubLabels.map((label) => `Violation: ${label}`);
+      const mergedTags = Array.from(new Set([...(formData.tags || []), ...violationTags]));
+
       const complaintPayload = {
         business_name: formData.business_name,
         business_address: formData.business_address,
@@ -871,7 +880,7 @@ export default function ComplaintForm({ verifiedEmail }) {
         reporter_email: formData.reporter_email,
         // store all images as URLs in image_urls; keep primary first
         image_urls: evidenceImages.filter(Boolean),
-        tags: formData.tags,
+        tags: mergedTags,
         status: 'Submitted',
         email_verified: !!verifiedEmail,
         reporter_lat: formData.reporter_lat,
@@ -1561,16 +1570,50 @@ export default function ComplaintForm({ verifiedEmail }) {
                     <div className="review-value">{formData.reporter_email || '—'}</div>
                   </div>
 
-                  <div className="review-row">
+                  <div className="review-row" style={{ borderBottom: 'none' }}>
                     <div className="review-label">Evidence Photos</div>
-                    <div className="review-value">{evidenceImages.length || 0}</div>
+                    <div className="review-value">
+                      {evidenceImages.length || 0}
+                      {evidenceImages.length > 0 ? (
+                        <div className="review-image-grid" style={{ marginTop: 6 }}>
+                          {evidenceImages.map((url) => (
+                            <img key={url} src={url} alt="Evidence" />
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
 
-                  {evidenceImages.length > 0 ? (
-                    <div className="review-image-grid">
-                      {evidenceImages.map((url) => (
-                        <img key={url} src={url} alt="Evidence" />
-                      ))}
+                  {(selectedCategories.length > 0 || Object.keys(selectedSubcats || {}).length > 0) ? (
+                    <div className="review-row" style={{ alignItems: 'flex-start', borderTop: '1px dashed #e5e7eb', paddingTop: 10, marginTop: 10 }}>
+                      <div className="review-label">Complaint Category</div>
+                      <div className="review-value">
+                        <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
+                          {selectedCategories
+                            .map((catKey) => {
+                              const cat = GUIDED_CATEGORIES.find((c) => c.key === catKey);
+                              if (!cat) return null;
+                              const subs = selectedSubcats[catKey] || [];
+                              const arr = GUIDED_SUBCATS[catKey] || [];
+                              const byKey = new Map(arr.map((s) => [s.key, s.label]));
+                              const subLabels = subs.map((k) => byKey.get(k)).filter(Boolean);
+                              const displayLabel = String(cat.label || '').replace(/\s*&\s*/g, ' and ');
+                              return (
+                                <li key={catKey} style={{ margin: '4px 0' }}>
+                                  <span style={{ fontWeight: 800 }}>{displayLabel}</span>
+                                  {subLabels.length > 0 ? (
+                                    <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
+                                      {subLabels.map((label) => (
+                                        <li key={label} style={{ margin: '2px 0' }}>{label}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </li>
+                              );
+                            })
+                            .filter(Boolean)}
+                        </ul>
+                      </div>
                     </div>
                   ) : null}
 

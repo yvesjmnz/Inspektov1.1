@@ -7,6 +7,64 @@ import { buildMissionOrderDocxFileName, generateMissionOrderDocx } from '../lib/
 import '../../dashboard_module/pages/Dashboard.css';
 import './MissionOrderEditor.css';
 
+// Complaint Category grouping helper (from tags like "Violation: <Sub>")
+const GUIDED_CATEGORY_LABELS = [
+  'Business Permit & Licensing Issues',
+  'Alcohol & Tobacco Violations',
+  'Sanitation & Environmental Violations',
+  'Health, Hygiene, & Nutrition',
+  'Public Security Compliance',
+];
+const GUIDED_SUBCAT_BY_CATEGORY = new Map([
+  ['Business Permit & Licensing Issues', [
+    'Operating Without a Valid Business Permit',
+    'Missing Commerical Space Clearance',
+    'Unregistered or Untaxed Employees',
+  ]],
+  ['Alcohol & Tobacco Violations', [
+    'Selling Alcohol Near Schools',
+    'Selling Alcohol to Minors',
+    'Selling Cigarettes to Minors',
+  ]],
+  ['Sanitation & Environmental Violations', [
+    'Improper Waste Disposal or Segregation',
+    'Illegal Disposing of Cooking Oil',
+    'Unpaid Garbage Tax',
+  ]],
+  ['Health, Hygiene, & Nutrition', [
+    'Poor Food-Handler Hygiene',
+    'Missing Menu Nutrition Labels',
+  ]],
+  ['Public Security Compliance', [
+    'CCTV System Non-Compliance',
+  ]],
+]);
+function groupComplaintCategoriesFromTags(tags) {
+  const result = [];
+  if (!Array.isArray(tags) || tags.length === 0) return result;
+  const selectedSubs = tags
+    .map((t) => String(t || ''))
+    .filter((t) => /^Violation:\s*/i.test(t))
+    .map((t) => t.replace(/^Violation:\s*/i, '').trim());
+  if (selectedSubs.length === 0) return result;
+  const subToCat = new Map();
+  for (const cat of GUIDED_CATEGORY_LABELS) {
+    const subs = GUIDED_SUBCAT_BY_CATEGORY.get(cat) || [];
+    subs.forEach((s) => subToCat.set(s, cat));
+  }
+  const byCat = new Map();
+  for (const sub of selectedSubs) {
+    const cat = subToCat.get(sub);
+    if (!cat) continue;
+    if (!byCat.has(cat)) byCat.set(cat, new Set());
+    byCat.get(cat).add(sub);
+  }
+  for (const [cat, setSubs] of byCat) {
+    result.push({ category: cat, subs: Array.from(setSubs) });
+  }
+  return result;
+}
+
 function getMissionOrderIdFromQuery() {
   const params = new URLSearchParams(window.location.search);
   return params.get('id');
@@ -212,7 +270,7 @@ export default function MissionOrderEditor() {
       if (mo?.complaint_id) {
         const { data: c, error: cError } = await supabase
           .from('complaints')
-          .select('id, business_name, business_address, complaint_description, reporter_email, created_at, status')
+          .select('id, business_name, business_address, complaint_description, reporter_email, created_at, status, tags')
           .eq('id', mo.complaint_id)
           .single();
         if (cError) throw cError;
@@ -1024,6 +1082,36 @@ export default function MissionOrderEditor() {
                       value={complaint?.business_address || ''}
                       style={{ width: '100%', height: 46, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '0 12px', fontWeight: 700, color: '#94a3b8', fontSize: 16 }}
                     />
+                  </div>
+
+                  {/* Complaint Category (read-only) */}
+                  <div>
+                    <label className="mo-label" style={{ fontSize: 13 }}>Complaint Category (Read Only)</label>
+                    <div
+                      style={{ width: '100%', borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '10px 12px', height: 'auto', overflow: 'visible', display: 'block', color: '#94a3b8', fontWeight: 700, fontSize: 15 }}
+                    >
+                      {(() => {
+                        const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
+                        return groups.length > 0 ? (
+                          <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
+                            {groups.map((g) => (
+                              <li key={g.category} style={{ margin: '4px 0' }}>
+                                <span style={{ fontWeight: 800 }}>{String(g.category).replace(/\s*&\s*/g, ' and ')}</span>
+                                {Array.isArray(g.subs) && g.subs.length > 0 ? (
+                                  <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
+                                    {g.subs.map((s) => (
+                                      <li key={s} style={{ margin: '2px 0' }}>{s}</li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div style={{ color: '#94a3b8', fontWeight: 700 }}>—</div>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   {/* 4) Complaint details (read-only) */}

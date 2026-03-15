@@ -15,6 +15,64 @@ import {
 } from '../../../lib/complaints/decisionSupport';
 import '../../dashboard_module/pages/Dashboard.css';
 
+// Complaint Category grouping (derive from tags like "Violation: <Sub>")
+const GUIDED_CATEGORY_LABELS = [
+  'Business Permit & Licensing Issues',
+  'Alcohol & Tobacco Violations',
+  'Sanitation & Environmental Violations',
+  'Health, Hygiene, & Nutrition',
+  'Public Security Compliance',
+];
+const GUIDED_SUBCAT_BY_CATEGORY = new Map([
+  ['Business Permit & Licensing Issues', [
+    'Operating Without a Valid Business Permit',
+    'Missing Commerical Space Clearance',
+    'Unregistered or Untaxed Employees',
+  ]],
+  ['Alcohol & Tobacco Violations', [
+    'Selling Alcohol Near Schools',
+    'Selling Alcohol to Minors',
+    'Selling Cigarettes to Minors',
+  ]],
+  ['Sanitation & Environmental Violations', [
+    'Improper Waste Disposal or Segregation',
+    'Illegal Disposing of Cooking Oil',
+    'Unpaid Garbage Tax',
+  ]],
+  ['Health, Hygiene, & Nutrition', [
+    'Poor Food-Handler Hygiene',
+    'Missing Menu Nutrition Labels',
+  ]],
+  ['Public Security Compliance', [
+    'CCTV System Non-Compliance',
+  ]],
+]);
+function groupComplaintCategoriesFromTags(tags) {
+  const result = [];
+  if (!Array.isArray(tags) || tags.length === 0) return result;
+  const selectedSubs = tags
+    .map((t) => String(t || ''))
+    .filter((t) => /^Violation:\s*/i.test(t))
+    .map((t) => t.replace(/^Violation:\s*/i, '').trim());
+  if (selectedSubs.length === 0) return result;
+  const subToCat = new Map();
+  for (const cat of GUIDED_CATEGORY_LABELS) {
+    const subs = GUIDED_SUBCAT_BY_CATEGORY.get(cat) || [];
+    subs.forEach((s) => subToCat.set(s, cat));
+  }
+  const byCat = new Map();
+  for (const sub of selectedSubs) {
+    const cat = subToCat.get(sub);
+    if (!cat) continue;
+    if (!byCat.has(cat)) byCat.set(cat, new Set());
+    byCat.get(cat).add(sub);
+  }
+  for (const [cat, setSubs] of byCat) {
+    result.push({ category: cat, subs: Array.from(setSubs) });
+  }
+  return result;
+}
+
 function formatStatus(status) {
   if (!status) return 'Unknown';
   return String(status)
@@ -624,6 +682,33 @@ export default function ComplaintReview() {
                       {/* Description Value */}
                       <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 15 }}>
                         {complaint.complaint_description || '—'}
+                      </div>
+
+                      {/* Complaint Category Label */}
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaint Category</div>
+                      {/* Complaint Category Value */}
+                      <div>
+                        {(() => {
+                          const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
+                          return groups.length > 0 ? (
+                            <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
+                              {groups.map((g) => (
+                                <li key={g.category} style={{ margin: '4px 0' }}>
+                                  <span style={{ fontWeight: 800 }}>{String(g.category).replace(/\s*&\s*/g, ' and ')}</span>
+                                  {Array.isArray(g.subs) && g.subs.length > 0 ? (
+                                    <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
+                                      {g.subs.map((s) => (
+                                        <li key={s} style={{ margin: '2px 0' }}>{s}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div style={{ color: '#64748b', fontWeight: 700 }}>—</div>
+                          );
+                        })()}
                       </div>
 
                       {/* Evidence Label */}
