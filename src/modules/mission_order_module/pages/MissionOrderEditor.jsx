@@ -4,65 +4,24 @@ import DashboardSidebar from '../../../components/DashboardSidebar';
 import { supabase } from '../../../lib/supabase';
 import { notifyDirectorMissionOrderSubmitted, notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import { buildMissionOrderDocxFileName, generateMissionOrderDocx } from '../lib/docx_template';
+import { groupSubcategories, getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
 import '../../dashboard_module/pages/Dashboard.css';
 import './MissionOrderEditor.css';
 
-// Complaint Category grouping helper (from tags like "Violation: <Sub>")
-const GUIDED_CATEGORY_LABELS = [
-  'Business Permit & Licensing Issues',
-  'Alcohol & Tobacco Violations',
-  'Sanitation & Environmental Violations',
-  'Health, Hygiene, & Nutrition',
-  'Public Security Compliance',
-];
-const GUIDED_SUBCAT_BY_CATEGORY = new Map([
-  ['Business Permit & Licensing Issues', [
-    'Operating Without a Valid Business Permit',
-    'Missing Commerical Space Clearance',
-    'Unregistered or Untaxed Employees',
-  ]],
-  ['Alcohol & Tobacco Violations', [
-    'Selling Alcohol Near Schools',
-    'Selling Alcohol to Minors',
-    'Selling Cigarettes to Minors',
-  ]],
-  ['Sanitation & Environmental Violations', [
-    'Improper Waste Disposal or Segregation',
-    'Illegal Disposing of Cooking Oil',
-    'Unpaid Garbage Tax',
-  ]],
-  ['Health, Hygiene, & Nutrition', [
-    'Poor Food-Handler Hygiene',
-    'Missing Menu Nutrition Labels',
-  ]],
-  ['Public Security Compliance', [
-    'CCTV System Non-Compliance',
-  ]],
-]);
-function groupComplaintCategoriesFromTags(tags) {
-  const result = [];
-  if (!Array.isArray(tags) || tags.length === 0) return result;
-  const selectedSubs = tags
+// Helper to extract selected subcategory labels from complaint tags
+function listSelectedSubcategories(tags) {
+  if (!Array.isArray(tags) || tags.length === 0) return [];
+  return tags
     .map((t) => String(t || ''))
     .filter((t) => /^Violation:\s*/i.test(t))
     .map((t) => t.replace(/^Violation:\s*/i, '').trim());
-  if (selectedSubs.length === 0) return result;
-  const subToCat = new Map();
-  for (const cat of GUIDED_CATEGORY_LABELS) {
-    const subs = GUIDED_SUBCAT_BY_CATEGORY.get(cat) || [];
-    subs.forEach((s) => subToCat.set(s, cat));
-  }
-  const byCat = new Map();
-  for (const sub of selectedSubs) {
-    const cat = subToCat.get(sub);
-    if (!cat) continue;
-    if (!byCat.has(cat)) byCat.set(cat, new Set());
-    byCat.get(cat).add(sub);
-  }
-  for (const [cat, setSubs] of byCat) {
-    result.push({ category: cat, subs: Array.from(setSubs) });
-  }
-  return result;
+}
+
+// Helper to group violation subcategories from complaint tags for display
+function groupComplaintCategoriesFromTags(tags) {
+  const selectedSubs = listSelectedSubcategories(tags);
+  if (selectedSubs.length === 0) return [];
+  return groupSubcategories(selectedSubs);
 }
 
 function getMissionOrderIdFromQuery() {
@@ -317,6 +276,45 @@ export default function MissionOrderEditor() {
         const prevLen = (prev || []).length;
         return prevLen === next.length ? prev : next;
       });
+
+      // Auto-populate ordinances from complaint violation tags (only for draft status with no assigned ordinances)
+      const isCurrentlyDraft = String(mo?.status || '').toLowerCase() === 'draft';
+      const hasNoAssignedOrdinances = (assignedOrdRows || []).length === 0;
+      
+      if (isCurrentlyDraft && hasNoAssignedOrdinances && complaint?.tags && ordinancesData) {
+        const selectedSubs = listSelectedSubcategories(complaint.tags);
+        if (selectedSubs.length > 0) {
+          const ordinancesToAdd = [];
+          
+          for (const sub of selectedSubs) {
+            const ordinanceData = getOrdinancesForSubcategory(sub);
+            for (const ord of ordinanceData) {
+              // Find the ordinance record by code_number
+              const ordinanceRecord = ordinancesData.find(o => o.code_number === ord.code_number);
+              if (ordinanceRecord && !ordinancesToAdd.includes(ordinanceRecord.id)) {
+                ordinancesToAdd.push(ordinanceRecord.id);
+              }
+            }
+          }
+          
+          // Insert the ordinances if any were found
+          if (ordinancesToAdd.length > 0) {
+            const inserts = ordinancesToAdd.map(ordinanceId => ({
+              mission_order_id: missionOrderId,
+              ordinance_id: ordinanceId
+            }));
+            
+            const { error: insertError } = await supabase
+              .from('mission_order_ordinances')
+              .insert(inserts);
+              
+            if (!insertError) {
+              setAssignedOrdinanceIds(ordinancesToAdd);
+              setToast(`${ordinancesToAdd.length} ordinance(s) auto-populated from complaint`);
+            }
+          }
+        }
+      }
 
       // If doc exists, default open the preview panel (reduces clicks)
       if (mo?.generated_docx_url) {

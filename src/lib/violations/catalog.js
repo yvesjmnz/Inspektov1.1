@@ -72,3 +72,96 @@ export function getOrdinancesForSubcategory(label) {
 export function listAllMappedSubcategories() {
   return Object.keys(ORDINANCE_BY_SUBCATEGORY);
 }
+
+// Ordered category sections for UI display
+export const CATEGORY_SECTIONS = [
+  {
+    category: 'Business Permit & Licensing Issues',
+    subcategories: [
+      'Operating Without a Valid Business Permit',
+      'Missing Commercial Space Clearance',
+      'Missing Commerical Space Clearance', // typo variant for resilience
+      'Unregistered or Untaxed Employees',
+    ],
+  },
+  {
+    category: 'Alcohol & Tobacco Violations',
+    subcategories: [
+      'Selling Alcohol Near Schools',
+      'Selling Alcohol to Minors',
+      'Selling Cigarettes to Minors',
+    ],
+  },
+  {
+    category: 'Sanitation & Environmental Violations',
+    subcategories: [
+      'Improper Waste Disposal or Segregation',
+      'Illegal Disposing of Cooking Oil',
+      'Unpaid Garbage Tax',
+    ],
+  },
+  {
+    category: 'Health, Hygiene, & Nutrition',
+    subcategories: [
+      'Poor Food-Handler Hygiene',
+      'Missing Menu Nutrition Labels',
+    ],
+  },
+  {
+    category: 'Public Security Compliance',
+    subcategories: [
+      'CCTV System Non-Compliance',
+    ],
+  },
+];
+
+export function categorizeSubcategory(label) {
+  if (!label) return 'Uncategorized';
+  // Try direct match first
+  for (const section of CATEGORY_SECTIONS) {
+    if (section.subcategories.includes(label)) {
+      return section.category;
+    }
+  }
+  // Fallback: normalize spacing/case to be defensive
+  const norm = String(label).trim().toLowerCase().replace(/\s+/g, ' ');
+  for (const section of CATEGORY_SECTIONS) {
+    const normalizedSubs = section.subcategories.map(s => s.trim().toLowerCase().replace(/\s+/g, ' '));
+    if (normalizedSubs.includes(norm)) {
+      return section.category;
+    }
+  }
+  return 'Uncategorized';
+}
+
+export function groupSubcategories(labels) {
+  if (!Array.isArray(labels)) return [];
+  const uniqueLabels = [...new Set(labels.filter(Boolean))];
+  const byCategory = new Map();
+  
+  // Initialize with CATEGORY_SECTIONS order
+  for (const section of CATEGORY_SECTIONS) {
+    byCategory.set(section.category, []);
+  }
+  byCategory.set('Uncategorized', []);
+  
+  for (const label of uniqueLabels) {
+    const category = categorizeSubcategory(label);
+    byCategory.get(category).push(label);
+  }
+  
+  const result = [];
+  // Preserve CATEGORY_SECTIONS order
+  for (const section of CATEGORY_SECTIONS) {
+    const subs = byCategory.get(section.category);
+    if (subs.length > 0) {
+      result.push({ category: section.category, subs });
+    }
+  }
+  // Add Uncategorized last if present
+  const uncategorized = byCategory.get('Uncategorized');
+  if (uncategorized.length > 0) {
+    result.push({ category: 'Uncategorized', subs: uncategorized });
+  }
+  return result;
+}
