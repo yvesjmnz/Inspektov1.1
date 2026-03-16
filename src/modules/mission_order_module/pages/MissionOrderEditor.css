@@ -228,28 +228,181 @@
   font-size: 13px;
 }
 
-/* Assigned inspector chips */
+/* Multi-select (chips + inline search input) */
+.mo-multi-select {
+  min-height: 46px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Stacked mode (repurposed): keep ordinances like inspectors (horizontal + continuous) */
+.mo-multi-select--stacked {
+  flex-direction: row;
+  align-items: center;
+}
+
+.mo-multi-select-row {
+  flex: 1;
+  min-width: 140px;
+  display: flex;
+}
+
+.mo-multi-select--stacked .mo-multi-select-input {
+  width: auto;
+  min-width: 140px;
+}
+
+.mo-multi-select:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+/* Inline search input */
+.mo-multi-select-input {
+  flex: 1;
+  min-width: 140px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font-weight: 900;
+  font-size: 14px;
+  color: #0f172a;
+  outline: none;
+  box-shadow: none;
+}
+
+.mo-multi-select-input::placeholder {
+  color: #94a3b8;
+}
+
+.mo-multi-select-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Kill any UA styling that can draw an outline/inner border */
+.mo-multi-select-input,
+.mo-multi-select-input:focus,
+.mo-multi-select-input:active {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Pills (for inspector multi-select) */
+.mo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  color: #0f172a;
+  font-weight: 900;
+  font-size: 13px;
+  line-height: 1;
+  max-width: 260px;
+}
+
+.mo-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.mo-pill-x {
+  -webkit-appearance: none;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-weight: 1000;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.mo-pill-x:hover {
+  color: #0f172a;
+}
+
+.mo-pill-x:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Dropdown */
+.mo-multi-select-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  background: #fff;
+  border: 1px solid #9ca3af;
+  border-radius: 0;
+  box-shadow: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: min(360px, 50vh);
+  padding-bottom: 10px;
+  z-index: 2147483647;
+}
+
+.mo-multi-select-option {
+  width: 100%;
+  text-align: left;
+  padding: 4px 12px;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 400;
+  font-size: 14px;
+  color: #0f172a;
+  line-height: 1.5;
+}
+
+.mo-multi-select-option:hover {
+  background: #9ac5f4;
+}
+
+.mo-multi-select-empty {
+  padding: 4px 12px;
+  color: #64748b;
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Keep old chips for ordinances */
 .mo-chip {
   -webkit-appearance: none;
   appearance: none;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border: none;
+  background: #f1f5f9;
   color: #0f172a;
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 6px 10px;
-  font-weight: 800;
-  font-size: 12px;
+  font-weight: 900;
+  font-size: 13px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  box-shadow: none;
 }
 
 .mo-chip:hover {
-  background: #eef2ff;
-  border-color: #c7d2fe;
+  background: #e2e8f0;
 }
 
 .mo-chip:focus {
@@ -263,18 +416,22 @@
 }
 
 .mo-chip-label {
-  white-space: nowrap;
+  white-space: normal;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
 }
 
 .mo-chip-x {
   font-weight: 900;
   font-size: 14px;
   line-height: 1;
-  opacity: 0.7;
+  opacity: 0.45;
 }
 
 .mo-chip:hover .mo-chip-x {
-  opacity: 1;
+  opacity: 0.9;
 }
 
 /* Form control skins for Mission Order */

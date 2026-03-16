@@ -725,6 +725,20 @@
   border-color: #bfdbfe;
 }
 
+/* Mission Order: Awaiting Signature (shared with Head Inspector dashboard identity) */
+.status-accent {
+  background: #ede9fe; /* violet-100 */
+  color: #6d28d9;      /* violet-700 */
+  border-color: #c4b5fd; /* violet-300 */
+}
+
+/* Backward-compat: older class name used in Mission Order Editor */
+.status-purple {
+  background: #ede9fe;
+  color: #6d28d9;
+  border-color: #c4b5fd;
+}
+
 .track-result-actions {
   margin-top: 32px;
   padding-top: 24px;

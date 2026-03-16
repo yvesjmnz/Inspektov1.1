@@ -67,6 +67,18 @@ function statusLabel(status) {
   return status || '—';
 }
 
+function statusBadgeClass(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'for inspection' || s === 'for_inspection') return 'status-badge status-success';
+  if (s === 'complete' || s === 'completed') return 'status-badge status-success';
+  if (s === 'awaiting_signature') return 'status-badge status-purple';
+  if (s === 'issued') return 'status-badge status-info';
+  if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
+  if (s === 'draft') return 'status-badge status-info';
+  if (!s) return 'status-badge status-info';
+  return 'status-badge';
+}
+
 const TEMPLATE_NAME = 'MISSION-ORDER-TEMPLATE';
 
 function KeyTile({ label, value, sub }) {
@@ -100,7 +112,7 @@ function Panel({ title, right, subtitle, children }) {
         borderRadius: 16,
         background: '#fff',
         boxShadow: '0 6px 18px rgba(2,6,23,0.06)',
-        overflow: 'hidden',
+        overflow: 'visible',
       }}
     >
       <div
@@ -151,10 +163,18 @@ export default function MissionOrderEditor() {
   const [inspectors, setInspectors] = useState([]);
   const [assignedInspectorIds, setAssignedInspectorIds] = useState([]);
   const [selectedInspectorId, setSelectedInspectorId] = useState('');
+  const [inspectorQuery, setInspectorQuery] = useState('');
+  const [inspectorDropdownOpen, setInspectorDropdownOpen] = useState(false);
+  const inspectorInputRef = useRef(null);
+  const inspectorDropdownRef = useRef(null);
 
   const [ordinances, setOrdinances] = useState([]);
   const [assignedOrdinanceIds, setAssignedOrdinanceIds] = useState([]);
   const [selectedOrdinanceId, setSelectedOrdinanceId] = useState('');
+  const [ordinanceQuery, setOrdinanceQuery] = useState('');
+  const [ordinanceDropdownOpen, setOrdinanceDropdownOpen] = useState(false);
+  const ordinanceInputRef = useRef(null);
+  const ordinanceDropdownRef = useRef(null);
 
   const [dateOfInspection, setDateOfInspection] = useState('');
 
@@ -196,9 +216,10 @@ export default function MissionOrderEditor() {
   const isSubmitted = statusLower === 'issued';
   const isAwaitingSignature = statusLower === 'awaiting_signature';
   const isComplete = statusLower === 'complete' || statusLower === 'completed';
-  // Mission Order Details should remain editable for Head Inspector.
-  // (Status-based restrictions are enforced by the presence/absence of action buttons like Submit/Generate.)
-  const isReadOnly = false;
+
+  // Editing is only allowed while the mission order is still being prepared (draft/submitted).
+  // After director pre-approval, awaiting signature, or completion, the MO must be read-only.
+  const isReadOnly = isApproved || isAwaitingSignature || isComplete;
 
   const handleLogout = async () => {
     setError('');
@@ -237,6 +258,8 @@ export default function MissionOrderEditor() {
       setMissionOrder(mo);
       setDateOfInspection(formatDateInputValue(mo?.date_of_inspection));
 
+      let complaintForAutoPopulate = null;
+
       if (mo?.complaint_id) {
         const { data: c, error: cError } = await supabase
           .from('complaints')
@@ -244,9 +267,11 @@ export default function MissionOrderEditor() {
           .eq('id', mo.complaint_id)
           .single();
         if (cError) throw cError;
+        complaintForAutoPopulate = c;
         setComplaint(c);
         setEvidencePreviewUrl('');
       } else {
+        complaintForAutoPopulate = null;
         setComplaint(null);
         setEvidencePreviewUrl('');
       }
@@ -293,34 +318,34 @@ export default function MissionOrderEditor() {
       // Auto-populate ordinances from complaint violation tags (only for draft status with no assigned ordinances)
       const isCurrentlyDraft = String(mo?.status || '').toLowerCase() === 'draft';
       const hasNoAssignedOrdinances = (assignedOrdRows || []).length === 0;
-      
-      if (isCurrentlyDraft && hasNoAssignedOrdinances && complaint?.tags && ordinancesData) {
-        const selectedSubs = listSelectedSubcategories(complaint.tags);
+
+      const complaintTags = complaintForAutoPopulate?.tags;
+
+      if (isCurrentlyDraft && hasNoAssignedOrdinances && Array.isArray(complaintTags) && ordinancesData) {
+        const selectedSubs = listSelectedSubcategories(complaintTags);
         if (selectedSubs.length > 0) {
           const ordinancesToAdd = [];
-          
+
           for (const sub of selectedSubs) {
             const ordinanceData = getOrdinancesForSubcategory(sub);
             for (const ord of ordinanceData) {
               // Find the ordinance record by code_number
-              const ordinanceRecord = ordinancesData.find(o => o.code_number === ord.code_number);
+              const ordinanceRecord = ordinancesData.find((o) => o.code_number === ord.code_number);
               if (ordinanceRecord && !ordinancesToAdd.includes(ordinanceRecord.id)) {
                 ordinancesToAdd.push(ordinanceRecord.id);
               }
             }
           }
-          
+
           // Insert the ordinances if any were found
           if (ordinancesToAdd.length > 0) {
-            const inserts = ordinancesToAdd.map(ordinanceId => ({
+            const inserts = ordinancesToAdd.map((ordinanceId) => ({
               mission_order_id: missionOrderId,
-              ordinance_id: ordinanceId
+              ordinance_id: ordinanceId,
             }));
-            
-            const { error: insertError } = await supabase
-              .from('mission_order_ordinances')
-              .insert(inserts);
-              
+
+            const { error: insertError } = await supabase.from('mission_order_ordinances').insert(inserts);
+
             if (!insertError) {
               setAssignedOrdinanceIds(ordinancesToAdd);
               setToast(`${ordinancesToAdd.length} ordinance(s) auto-populated from complaint`);
@@ -366,11 +391,9 @@ export default function MissionOrderEditor() {
         const o = ordinances.find((x) => x.id === id);
         if (!o) return null;
         const code = o.code_number ? String(o.code_number).trim() : '';
-        const title = o.title ? String(o.title).trim() : '';
-        return code && title ? `${code} — ${title}` : code || title || id;
+        return code || id;
       })
-      .filter(Boolean)
-      .join(', ');
+      .filter(Boolean);
   }, [assignedOrdinanceIds, ordinances]);
 
   const canSave = !loading && !!missionOrderId && !isReadOnly;
@@ -378,7 +401,7 @@ export default function MissionOrderEditor() {
   const isDraft = statusLower === 'draft';
   // Allow generating an UNSIGNED doc even after submit (issued), so the director can see the latest draft output.
   // Director approval will overwrite it with the SIGNED template automatically.
-  const canGenerateDocx = !loading && !!missionOrderId && !isComplete && (isDraft || isSubmitted || isApproved || isAwaitingSignature);
+  const canGenerateDocx = !loading && !!missionOrderId && !isReadOnly && (isDraft || isSubmitted);
 
   const saveMissionOrder = async () => {
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -462,7 +485,8 @@ export default function MissionOrderEditor() {
   };
 
   const addInspector = async () => {
-    if (!missionOrderId || !selectedInspectorId) return;
+    const inspectorId = selectedInspectorId;
+    if (!missionOrderId || !inspectorId) return;
 
     setError('');
     setToast('');
@@ -473,7 +497,6 @@ export default function MissionOrderEditor() {
       const userId = userData?.user?.id;
       if (!userId) throw new Error('Not authenticated. Please login again.');
 
-      const inspectorId = selectedInspectorId;
       const { data: existing, error: existingError } = await supabase
         .from('mission_order_assignments')
         .select('id')
@@ -483,6 +506,7 @@ export default function MissionOrderEditor() {
       if (existingError) throw existingError;
       if (existing && existing.length > 0) {
         setToast('Already added');
+        setSelectedInspectorId('');
         return;
       }
 
@@ -501,6 +525,28 @@ export default function MissionOrderEditor() {
       setError(e?.message || 'Failed to add inspector.');
     }
   };
+
+  // Auto-add inspector on selection (no need to click the Add button)
+  useEffect(() => {
+    if (!selectedInspectorId) return;
+    if (loading) return;
+
+    // Avoid re-adding if it's already assigned; still clear selection to reduce friction.
+    if (assignedInspectorIds.includes(selectedInspectorId)) {
+      setSelectedInspectorId('');
+      setInspectorQuery('');
+      return;
+    }
+
+    // Fire and forget; addInspector handles its own error/toast states.
+    void addInspector();
+
+    // Clear query and keep focus for rapid multi-add.
+    setInspectorQuery('');
+    setInspectorDropdownOpen(true);
+    queueMicrotask(() => inspectorInputRef.current?.focus());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInspectorId]);
 
   const removeInspector = async (inspectorId) => {
     if (!missionOrderId) return;
@@ -526,15 +572,43 @@ export default function MissionOrderEditor() {
     }
   };
 
+  // Close dropdowns on outside click / Escape
+  useEffect(() => {
+    const onDocMouseDown = (e) => {
+      const t = e.target;
+
+      const inInspectorInput = inspectorInputRef.current && inspectorInputRef.current.contains(t);
+      const inInspectorDropdown = inspectorDropdownRef.current && inspectorDropdownRef.current.contains(t);
+      if (!inInspectorInput && !inInspectorDropdown) setInspectorDropdownOpen(false);
+
+      const inOrdInput = ordinanceInputRef.current && ordinanceInputRef.current.contains(t);
+      const inOrdDropdown = ordinanceDropdownRef.current && ordinanceDropdownRef.current.contains(t);
+      if (!inOrdInput && !inOrdDropdown) setOrdinanceDropdownOpen(false);
+    };
+
+    const onDocKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setInspectorDropdownOpen(false);
+        setOrdinanceDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onDocKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onDocKeyDown);
+    };
+  }, []);
+
   const addOrdinance = async () => {
-    if (!missionOrderId || !selectedOrdinanceId) return;
+    const ordinanceId = selectedOrdinanceId;
+    if (!missionOrderId || !ordinanceId) return;
 
     setError('');
     setToast('');
 
     try {
-      const ordinanceId = selectedOrdinanceId;
-
       const { data: existing, error: existingError } = await supabase
         .from('mission_order_ordinances')
         .select('id')
@@ -544,6 +618,7 @@ export default function MissionOrderEditor() {
       if (existingError) throw existingError;
       if (existing && existing.length > 0) {
         setToast('Already added');
+        setSelectedOrdinanceId('');
         return;
       }
 
@@ -562,6 +637,25 @@ export default function MissionOrderEditor() {
       setError(e?.message || 'Failed to add ordinance.');
     }
   };
+
+  // Auto-add ordinance on selection (no need to click the Add button)
+  useEffect(() => {
+    if (!selectedOrdinanceId) return;
+    if (loading) return;
+
+    if (assignedOrdinanceIds.includes(selectedOrdinanceId)) {
+      setSelectedOrdinanceId('');
+      return;
+    }
+
+    void addOrdinance();
+
+    // Clear query and keep focus for rapid multi-add.
+    setOrdinanceQuery('');
+    setOrdinanceDropdownOpen(true);
+    queueMicrotask(() => ordinanceInputRef.current?.focus());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOrdinanceId]);
 
   const removeOrdinance = async (ordinanceId) => {
     if (!missionOrderId) return;
@@ -737,7 +831,7 @@ export default function MissionOrderEditor() {
         templateUrl: signedTemplate.signedUrl,
         inspectors: assignedInspectorNamesFresh || '—',
         date_of_complaint: complaint?.created_at,
-        date_of_inspection: fresh.date_of_inspection,
+        date_of_inspection: inspectionDate,
         date_of_issuance: fresh.date_of_issuance,
         business_name: c?.business_name,
         business_address: c?.business_address,
@@ -803,7 +897,7 @@ export default function MissionOrderEditor() {
     }
   };
 
-  const maybeAutoRegenerateDocx = () => {
+  const maybeAutoRegenerateDocx = ({ ensureSaved } = {}) => {
     // Only regenerate if a document already exists AND regeneration is allowed in this state.
     if (!missionOrder?.generated_docx_url) return;
     if (!canGenerateDocx) return;
@@ -822,6 +916,11 @@ export default function MissionOrderEditor() {
     autoRegenTimerRef.current = setTimeout(async () => {
       autoRegenTimerRef.current = null;
       try {
+        // Keep DB state in sync so the doc generation (which re-reads from DB) uses the new inspection date.
+        if (ensureSaved) {
+          await saveMissionOrder();
+        }
+
         await handleGenerateDocx({ silent: true });
         setToast('Document updated');
       } catch {
@@ -863,6 +962,20 @@ export default function MissionOrderEditor() {
       setError(e?.message || 'Failed to update status.');
     }
   };
+
+  // Auto-regenerate docx when the inspection date changes (same behavior as inspectors/ordinances).
+  useEffect(() => {
+    if (loading) return;
+    if (isReadOnly) return;
+    if (!missionOrder?.generated_docx_url) return;
+
+    // Only regenerate if the date is set (optional: remove this guard if you want clearing date to also regenerate)
+    if (!dateOfInspection) return;
+
+    // Ensure date is saved before regeneration so the template reads the latest value.
+    maybeAutoRegenerateDocx({ ensureSaved: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateOfInspection]);
 
   const officeViewerUrl = useMemo(() => buildOfficeViewerUrl(missionOrder?.generated_docx_url), [missionOrder?.generated_docx_url]);
 
@@ -952,80 +1065,138 @@ export default function MissionOrderEditor() {
 
               {/* Status Ribbon */}
               <div
+                id="mo-status-ribbon"
                 style={{
                   marginTop: 12,
                   marginBottom: 14,
-                  display: 'flex',
-                  gap: 18,
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr',
+                  gap: 12,
                   padding: '14px 16px',
                   border: '1px solid #0b2249',
                   borderRadius: 14,
                   background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
                   color: '#fff',
-                  boxShadow: '0 8px 16px rgba(2,6,23,0.25)'
+                  boxShadow: '0 8px 16px rgba(2,6,23,0.25)',
                 }}
               >
-                {/* MO Status */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                {/* make all ribbon icons white */}
+                <style>{`
+#mo-status-ribbon span[aria-hidden="true"] { color: #fff !important; opacity: 0.95; }
+#mo-status-ribbon span[aria-hidden="true"] svg path { fill: #fff !important; stroke: #fff !important; }
+`}</style>
+
+                {/* Row 1: labels only */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                    gap: 18,
+                    rowGap: 0,
+                    marginBottom: -4,
+                    alignItems: 'center',
+                    width: '100%',
+                  }}
+                >
+                  {/* MO Status */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <span aria-hidden="true" style={{ color: '#0b2249' }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M7 2h7l5 5v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V8h4.5L14 3.5Z" fill="#0b2249"/>
                       <path d="M8 12h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Zm0 4h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Z" fill="#0b2249"/>
                     </svg>
                   </span>
-                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>MO Status:</span>
-                  <span className={isComplete ? 'status-badge status-success' : 'status-badge status-info'} style={{ fontWeight: 900 }}>
-                    {statusLabel(missionOrder?.status)}
-                  </span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>MO Status</span>
                 </div>
                 {/* Inspectors */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <span aria-hidden="true" style={{ color: '#0b2249' }}>
                     {/* User icon */}
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M12 12c2.761 0 5-2.686 5-6s-2.239-5-5-5-5 2.686-5 6 2.239 5 5 5Zm0 2c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5Z" fill="#0b2249"/>
                     </svg>
                   </span>
-                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspectors:</span>
-                  <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>{assignedInspectorNames || '—'}</span>
-                </div>
-
-                {/* Ordinances */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
-                  <span aria-hidden="true" style={{ color: '#0b2249' }}>
-                    {/* Document icon */}
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M7 2h7l5 5v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V8h4.5L14 3.5ZM8 12h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Zm0 4h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Z" fill="#0b2249"/>
-                    </svg>
-                  </span>
-                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Ordinances:</span>
-                  <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>{assignedOrdinanceLabels || '—'}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspectors</span>
                 </div>
 
                 {/* Inspection Date */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <span aria-hidden="true" style={{ color: '#0b2249' }}>
                     {/* Calendar icon */}
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 1 1 2 0v1Zm13 7H4v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9ZM5 7h14V6H5v1Z" fill="#0b2249"/>
                     </svg>
                   </span>
-                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspection Date:</span>
-                  <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>{dateOfInspection ? formatDateHuman(dateOfInspection) : '—'}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Inspection Date</span>
                 </div>
 
                 {/* Issuance Date */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <span aria-hidden="true" style={{ color: '#0b2249' }}>
                     {/* Calendar icon (reuse) */}
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 1 1 2 0v1Zm13 7H4v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9ZM5 7h14V6H5v1Z" fill="#0b2249"/>
                     </svg>
                   </span>
-                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Issuance</span>
-                  <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>{missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Issuance Date</span>
+                </div>
+                </div>
+
+                {/* Row 2: values */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                    gap: 18,
+                    rowGap: 0,
+                    marginTop: -6,
+                    alignItems: 'center',
+                    width: '100%',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <span className={statusBadgeClass(missionOrder?.status)} style={{ fontWeight: 900 }}>
+                      {statusLabel(missionOrder?.status)}
+                    </span>
+                  </div>
+                  <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{assignedInspectorNames || '—'}</div>
+                  <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{dateOfInspection ? formatDateHuman(dateOfInspection) : '—'}</div>
+                  <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'N/A'}</div>
+                </div>
+
+                {/* Row 3: ordinances */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95, paddingTop: 1 }}>
+                    {/* Document icon */}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M7 2h7l5 5v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V8h4.5L14 3.5ZM8 12h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Zm0 4h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Z" fill="#0b2249"/>
+                    </svg>
+                  </span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Ordinances:</span>
+                  {Array.isArray(assignedOrdinanceLabels) && assignedOrdinanceLabels.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {assignedOrdinanceLabels.map((code) => (
+                        <span
+                          key={code}
+                          style={{
+                            background: 'rgba(255,255,255,0.12)',
+                            border: '1px solid rgba(255,255,255,0.16)',
+                            color: '#fff',
+                            fontWeight: 900,
+                            fontSize: 13,
+                            padding: '4px 8px',
+                            borderRadius: 999,
+                            lineHeight: 1.2,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {code}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>—</span>
+                  )}
                 </div>
               </div>
 
@@ -1036,134 +1207,292 @@ export default function MissionOrderEditor() {
                   {/* 1) Inspectors (editable) */}
                   <div>
                     <div style={{ fontWeight: 900, fontSize: 13, color: '#0f172a' }}>Inspectors</div>
-                    {!isReadOnly ? (
-                      <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
-                        <select
-                          className="mo-select mo-input-editable"
-                          value={selectedInspectorId}
-                          onChange={(e) => setSelectedInspectorId(e.target.value)}
-                          disabled={loading}
-                          style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', background: '#f8fafc', height: 46, fontWeight: 900, fontSize: 15 }}
-                        >
-                          <option value="">Select inspector…</option>
-                          {inspectors.map((ins) => (
-                            <option key={ins.id} value={ins.id}>
-                              {ins.full_name || ins.id}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="button" className="dash-btn" onClick={addInspector} disabled={loading || !selectedInspectorId}>
-                          Add
-                        </button>
-                      </div>
-                    ) : null}
 
-                    {assignedInspectorIds.length > 0 ? (
-                      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        {assignedInspectorIds.map((id) => {
-                          const ins = inspectors.find((x) => x.id === id);
-                          const label = ins?.full_name || id;
-                          return (
-                            <button
-                              key={id}
-                              type="button"
-                              className="mo-chip"
-                              title={isReadOnly ? '' : 'Click to remove'}
-                              onClick={() => (isReadOnly ? null : removeInspector(id))}
-                              disabled={isReadOnly}
-                              style={{ fontSize: 14, fontWeight: 1000 }}
-                            >
-                              <span className="mo-chip-label">{label}</span>
-                              {!isReadOnly ? <span aria-hidden="true" className="mo-chip-x">×</span> : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : (
+                    <div
+                      className="mo-multi-select"
+                      style={{ marginTop: 10, position: 'relative' }}
+                      role="combobox"
+                      aria-expanded={inspectorDropdownOpen}
+                      aria-haspopup="listbox"
+                      onMouseDown={(e) => {
+                        // Keep focus on the input when clicking within the container.
+                        if (e.target === e.currentTarget) {
+                          e.preventDefault();
+                          inspectorInputRef.current?.focus();
+                        }
+                      }}
+                    >
+                      {/* Pills */}
+                      {assignedInspectorIds.map((id) => {
+                        const ins = inspectors.find((x) => x.id === id);
+                        const label = ins?.full_name || id;
+                        return (
+                          <span key={id} className="mo-pill">
+                            <span className="mo-pill-label">{label}</span>
+                            {!isReadOnly ? (
+                              <button
+                                type="button"
+                                className="mo-pill-x"
+                                aria-label={`Remove ${label}`}
+                                onClick={() => removeInspector(id)}
+                                disabled={loading}
+                              >
+                                ×
+                              </button>
+                            ) : null}
+                          </span>
+                        );
+                      })}
+
+                      {/* Inline search input */}
+                      {!isReadOnly ? (
+                        <input
+                          ref={inspectorInputRef}
+                          className="mo-multi-select-input"
+                          value={inspectorQuery}
+                          onChange={(e) => {
+                            setInspectorQuery(e.target.value);
+                            setInspectorDropdownOpen(true);
+                          }}
+                          onFocus={() => setInspectorDropdownOpen(true)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Backspace' && !inspectorQuery && assignedInspectorIds.length > 0) {
+                              // Quick remove last pill
+                              const lastId = assignedInspectorIds[assignedInspectorIds.length - 1];
+                              void removeInspector(lastId);
+                            }
+                          }}
+                          disabled={loading}
+                          placeholder={assignedInspectorIds.length ? 'Add more…' : 'Search inspectors…'}
+                          aria-label="Search inspectors"
+                        />
+                      ) : null}
+
+                      {/* Dropdown */}
+                      {(() => {
+                        if (isReadOnly || !inspectorDropdownOpen) return null;
+
+                        const availableInspectors = inspectors.filter((ins) => !assignedInspectorIds.includes(ins.id));
+                        // If all inspectors are already selected, don’t show an empty dropdown.
+                        if (availableInspectors.length === 0) return null;
+
+                        const q = inspectorQuery.trim().toLowerCase();
+                        const filteredInspectors = availableInspectors.filter((ins) => {
+                          if (!q) return true;
+                          return String(ins.full_name || '').toLowerCase().includes(q);
+                        });
+
+                        return (
+                          <div ref={inspectorDropdownRef} className="mo-multi-select-dropdown" role="listbox">
+                            {filteredInspectors.slice(0, 10).map((ins) => (
+                              <button
+                                key={ins.id}
+                                type="button"
+                                className="mo-multi-select-option"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setSelectedInspectorId(ins.id)}
+                              >
+                                {ins.full_name || ins.id}
+                              </button>
+                            ))}
+
+                            {filteredInspectors.length === 0 ? (
+                              <div className="mo-multi-select-empty">No matches.</div>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {assignedInspectorIds.length === 0 ? (
                       <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>No inspectors assigned yet.</div>
-                    )}
+                    ) : null}
                   </div>
                   
                                     
                   {/* 2) City ordinances violated (editable) */}
                   <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
                     <div style={{ fontWeight: 900, fontSize: 13, color: '#0f172a' }}>City Ordinances Violated</div>
-                    {!isReadOnly ? (
-                      <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
-                        <select
-                          className="mo-select mo-input-editable"
-                          value={selectedOrdinanceId}
-                          onChange={(e) => setSelectedOrdinanceId(e.target.value)}
-                          disabled={loading}
-                          style={{ padding: '10px 12px', borderRadius: 14, border: '1px solid #e2e8f0', background: '#f8fafc', height: 46, fontWeight: 900, fontSize: 15 }}
-                        >
-                          <option value="">Select ordinance…</option>
-                          {ordinances.map((o) => {
-                            const code = o.code_number ? String(o.code_number).trim() : '';
-                            const title = o.title ? String(o.title).trim() : '';
-                            const label = code && title ? `${code} — ${title}` : code || title || o.id;
-                            return (
-                              <option key={o.id} value={o.id}>
-                                {label}
-                              </option>
-                            );
-                          })}
-                        </select>
-                        <button type="button" className="dash-btn" onClick={addOrdinance} disabled={loading || !selectedOrdinanceId}>
-                          Add
-                        </button>
-                      </div>
-                    ) : null}
 
-                    {assignedOrdinanceIds.length > 0 ? (
-                      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        {assignedOrdinanceIds.map((id) => {
-                          const o = ordinances.find((x) => x.id === id);
-                          const code = o?.code_number ? String(o.code_number).trim() : '';
-                          const title = o?.title ? String(o.title).trim() : '';
-                          const label = o ? (code && title ? `${code} — ${title}` : code || title || id) : id;
-                          const tip = !isReadOnly && o?.description ? o.description : (isReadOnly ? '' : 'Click to remove');
-                          return (
-                            <button
-                              key={id}
-                              type="button"
-                              className="mo-chip"
-                              title={tip}
-                              onClick={() => (isReadOnly ? null : removeOrdinance(id))}
-                              disabled={isReadOnly}
-                              style={{ fontSize: 14, fontWeight: 1000 }}
-                            >
-                              <span className="mo-chip-label">{label}</span>
-                              {!isReadOnly ? <span aria-hidden="true" className="mo-chip-x">×</span> : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : (
+                    {/* Pills stacked vertically, search on a new line */}
+                    <div
+                      className="mo-multi-select mo-multi-select--stacked"
+                      style={{ marginTop: 10, position: 'relative' }}
+                      role="combobox"
+                      aria-expanded={ordinanceDropdownOpen}
+                      aria-haspopup="listbox"
+                      onMouseDown={(e) => {
+                        if (e.target === e.currentTarget) {
+                          e.preventDefault();
+                          ordinanceInputRef.current?.focus();
+                        }
+                      }}
+                    >
+                      {assignedOrdinanceIds.map((id) => {
+                        const o = ordinances.find((x) => x.id === id);
+                        const code = o?.code_number ? String(o.code_number).trim() : '';
+                        const title = o?.title ? String(o.title).trim() : '';
+                        const label = o ? (code && title ? `${code} - ${title}` : code || title || id) : id;
+                        const tip = !isReadOnly && o?.description ? o.description : (isReadOnly ? '' : 'Click to remove');
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className="mo-chip"
+                            title={tip}
+                            onClick={() => (isReadOnly ? null : removeOrdinance(id))}
+                            disabled={isReadOnly}
+                            style={{ fontSize: 14, fontWeight: 1000 }}
+                          >
+                            <span className="mo-chip-label">{label}</span>
+                            {!isReadOnly ? <span aria-hidden="true" className="mo-chip-x">×</span> : null}
+                          </button>
+                        );
+                      })}
+
+                      {!isReadOnly ? (
+                        <div className="mo-multi-select-row">
+                          <input
+                            ref={ordinanceInputRef}
+                            className="mo-multi-select-input"
+                            value={ordinanceQuery}
+                            onChange={(e) => {
+                              setOrdinanceQuery(e.target.value);
+                              setOrdinanceDropdownOpen(true);
+                            }}
+                            onFocus={() => setOrdinanceDropdownOpen(true)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Backspace' && !ordinanceQuery && assignedOrdinanceIds.length > 0) {
+                                const lastId = assignedOrdinanceIds[assignedOrdinanceIds.length - 1];
+                                void removeOrdinance(lastId);
+                              }
+                            }}
+                            disabled={loading}
+                            placeholder={assignedOrdinanceIds.length ? 'Add more…' : 'Search ordinances…'}
+                            aria-label="Search ordinances"
+                          />
+
+                          {(() => {
+                            if (isReadOnly || !ordinanceDropdownOpen) return null;
+
+                            const availableOrdinances = ordinances.filter((o) => !assignedOrdinanceIds.includes(o.id));
+                            if (availableOrdinances.length === 0) return null;
+
+                            const q = ordinanceQuery.trim().toLowerCase();
+                            const filteredOrdinances = availableOrdinances.filter((o) => {
+                              if (!q) return true;
+                              const code = o.code_number ? String(o.code_number) : '';
+                              const title = o.title ? String(o.title) : '';
+                              return (
+                                code.toLowerCase().includes(q) ||
+                                title.toLowerCase().includes(q) ||
+                                `${code} - ${title}`.toLowerCase().includes(q)
+                              );
+                            });
+
+                            return (
+                              <div ref={ordinanceDropdownRef} className="mo-multi-select-dropdown" role="listbox">
+                                {filteredOrdinances.slice(0, 10).map((o) => {
+                                  const code = o.code_number ? String(o.code_number).trim() : '';
+                                  const title = o.title ? String(o.title).trim() : '';
+                                  const label = code && title ? `${code} - ${title}` : code || title || o.id;
+                                  return (
+                                    <button
+                                      key={o.id}
+                                      type="button"
+                                      className="mo-multi-select-option"
+                                      onMouseDown={(e) => e.preventDefault()}
+                                      onClick={() => setSelectedOrdinanceId(o.id)}
+                                    >
+                                      {label}
+                                    </button>
+                                  );
+                                })}
+
+                                {filteredOrdinances.length === 0 ? (
+                                  <div className="mo-multi-select-empty">No matches.</div>
+                                ) : null}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {assignedOrdinanceIds.length === 0 ? (
                       <div style={{ marginTop: 10, color: '#64748b', fontWeight: 800 }}>No ordinances added yet.</div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Dates side-by-side */}
                   <div className="mo-row-2" style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                     <div>
                       <label className="mo-label" htmlFor="dateInspection" style={{ fontSize: 13 }}>Date of Inspection</label>
-                      <input
-                        id="dateInspection"
-                        type="date"
-                        value={dateOfInspection}
-                        onChange={(e) => setDateOfInspection(e.target.value)}
-                        disabled={loading || isReadOnly}
-                        className="mo-title mo-input-editable"
-                        style={{ fontSize: 16, fontWeight: 900, height: 46, borderRadius: 14, background: '#f8fafc', border: '1px solid #e2e8f0', padding: '0 12px' }}
-                      />
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          // Open the native date picker while keeping a human-readable display.
+                          const el = document.getElementById('dateInspectionHidden');
+                          if (el?.showPicker) el.showPicker();
+                          else el?.focus();
+                          el?.click?.();
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return;
+                          e.preventDefault();
+                          const el = document.getElementById('dateInspectionHidden');
+                          if (el?.showPicker) el.showPicker();
+                          else el?.focus();
+                          el?.click?.();
+                        }}
+                        style={{
+                          height: 46,
+                          borderRadius: 14,
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          padding: '0 12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <span aria-hidden="true" style={{ color: '#64748b', display: 'inline-flex', alignItems: 'center' }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 1 1 2 0v1Zm13 7H4v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9ZM5 7h14V6H5v1Z" fill="currentColor"/>
+                          </svg>
+                        </span>
+
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 900, color: '#0f172a' }}>
+                          {dateOfInspection ? formatDateHuman(dateOfInspection) : 'Select date'}
+                        </span>
+
+                        {/* Hidden native date input (keeps same functionality and value format in state) */}
+                        <input
+                          id="dateInspectionHidden"
+                          type="date"
+                          value={dateOfInspection}
+                          onChange={(e) => setDateOfInspection(e.target.value)}
+                          disabled={loading || isReadOnly}
+                          style={{
+                            position: 'absolute',
+                            opacity: 0,
+                            pointerEvents: 'none',
+                            width: 1,
+                            height: 1,
+                          }}
+                        />
+
+                                              </div>
                     </div>
                     <div>
                       <label className="mo-label" htmlFor="dateIssuance" style={{ fontSize: 13 }}>Date of Issuance</label>
                       <input
                         id="dateIssuance"
                         className="mo-input-readonly"
-                        value={missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'Auto'}
+                        value={missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'N/A'}
                         readOnly
                         style={{ width: '100%', height: 46, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '0 12px', fontWeight: 700, color: '#94a3b8', fontSize: 16 }}
                       />
@@ -1240,9 +1569,11 @@ export default function MissionOrderEditor() {
                     subtitle={
                       <div style={{ display: 'grid', gap: 4 }}>
                         <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', columnGap: 8, alignItems: 'baseline' }}>
-                          <span style={{ fontSize: 10, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>Date Filed</span>
+                          <span style={{ fontSize: 10, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>Date | Time</span>
                           <span style={{ fontSize: 11, fontWeight: 800, color: '#334155' }}>
-                            {complaint?.created_at ? new Date(complaint.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '—'}
+                            {complaint?.created_at
+                              ? `${new Date(complaint.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} | ${new Date(complaint.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+                              : '—'}
                           </span>
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', columnGap: 8, alignItems: 'baseline' }}>
@@ -1357,7 +1688,7 @@ export default function MissionOrderEditor() {
                         </div>
                         {Array.isArray(complaint?.image_urls) && complaint.image_urls.length > 0 ? (
                           <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                            {complaint.image_urls.filter(Boolean).slice(0, 4).map((url, idx) => (
+                            {complaint.image_urls.filter(Boolean).map((url, idx) => (
                               <img
                                 key={`${url}-${idx}`}
                                 src={url}
