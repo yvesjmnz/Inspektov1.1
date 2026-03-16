@@ -27,6 +27,8 @@ export default function ComplaintForm({ verifiedEmail }) {
 
   const [businesses, setBusinesses] = useState([]);
   const [showBusinessList, setShowBusinessList] = useState(false);
+  const [nearbyOnly, setNearbyOnly] = useState(false);
+  const [nearbyBusinessesCache, setNearbyBusinessesCache] = useState([]);
 
   // Step C (mandatory): primary image capture
   // Step 3: evidence images (required: at least 1)
@@ -61,6 +63,11 @@ export default function ComplaintForm({ verifiedEmail }) {
 
   const primaryImageInputRef = useRef(null);
   const additionalImageInputRef = useRef(null);
+
+  // Prevent stale async search results from repopulating suggestions after the user clears/backspaces.
+  // NOTE: handled with query refs (no seq gating) to keep UI responsive.
+  const businessSearchQueryRef = useRef('');
+  const nameSearchQueryRef = useRef('');
 
   const TOTAL_STEPS = 5;
 
@@ -147,21 +154,66 @@ export default function ComplaintForm({ verifiedEmail }) {
   };
 
   const handleBusinessSearch = async (query) => {
-    setSearchQuery(query);
+    const q = String(query || '');
+
+    // Update visible input immediately.
+    setSearchQuery(q);
     setError(null);
 
-    if (query.length > 2) {
-      try {
-        const results = await getBusinesses(query);
-        setBusinesses(results);
-        setShowBusinessList(true);
-      } catch (err) {
-        setError(err.message);
-      }
-    } else {
+    // Track latest query so slow responses can be ignored.
+    businessSearchQueryRef.current = q;
+
+    // If query is too short/empty, clear suggestions immediately.
+    if (q.length <= 2) {
       setBusinesses([]);
       setShowBusinessList(false);
+      return;
     }
+
+    // Nearby-only mode: filter locally from the nearby cache (no network search).
+    if (nearbyOnly) {
+      const needle = q.toLowerCase();
+      const filtered = (nearbyBusinessesCache || []).filter((b) => {
+        const name = String(b.business_name || '').toLowerCase();
+        const addr = String(b.business_address || '').toLowerCase();
+        return name.includes(needle) || addr.includes(needle);
+      });
+      setBusinesses(filtered);
+      setShowBusinessList(true);
+      return;
+    }
+
+    // Normal mode: query full DB.
+    try {
+      const results = await getBusinesses(q);
+
+      // Ignore stale responses.
+      if (businessSearchQueryRef.current !== q) return;
+
+      setBusinesses(results);
+      setShowBusinessList(true);
+    } catch (err) {
+      if (businessSearchQueryRef.current !== q) return;
+      setError(err.message);
+    }
+  };
+
+  const clearBusinessSearch = () => {
+    setError(null);
+    setSearchQuery('');
+    businessSearchQueryRef.current = '';
+    setBusinesses([]);
+    setShowBusinessList(false);
+  };
+
+  const clearNameSearch = () => {
+    // Clearing the name search should also clear the selected business,
+    // otherwise the address will remain populated and confuse the user.
+    clearSelectedBusiness();
+    setError(null);
+    setNameSearchQuery('');
+    setBusinesses([]);
+    setShowBusinessList(false);
   };
 
   const selectBusiness = (business, source = 'initial') => {
@@ -223,20 +275,45 @@ export default function ComplaintForm({ verifiedEmail }) {
   };
 
   const handleNameSearch = async (query) => {
-    setNameSearchQuery(query);
-    setError(null);
+    const q = String(query || '');
 
-    if (query.length > 2) {
-      try {
-        const results = await getBusinesses(query);
-        setBusinesses(results);
-        setShowBusinessList(true);
-      } catch (err) {
-        setError(err.message);
-      }
-    } else {
+    // If the user edits the business name after selecting one from the DB,
+    // clear the selected business details so address/pk aren't kept (or re-used)
+    // while the user is typing/backspacing.
+    if (formData.business_pk) {
+      setFormData((prev) => ({
+        ...prev,
+        business_pk: null,
+        business_name: '',
+        business_address: '',
+      }));
+
+      // Also clear any stale suggestions from the previously selected business.
       setBusinesses([]);
       setShowBusinessList(false);
+    }
+
+    // Update visible input immediately.
+    setNameSearchQuery(q);
+    setError(null);
+
+    // Track latest query so slow responses can be ignored.
+    nameSearchQueryRef.current = q;
+
+    if (q.length <= 2) {
+      setBusinesses([]);
+      setShowBusinessList(false);
+      return;
+    }
+
+    try {
+      const results = await getBusinesses(q);
+      if (nameSearchQueryRef.current !== q) return;
+      setBusinesses(results);
+      setShowBusinessList(true);
+    } catch (err) {
+      if (nameSearchQueryRef.current !== q) return;
+      setError(err.message);
     }
   };
 
@@ -722,7 +799,7 @@ export default function ComplaintForm({ verifiedEmail }) {
         return;
       }
 
-      // Find nearby businesses (500m radius)
+      // Find nearby businesses (200m radius)
       const nearby = await getNearbyBusinesses(coords.lat, coords.lng, 200);
 
       if (nearby.length === 0) {
@@ -731,7 +808,8 @@ export default function ComplaintForm({ verifiedEmail }) {
         return;
       }
 
-      // Display nearby businesses
+      // Cache and display nearby businesses
+      setNearbyBusinessesCache(nearby);
       setBusinesses(nearby);
       setShowBusinessList(true);
       setError(null);
@@ -822,12 +900,28 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
 
     if (step === 4) {
-      const descLen = String(formData.complaint_description || '').length;
-      if (descLen < 20) {
+      const descText = String(formData.complaint_description || '').trim();
+
+      // Require: at least 1 selected category AND at least 1 selected specific violation (under any selected category)
+      const selectedViolationCount = Object.values(selectedSubcats || {}).reduce((acc, arr) => acc + (arr?.length || 0), 0);
+
+      if ((selectedCategories || []).length === 0) {
+        setError('Please select at least one Nature of Violation.');
+        return;
+      }
+
+      if (selectedViolationCount === 0) {
+        setError('Please select at least one Specific Violation under your selected category.');
+        return;
+      }
+
+      // Require min 20 characters
+      if (descText.length < 20) {
         setError('Description is too short (minimum 20 characters).');
         return;
       }
-      if (descLen > 1000) {
+
+      if (descText.length > 1000) {
         setError('Description is too long (maximum 1000 characters).');
         return;
       }
@@ -983,29 +1077,77 @@ export default function ComplaintForm({ verifiedEmail }) {
 
                 {!businessNotInDb && (!firstSearchDone || !formData.business_name) && (
                   <>
-                    <input
-                      id="business_search"
-                      aria-label="Business Search"
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => handleBusinessSearch(e.target.value)}
-                      placeholder="Search business name or address..."
-                      className="form-input"
-                      autoComplete="off"
-                    />
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <input
+                          id="business_search"
+                          aria-label="Business Search"
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => handleBusinessSearch(e.target.value)}
+                          placeholder={nearbyOnly ? 'Search nearby businesses…' : 'Search business name or address...'}
+                          className="form-input"
+                          autoComplete="off"
+                        />
+                        {searchQuery ? (
+                          <button
+                            type="button"
+                            onClick={clearBusinessSearch}
+                            aria-label="Clear search"
+                            title="Clear"
+                            className="btn"
+                            style={{
+                              position: 'absolute',
+                              right: 10,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              width: 28,
+                              height: 28,
+                              borderRadius: 999,
+                              padding: 0,
+                              lineHeight: '28px',
+                              textAlign: 'center',
+                              background: '#f1f5f9',
+                              border: '1px solid #e2e8f0',
+                              color: '#0f172a',
+                              fontWeight: 900,
+                            }}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
 
-                    <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
                       <button
                         type="button"
-                        onClick={findNearbyBusinesses}
+                        onClick={async () => {
+                          const next = !nearbyOnly;
+                          setNearbyOnly(next);
+
+                          // Always clear the current input/suggestions when toggling modes
+                          // so the user starts fresh.
+                          clearBusinessSearch();
+
+                          // Turning ON: fetch nearby list (and show it)
+                          if (next) {
+                            await findNearbyBusinesses();
+                            return;
+                          }
+
+                          // Turning OFF: clear nearby cache
+                          setNearbyBusinessesCache([]);
+                        }}
                         disabled={loading}
-                        className="btn btn-secondary"
-                        style={{ flex: 1 }}
+                        className={`btn ${nearbyOnly ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ whiteSpace: 'nowrap' }}
+                        aria-pressed={nearbyOnly ? 'true' : 'false'}
+                        title={nearbyOnly ? 'Nearby filter is ON' : 'Nearby filter is OFF'}
                       >
-                        {loading ? 'Finding nearby…' : '📍 Find Nearby Businesses'}
+                        📍 Nearby
                       </button>
-                      <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>or search above</span>
                     </div>
+
+                    {null}
 
                     {showBusinessList && businesses.length > 0 ? (
                       <div className="business-list">
@@ -1027,15 +1169,44 @@ export default function ComplaintForm({ verifiedEmail }) {
                 {!businessNotInDb && firstSearchDone && formData.business_name ? (
                   <div className="form-group" style={{ marginTop: 8 }}>
                     <label htmlFor="business_name_search">Business Name</label>
-                    <input
-                      id="business_name_search"
-                      type="text"
-                      value={nameSearchQuery || formData.business_name}
-                      onChange={(e) => handleNameSearch(e.target.value)}
-                      className="form-input"
-                      placeholder="Search or change business name"
-                      autoComplete="off"
-                    />
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        id="business_name_search"
+                        type="text"
+                        value={nameSearchQuery}
+                        onChange={(e) => handleNameSearch(e.target.value)}
+                        className="form-input"
+                        placeholder={formData.business_name ? formData.business_name : 'Search or change business name'}
+                        autoComplete="off"
+                      />
+                      {nameSearchQuery ? (
+                        <button
+                          type="button"
+                          onClick={clearNameSearch}
+                          aria-label="Clear business name search"
+                          title="Clear"
+                          className="btn"
+                          style={{
+                            position: 'absolute',
+                            right: 10,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            width: 28,
+                            height: 28,
+                            borderRadius: 999,
+                            padding: 0,
+                            lineHeight: '28px',
+                            textAlign: 'center',
+                            background: '#f1f5f9',
+                            border: '1px solid #e2e8f0',
+                            color: '#0f172a',
+                            fontWeight: 900,
+                          }}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
 
                     {showBusinessList && businesses.length > 0 ? (
                       <div className="business-list">
@@ -1442,93 +1613,89 @@ export default function ComplaintForm({ verifiedEmail }) {
 
           {step === 4 ? (
             <>
-              {/* Guided Filing: Nature of Violation */}
+              {/* Guided Filing: Nature of Violation (pill buttons with dropdown checklist inside) */}
               <div className="form-group">
                 <label style={{ marginBottom: 6, fontWeight: 800, color: '#0f172a' }}>Nature of Violation</label>
-                <div>
-                  {GUIDED_CATEGORIES.map((c) => (
-                    <div key={c.key} className="check-row" style={{ marginTop: 6 }}>
-                      <input
-                        id={`guided-cat-${c.key}`}
-                        type="checkbox"
-                        checked={selectedCategories.includes(c.key)}
-                        onChange={(e) => toggleCategory(c.key, e.target.checked)}
-                      />
-                      <label htmlFor={`guided-cat-${c.key}`} style={{ margin: 0 }}>{c.label}</label>
-                    </div>
-                  ))}
-                </div>
-                <div className="inline-note" style={{ marginTop: 6 }}>
-                  You can select more than one category if applicable.
-                </div>
-              </div>
 
-              {/* Guided Filing: Specific Violations (Dynamic Accordions) */}
-              <div className="form-group">
-                <label style={{ marginBottom: 6, fontWeight: 800, color: '#0f172a' }}>Specific Violations</label>
-                {selectedCategories.length === 0 ? (
-                  <div className="inline-note">Select one or more categories above to see specific violations.</div>
-                ) : null}
+                <div className="guided-cat-list" role="list" aria-label="Nature of Violation categories">
+                  {GUIDED_CATEGORIES.map((c) => {
+                    const isSelected = selectedCategories.includes(c.key);
+                    const isOpen = expandedGuided[c.key] === true;
+                    const subs = GUIDED_SUBCATS[c.key] || [];
 
-                {selectedCategories.map((catKey) => {
-                  const cat = GUIDED_CATEGORIES.find((c) => c.key === catKey) || { label: catKey };
-                  const subs = GUIDED_SUBCATS[catKey] || [];
-                  const isOpen = expandedGuided[catKey] !== false; // default open when selected
+                    return (
+                      <div key={c.key} className={`guided-cat-row ${isSelected ? 'is-selected' : ''}`} role="listitem">
+                        <button
+                          type="button"
+                          className="guided-cat-row-btn"
+                          aria-expanded={isOpen ? 'true' : 'false'}
+                          onClick={() => {
+                            // Only open/close the dropdown. Do NOT auto-check the category.
+                            setExpandedGuided((prev) => ({ ...(prev || {}), [c.key]: !isOpen }));
+                          }}
+                        >
+                          <span className="guided-cat-row-left">
+                            <input
+                              className="guided-cat-row-checkbox"
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                const checked = e.target.checked;
+                                toggleCategory(c.key, checked);
+                                // if user checks it, open; if unchecks it, close
+                                setExpandedGuided((prev) => ({ ...(prev || {}), [c.key]: checked ? true : false }));
+                              }}
+                              aria-label={`Select ${c.label}`}
+                            />
+                            <span className="guided-cat-row-label">{c.label}</span>
+                          </span>
+                          <span className="guided-cat-row-chevron">⌄</span>
+                        </button>
 
-                  return (
-                    <div key={catKey} style={{ border: '1px solid #e5e7eb', borderRadius: 12, background: '#fff', marginTop: 8 }}>
-                      <button
-                        type="button"
-                        onClick={() => setExpandedGuided((prev) => ({ ...(prev || {}), [catKey]: !isOpen }))}
-                        aria-expanded={isOpen ? 'true' : 'false'}
-                        className="btn"
-                        style={{
-                          width: '100%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '10px 12px',
-                          background: '#fff',
-                          border: 'none',
-                          boxShadow: 'none',
-                          cursor: 'pointer',
-                          borderRadius: 12,
-                        }}
-                      >
-                        <span style={{ fontWeight: 800, color: '#0f172a' }}>{cat.label}</span>
-                        <span style={{ display: 'inline-block', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms ease' }}>⌄</span>
-                      </button>
-
-                      <div
-                        className="accordion-panel"
-                        style={{
-                          overflow: 'hidden',
-                          transition: 'max-height 220ms ease, opacity 220ms ease',
-                          maxHeight: isOpen ? 400 : 0,
-                          opacity: isOpen ? 1 : 0,
-                        }}
-                      >
-                        <div style={{ padding: 12 }}>
-                          {subs.length === 0 ? (
-                            <div className="inline-note">No sub-categories configured.</div>
-                          ) : (
-                            subs.map((sc) => (
-                              <div key={sc.key} className="check-row" style={{ marginTop: 6 }}>
-                                <input
-                                  id={`guided-sub-${catKey}-${sc.key}`}
-                                  type="checkbox"
-                                  checked={(selectedSubcats[catKey] || []).includes(sc.key)}
-                                  onChange={(e) => toggleSubcat(catKey, sc.key, e.target.checked)}
-                                />
-                                <label htmlFor={`guided-sub-${catKey}-${sc.key}`} style={{ margin: 0 }}>{sc.label}</label>
+                        <div
+                          className="guided-cat-menu"
+                          style={{
+                            maxHeight: isOpen ? 420 : 0,
+                            opacity: isOpen ? 1 : 0,
+                          }}
+                        >
+                          <div className="guided-cat-menu-inner">
+                            {subs.length === 0 ? (
+                              <div className="inline-note" style={{ marginTop: 0 }}>
+                                No specific violations configured.
                               </div>
-                            ))
-                          )}
+                            ) : (
+                              subs.map((sc) => (
+                                <label key={sc.key} className="guided-menu-item">
+                                  <input
+                                    type="checkbox"
+                                    checked={(selectedSubcats[c.key] || []).includes(sc.key)}
+                                    onChange={(e) => {
+                                      const checked = e.target.checked;
+                                      // If user selects a specific violation, ensure its parent category is selected too.
+                                      if (checked && !selectedCategories.includes(c.key)) {
+                                        toggleCategory(c.key, true);
+                                      }
+                                      toggleSubcat(c.key, sc.key, checked);
+                                      // Keep the dropdown open while interacting.
+                                      setExpandedGuided((prev) => ({ ...(prev || {}), [c.key]: true }));
+                                    }}
+                                  />
+                                  <span>{sc.label}</span>
+                                </label>
+                              ))
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+
+                <div className="inline-note" style={{ marginTop: 6 }}>
+                  Tap a category to select it and show its specific violations.
+                </div>
               </div>
 
               {/* Move Complaint Description textarea to bottom */}
@@ -1666,9 +1833,11 @@ export default function ComplaintForm({ verifiedEmail }) {
           {error ? <div className="error-message">{error}</div> : null}
 
           <div className="form-nav">
-            <button type="button" className="btn btn-secondary" onClick={goBack} disabled={loading || step === 1}>
-              Back
-            </button>
+            {step === 1 ? null : (
+              <button type="button" className="btn btn-secondary" onClick={goBack} disabled={loading}>
+                Back
+              </button>
+            )}
 
             {step < TOTAL_STEPS ? (
               <button type="button" className="btn btn-primary" onClick={goNext} disabled={loading}>
