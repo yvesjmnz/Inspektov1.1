@@ -568,10 +568,16 @@ export default function ComplaintForm({ verifiedEmail }) {
         setBusinessCoords(data.business_coords);
       }
 
-      setFormData((prev) => ({
-        ...prev,
-        tags: [...new Set([...prev.tags, tag])],
-      }));
+      setFormData((prev) => {
+        // Remove old location verification tags to avoid conflicts on retry
+        const filteredTags = (prev.tags || []).filter(
+          (t) => t !== 'Location Verified' && t !== 'Failed Location Verification' && t !== 'Verification Unavailable'
+        );
+        return {
+          ...prev,
+          tags: [...new Set([...filteredTags, tag])],
+        };
+      });
 
       // Warn if far, but don't block
       if (tag === 'Failed Location Verification') {
