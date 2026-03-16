@@ -92,7 +92,7 @@ function KeyTile({ label, value, sub }) {
   );
 }
 
-function Panel({ title, right, children }) {
+function Panel({ title, right, subtitle, children }) {
   return (
     <section
       style={{
@@ -107,15 +107,19 @@ function Panel({ title, right, children }) {
         style={{
           padding: '14px 16px',
           borderBottom: '1px solid #e2e8f0',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 10,
+          display: 'grid',
+          gap: 6,
           background: 'linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)',
         }}
       >
-        <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 15 }}>{title}</div>
-        {right ? <div>{right}</div> : null}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>{title}</span>
+          </div>
+          {right ? <div>{right}</div> : null}
+        </div>
+
+        {subtitle ? <div>{subtitle}</div> : null}
       </div>
       <div style={{ padding: 16 }}>{children}</div>
     </section>
@@ -154,6 +158,8 @@ export default function MissionOrderEditor() {
 
   const [dateOfInspection, setDateOfInspection] = useState('');
 
+  const [evidencePreviewUrl, setEvidencePreviewUrl] = useState('');
+
   
   const [docxPreviewOpen, setDocxPreviewOpen] = useState(false);
   const [docxPreviewError, setDocxPreviewError] = useState(false);
@@ -190,7 +196,9 @@ export default function MissionOrderEditor() {
   const isSubmitted = statusLower === 'issued';
   const isAwaitingSignature = statusLower === 'awaiting_signature';
   const isComplete = statusLower === 'complete' || statusLower === 'completed';
-  const isReadOnly = isApproved || isSubmitted || isAwaitingSignature || isComplete;
+  // Mission Order Details should remain editable for Head Inspector.
+  // (Status-based restrictions are enforced by the presence/absence of action buttons like Submit/Generate.)
+  const isReadOnly = false;
 
   const handleLogout = async () => {
     setError('');
@@ -232,13 +240,15 @@ export default function MissionOrderEditor() {
       if (mo?.complaint_id) {
         const { data: c, error: cError } = await supabase
           .from('complaints')
-          .select('id, business_name, business_address, complaint_description, reporter_email, created_at, status, tags')
+          .select('id, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls')
           .eq('id', mo.complaint_id)
           .single();
         if (cError) throw cError;
         setComplaint(c);
+        setEvidencePreviewUrl('');
       } else {
         setComplaint(null);
+        setEvidencePreviewUrl('');
       }
 
       const { data: inspectorsData, error: inspectorsError } = await supabase
@@ -870,55 +880,58 @@ export default function MissionOrderEditor() {
           <div className="dash-maincol">
             <div className="dash-card" style={{ padding: 18 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontWeight: 1000, fontSize: 20, color: '#0f172a' }}>Mission Order</div>
-                  <div style={{ color: '#475569', fontWeight: 800, marginTop: 6, fontSize: 14 }}>
-                    {complaint?.business_name || '—'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', flex: '0 0 auto' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '6px 10px',
+                        background: 'transparent',
+                        border: 'none',
+                        borderRadius: 8,
+                        color: '#334155',
+                        fontWeight: 800,
+                        fontSize: 14,
+                        textDecoration: 'none',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s ease, color 0.2s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f1f5f9';
+                        e.currentTarget.style.color = '#0f172a';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = '#334155';
+                      }}
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Back
+                    </button>
                   </div>
-                  {null}
+
+                  <span aria-hidden="true" style={{ width: 1, height: 36, background: '#e2e8f0', display: 'inline-block', marginTop: 2 }} />
+
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 1000, fontSize: 20, color: '#0f172a' }}>Mission Order</div>
+                    <div style={{ color: '#475569', fontWeight: 800, marginTop: 6, fontSize: 14 }}>
+                      {complaint?.business_name || '—'}
+                    </div>
+                    {null}
+                  </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
-                    }}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '8px 12px',
-                      background: 'transparent',
-                      border: '1px solid #cbd5e1',
-                      borderRadius: 8,
-                      color: '#0f172a',
-                      fontWeight: 700,
-                      fontSize: 14,
-                      textDecoration: 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = '#f1f5f9';
-                      e.currentTarget.style.borderColor = '#94a3b8';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent';
-                      e.currentTarget.style.borderColor = '#cbd5e1';
-                    }}
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
-                      <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    Back
-                  </button>
-
                   {!isApproved && !isSubmitted && !isAwaitingSignature && !isComplete ? (
                     <>
-                      <button className="dash-btn" type="button" onClick={handleSave} disabled={!canSave || saving}>
-                        {saving ? 'Saving…' : 'Save'}
-                      </button>
                       <button
                         className="dash-btn"
                         type="button"
@@ -1016,8 +1029,10 @@ export default function MissionOrderEditor() {
                 </div>
               </div>
 
-              <Panel title="Mission Order Details" right={isReadOnly ? <span style={{ fontWeight: 900, fontSize: 12, color: '#64748b' }}>Read-only</span> : null}>
-                <div style={{ display: 'grid', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, alignItems: 'start' }}>
+                <div style={{ display: 'grid', gap: 14, alignSelf: 'start' }}>
+                <Panel title="Mission Order Details">
+                  <div style={{ display: 'grid', gap: 16 }}>
                   {/* 1) Inspectors (editable) */}
                   <div>
                     <div style={{ fontWeight: 900, fontSize: 13, color: '#0f172a' }}>Inspectors</div>
@@ -1069,79 +1084,7 @@ export default function MissionOrderEditor() {
                     )}
                   </div>
                   
-                  {/* 2) Business name (read-only) */}
-                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
-                    <label className="mo-label" htmlFor="businessName" style={{ fontSize: 13 }}>Business Name (Read Only)</label>
-                    <input
-                      id="businessName"
-                      className="mo-input-readonly"
-                      readOnly
-                      value={complaint?.business_name || ''}
-                      style={{ width: '100%', height: 46, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '0 12px', fontWeight: 700, color: '#94a3b8', fontSize: 16 }}
-                    />
-                  </div>
-
-                  {/* 3) Business address (read-only) */}
-                  <div>
-                    <label className="mo-label" htmlFor="businessAddress" style={{ fontSize: 13 }}>Business Address (Read Only)</label>
-                    <input
-                      id="businessAddress"
-                      className="mo-input-readonly"
-                      readOnly
-                      value={complaint?.business_address || ''}
-                      style={{ width: '100%', height: 46, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '0 12px', fontWeight: 700, color: '#94a3b8', fontSize: 16 }}
-                    />
-                  </div>
-
-                  {/* Complaint Category (read-only) */}
-                  <div>
-                    <label className="mo-label" style={{ fontSize: 13 }}>Complaint Category (Read Only)</label>
-                    <div
-                      style={{ width: '100%', borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '10px 12px', height: 'auto', overflow: 'visible', display: 'block', color: '#94a3b8', fontWeight: 700, fontSize: 15 }}
-                    >
-                      {(() => {
-                        const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
-                        return groups.length > 0 ? (
-                          <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
-                            {groups.map((g) => (
-                              <li key={g.category} style={{ margin: '4px 0' }}>
-                                <span style={{ fontWeight: 800 }}>{String(g.category).replace(/\s*&\s*/g, ' and ')}</span>
-                                {Array.isArray(g.subs) && g.subs.length > 0 ? (
-                                  <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
-                                    {g.subs.map((s) => (
-                                      <li key={s} style={{ margin: '2px 0' }}>{s}</li>
-                                    ))}
-                                  </ul>
-                                ) : null}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <div style={{ color: '#94a3b8', fontWeight: 700 }}>—</div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-
-                  {/* 4) Complaint details (read-only) */}
-                  <div>
-                    <label className="mo-label" htmlFor="complaintDetails" style={{ fontSize: 13 }}>Complaint Details (Read Only)</label>
-                    <textarea
-                      id="complaintDetails"
-                      readOnly
-                      className="mo-input-readonly"
-                      value={complaint?.complaint_description || ''}
-                      style={{ width: '100%', minHeight: 110, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '10px 12px', fontWeight: 700, color: '#94a3b8', fontSize: 15, lineHeight: 1.5, resize: 'vertical' }}
-                    />
-                    {complaint?.id ? (
-                      <div style={{ marginTop: 12 }}>
-                        <a className="dash-btn" href={`/complaints/view?id=${complaint.id}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-                          Open Full Complaint
-                        </a>
-                      </div>
-                    ) : null}
-                  </div>
-                  
+                                    
                   {/* 2) City ordinances violated (editable) */}
                   <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
                     <div style={{ fontWeight: 900, fontSize: 13, color: '#0f172a' }}>City Ordinances Violated</div>
@@ -1227,10 +1170,9 @@ export default function MissionOrderEditor() {
                     </div>
                   </div>
                 </div>
-              </Panel>
+                </Panel>
 
-              {/* Unified DOCX actions inside the Preview panel header */}
-              <div style={{ marginTop: 14, display: 'grid', gap: 14 }}>
+                {/* Unified DOCX actions inside the Preview panel header */}
                 <Panel
                   title="Document Preview"
                   right={
@@ -1287,16 +1229,223 @@ export default function MissionOrderEditor() {
                         </div>
                       ) : null}
 
-                      {!isComplete ? (
-                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                          <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-                            Open in new tab
-                          </a>
-                        </div>
-                      ) : null}
-                    </div>
+                                          </div>
                   )}
                 </Panel>
+                </div>
+
+                <div style={{ display: 'grid', gap: 14, position: 'sticky', top: 14, alignSelf: 'start' }}>
+                  <Panel
+                    title="Business Complaint Reference"
+                    subtitle={
+                      <div style={{ display: 'grid', gap: 4 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', columnGap: 8, alignItems: 'baseline' }}>
+                          <span style={{ fontSize: 10, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>Date Filed</span>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: '#334155' }}>
+                            {complaint?.created_at ? new Date(complaint.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '—'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', columnGap: 8, alignItems: 'baseline' }}>
+                          <span style={{ fontSize: 10, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>Email</span>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: '#334155', wordBreak: 'break-word' }}>
+                            {complaint?.reporter_email || '—'}
+                          </span>
+                        </div>
+                      </div>
+                    }
+                    right={
+                      complaint?.id ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(String(complaint.id));
+                              setToast('Complaint ID copied');
+                            } catch {
+                              setToast('Failed to copy');
+                            }
+                          }}
+                          title="Copy complaint ID"
+                          aria-label="Copy complaint ID"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '4px 8px',
+                            borderRadius: 8,
+                            border: '1px solid #cbd5e1',
+                            background: '#fff',
+                            color: '#0f172a',
+                            fontWeight: 900,
+                            fontSize: 12,
+                            cursor: 'pointer',
+                            lineHeight: 1,
+                            outline: 'none',
+                          }}
+                        >
+                          <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
+                            {String(complaint.id).slice(0, 8)}…
+                          </span>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+                            <path d="M16 1H6a2 2 0 0 0-2 2v12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M8 5h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </button>
+                      ) : null
+                    }
+                  >
+                    <div style={{ display: 'grid', gap: 18 }}>
+                      <div style={{ paddingBottom: 6 }}>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6 }}>Business Name</div>
+                        <div style={{ marginTop: 6, fontWeight: 900, color: '#0f172a', fontSize: 14 }}>
+                          {complaint?.business_name || '—'}
+                        </div>
+                      </div>
+
+                      <div style={{ paddingBottom: 6 }}>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6 }}>Business Address</div>
+                        <div style={{ marginTop: 6, fontWeight: 800, color: '#334155', fontSize: 13, lineHeight: 1.4 }}>
+                          {complaint?.business_address || '—'}
+                        </div>
+                      </div>
+
+                      <div style={{ paddingBottom: 6 }}>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6 }}>Complaint Category</div>
+                        {(() => {
+                          const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
+                          if (!groups.length) {
+                            return <div style={{ marginTop: 6, fontWeight: 800, color: '#334155', fontSize: 13, lineHeight: 1.4 }}>—</div>;
+                          }
+
+                          return (
+                            <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: '#334155' }}>
+                              {groups.map((g) => {
+                                const category = g?.category || '—';
+                                const subs = Array.isArray(g?.subs) ? g.subs.filter(Boolean) : [];
+                                return (
+                                  <li key={category} style={{ margin: '4px 0' }}>
+                                    <div style={{ fontWeight: 900, fontSize: 13, lineHeight: 1.4 }}>{category}</div>
+                                    {subs.length ? (
+                                      <ul style={{ marginTop: 4, marginBottom: 0, paddingLeft: 18 }}>
+                                        {subs.map((s) => (
+                                          <li key={`${category}-${s}`} style={{ fontWeight: 600, fontSize: 13, lineHeight: 1.5, margin: '2px 0' }}>
+                                            {s}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : null}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          );
+                        })()}
+                      </div>
+
+                      
+                      
+                      <div style={{ paddingTop: 6 }}>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6 }}>Complaint Details</div>
+                        <div style={{ marginTop: 10, fontWeight: 500, color: '#334155', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                          {complaint?.complaint_description || '—'}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                          Evidences{Array.isArray(complaint?.image_urls) && complaint.image_urls.length ? ` (${complaint.image_urls.length} photos)` : ''}
+                        </div>
+                        {Array.isArray(complaint?.image_urls) && complaint.image_urls.length > 0 ? (
+                          <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            {complaint.image_urls.filter(Boolean).slice(0, 4).map((url, idx) => (
+                              <img
+                                key={`${url}-${idx}`}
+                                src={url}
+                                alt={`Evidence ${idx + 1}`}
+                                style={{ width: '100%', height: 110, objectFit: 'cover', borderRadius: 12, border: '1px solid #e2e8f0', cursor: 'zoom-in' }}
+                                onClick={() => setEvidencePreviewUrl(url)}
+                                title="Click to preview"
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 8, fontWeight: 700, color: '#94a3b8', fontSize: 13 }}>—</div>
+                        )}
+                      </div>
+
+                                          </div>
+
+                  {evidencePreviewUrl ? (
+                    <div
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label="Evidence photo preview"
+                      onClick={() => setEvidencePreviewUrl('')}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setEvidencePreviewUrl('');
+                      }}
+                      tabIndex={-1}
+                      style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(2,6,23,0.70)',
+                        display: 'grid',
+                        placeItems: 'center',
+                        zIndex: 9999,
+                        padding: 18,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 'min(980px, 96vw)',
+                          maxHeight: '88vh',
+                          background: '#0b1220',
+                          borderRadius: 16,
+                          border: '1px solid rgba(255,255,255,0.12)',
+                          boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
+                          overflow: 'hidden',
+                          position: 'relative',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setEvidencePreviewUrl('')}
+                          aria-label="Close preview"
+                          style={{
+                            position: 'absolute',
+                            top: 12,
+                            right: 12,
+                            width: 44,
+                            height: 44,
+                            border: 'none',
+                            outline: 'none',
+                            boxShadow: 'none',
+                            background: 'transparent',
+                            color: '#fff',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 26,
+                            fontWeight: 900,
+                            lineHeight: 1,
+                            padding: 0,
+                          }}
+                        >
+                          ×
+                        </button>
+                        <img
+                          src={evidencePreviewUrl}
+                          alt="Evidence preview"
+                          style={{ width: '100%', height: '100%', maxHeight: '88vh', objectFit: 'contain', display: 'block' }}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  </Panel>
+                </div>
               </div>
 
               {loading ? <div style={{ marginTop: 12, color: '#64748b', fontWeight: 800 }}>Loading…</div> : null}
