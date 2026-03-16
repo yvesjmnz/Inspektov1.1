@@ -62,6 +62,7 @@ function statusLabel(status) {
   if (s === 'issued') return 'Submitted to Director';
   if (s === 'for inspection' || s === 'for_inspection') return 'Pre-Approved';
   if (s === 'awaiting_signature') return 'Awaiting Signature';
+  if (s === 'complete' || s === 'completed') return 'Complete';
   if (s === 'cancelled' || s === 'canceled') return 'Rejected';
   return status || '—';
 }
@@ -184,10 +185,12 @@ export default function MissionOrderEditor() {
   }, [toast]);
 
   const status = String(missionOrder?.status || '');
-  const isApproved = String(status).toLowerCase() === 'for inspection' || String(status).toLowerCase() === 'for_inspection';
-  const isSubmitted = String(status).toLowerCase() === 'issued';
-  const isAwaitingSignature = String(status).toLowerCase() === 'awaiting_signature';
-  const isReadOnly = isApproved || isSubmitted || isAwaitingSignature;
+  const statusLower = String(status).toLowerCase();
+  const isApproved = statusLower === 'for inspection' || statusLower === 'for_inspection';
+  const isSubmitted = statusLower === 'issued';
+  const isAwaitingSignature = statusLower === 'awaiting_signature';
+  const isComplete = statusLower === 'complete' || statusLower === 'completed';
+  const isReadOnly = isApproved || isSubmitted || isAwaitingSignature || isComplete;
 
   const handleLogout = async () => {
     setError('');
@@ -362,10 +365,10 @@ export default function MissionOrderEditor() {
 
   const canSave = !loading && !!missionOrderId && !isReadOnly;
   const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection;
-  const isDraft = String(status).toLowerCase() === 'draft';
+  const isDraft = statusLower === 'draft';
   // Allow generating an UNSIGNED doc even after submit (issued), so the director can see the latest draft output.
   // Director approval will overwrite it with the SIGNED template automatically.
-  const canGenerateDocx = !loading && !!missionOrderId && (isDraft || isSubmitted || isApproved || isAwaitingSignature);
+  const canGenerateDocx = !loading && !!missionOrderId && !isComplete && (isDraft || isSubmitted || isApproved || isAwaitingSignature);
 
   const saveMissionOrder = async () => {
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -872,10 +875,7 @@ export default function MissionOrderEditor() {
                   <div style={{ color: '#475569', fontWeight: 800, marginTop: 6, fontSize: 14 }}>
                     {complaint?.business_name || '—'}
                   </div>
-                  <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <span className="status-badge status-info">{statusLabel(missionOrder?.status)}</span>
-                    <span style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>Template: {missionOrder?.template_name || TEMPLATE_NAME}</span>
-                  </div>
+                  {null}
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -914,7 +914,7 @@ export default function MissionOrderEditor() {
                     Back
                   </button>
 
-                  {!isApproved && !isSubmitted && !isAwaitingSignature ? (
+                  {!isApproved && !isSubmitted && !isAwaitingSignature && !isComplete ? (
                     <>
                       <button className="dash-btn" type="button" onClick={handleSave} disabled={!canSave || saving}>
                         {saving ? 'Saving…' : 'Save'}
@@ -930,9 +930,7 @@ export default function MissionOrderEditor() {
                         {submitting ? 'Submitting…' : 'Submit'}
                       </button>
                     </>
-                  ) : (
-                    <div style={{ fontWeight: 900, color: '#0f172a' }}>{isApproved ? 'Approved' : isAwaitingSignature ? 'Awaiting Signature' : 'Submitted'}</div>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
@@ -945,7 +943,7 @@ export default function MissionOrderEditor() {
                   marginTop: 12,
                   marginBottom: 14,
                   display: 'flex',
-                  gap: 28,
+                  gap: 18,
                   alignItems: 'center',
                   flexWrap: 'wrap',
                   padding: '14px 16px',
@@ -956,6 +954,19 @@ export default function MissionOrderEditor() {
                   boxShadow: '0 8px 16px rgba(2,6,23,0.25)'
                 }}
               >
+                {/* MO Status */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                  <span aria-hidden="true" style={{ color: '#0b2249' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M7 2h7l5 5v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V8h4.5L14 3.5Z" fill="#0b2249"/>
+                      <path d="M8 12h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Zm0 4h8a1 1 0 1 0 0-2H8a1 1 0 1 0 0 2Z" fill="#0b2249"/>
+                    </svg>
+                  </span>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>MO Status:</span>
+                  <span className={isComplete ? 'status-badge status-success' : 'status-badge status-info'} style={{ fontWeight: 900 }}>
+                    {statusLabel(missionOrder?.status)}
+                  </span>
+                </div>
                 {/* Inspectors */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
                   <span aria-hidden="true" style={{ color: '#0b2249' }}>
@@ -1224,22 +1235,24 @@ export default function MissionOrderEditor() {
                   title="Document Preview"
                   right={
                     <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="dash-btn"
-                        onClick={handleGenerateDocx}
-                        disabled={!canGenerateDocx || generatingDocx}
-                        style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
-                        title={
-                          isDraft
-                            ? 'Generate a previewable DOCX during draft.'
-                            : (isApproved || isAwaitingSignature)
-                            ? 'Regenerate the approved DOCX.'
-                            : 'Available during draft or after approval.'
-                        }
-                      >
-                        {generatingDocx ? 'Generating…' : missionOrder?.generated_docx_url ? 'Regenerate DOCX' : 'Generate DOCX'}
-                      </button>
+                      {!isComplete ? (
+                        <button
+                          type="button"
+                          className="dash-btn"
+                          onClick={handleGenerateDocx}
+                          disabled={!canGenerateDocx || generatingDocx}
+                          style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
+                          title={
+                            isDraft
+                              ? 'Generate a previewable DOCX during draft.'
+                              : (isApproved || isAwaitingSignature)
+                              ? 'Regenerate the approved DOCX.'
+                              : 'Available during draft or after approval.'
+                          }
+                        >
+                          {generatingDocx ? 'Generating…' : missionOrder?.generated_docx_url ? 'Regenerate DOCX' : 'Generate DOCX'}
+                        </button>
+                      ) : null}
 
                       {missionOrder?.generated_docx_url && (isApproved || isAwaitingSignature) ? (
                         <button
@@ -1251,20 +1264,6 @@ export default function MissionOrderEditor() {
                           Download
                         </button>
                       ) : null}
-
-                      {missionOrder?.generated_docx_url ? (
-                        <button
-                          type="button"
-                          className="dash-btn"
-                          onClick={() => {
-                            setDocxPreviewOpen((v) => !v);
-                            setDocxPreviewError(false);
-                          }}
-                          style={{ background: '#fff', border: '1px solid #e2e8f0', color: '#0b2249' }}
-                        >
-                          {docxPreviewOpen ? 'Hide Preview' : 'Show Preview'}
-                        </button>
-                      ) : null}
                     </div>
                   }
                 >
@@ -1272,14 +1271,8 @@ export default function MissionOrderEditor() {
                     <div style={{ color: '#64748b', fontWeight: 800 }}>
                       No generated document yet. {isDraft ? '(Preview only during draft)' : (!isApproved && !isAwaitingSignature ? '(Available after Director approval)' : '')}
                     </div>
-                  ) : docxPreviewOpen ? (
+                  ) : (
                     <div style={{ display: 'grid', gap: 10 }}>
-                      {docxPreviewError ? (
-                        <div className="dash-alert dash-alert-error">
-                          Preview failed to load.
-                        </div>
-                      ) : null}
-
                       <iframe
                         key={officeViewerUrl}
                         title="DOCX Preview"
@@ -1288,7 +1281,13 @@ export default function MissionOrderEditor() {
                         onError={() => setDocxPreviewError(true)}
                       />
 
-                      {isApproved ? (
+                      {docxPreviewError ? (
+                        <div className="dash-alert dash-alert-error">
+                          Preview failed to load.
+                        </div>
+                      ) : null}
+
+                      {!isComplete ? (
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                           <a className="dash-btn" href={missionOrder.generated_docx_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
                             Open in new tab
@@ -1296,8 +1295,6 @@ export default function MissionOrderEditor() {
                         </div>
                       ) : null}
                     </div>
-                  ) : (
-                    <div style={{ color: '#64748b', fontWeight: 800 }}>Preview hidden.</div>
                   )}
                 </Panel>
               </div>

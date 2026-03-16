@@ -50,10 +50,6 @@ export default function ComplaintConfirmation() {
               Back to Home
             </a>
           </div>
-
-          <div className="confirm-note">
-            If you provided an email address, you will receive an email confirmation shortly.
-          </div>
         </section>
       </main>
       <Footer />

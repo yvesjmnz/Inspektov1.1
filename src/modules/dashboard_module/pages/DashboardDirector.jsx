@@ -129,17 +129,18 @@ function formatDateNoSeconds(isoString) {
 }
 
 export default function DashboardDirector() {
-  // Initialize tab from URL query parameter, default to 'general'
+  // Initialize tab from URL query parameter, default to 'queue'
+  // Note: Director view no longer supports the 'general' (dashboard) tab.
   const getInitialTab = () => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
-    if (tabParam && ['general', 'queue', 'mission-orders', 'inspection', 'mission-orders-history', 'history'].includes(tabParam)) {
+    if (tabParam && ['queue', 'mission-orders', 'inspection', 'mission-orders-history', 'history', 'reports'].includes(tabParam)) {
       return tabParam;
     }
-    return 'general';
+    return 'queue';
   };
 
-  const [tab, setTab] = useState(getInitialTab); // general | queue | mission-orders | mission-orders-history | history
+  const [tab, setTab] = useState(getInitialTab); // queue | mission-orders | mission-orders-history | inspection | history | reports
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -485,10 +486,6 @@ export default function DashboardDirector() {
   useEffect(() => {
     if (tab === 'mission-orders' || tab === 'mission-orders-history' || tab === 'inspection') {
       loadMissionOrders();
-    } else if (tab === 'general') {
-      // Load both datasets for the overview
-      loadComplaints();
-      loadMissionOrders();
     } else {
       loadComplaints();
     }
@@ -719,9 +716,6 @@ export default function DashboardDirector() {
 
   const handleRefresh = () => {
     if (tab === 'mission-orders') {
-      loadMissionOrders();
-    } else if (tab === 'general') {
-      loadComplaints();
       loadMissionOrders();
     } else {
       loadComplaints();
@@ -1081,14 +1075,6 @@ export default function DashboardDirector() {
               </div>
             </div>
             <ul className="dash-nav" style={{ flex: 1 }}>
-              <li>
-                <button type="button" className={`dash-nav-item ${tab === 'general' ? 'active' : ''}`} onClick={() => setTab('general')}>
-                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <img src="/ui_icons/menu.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
-                  </span>
-                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Dashboard</span>
-                </button>
-              </li>
               <li className="dash-nav-section">
                 <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Complaints</span>
               </li>
@@ -1512,116 +1498,6 @@ export default function DashboardDirector() {
 
           {tab === 'reports' ? (
             <DirectorReports />
-          ) : tab === 'general' ? (
-            <div className="dash-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-              <div className="dash-tile">
-                <h3>Today's New Complaints</h3>
-                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.newToday}</div>
-                <div className="dash-cell-sub">Submitted/Pending/New created today</div>
-              </div>
-              <div className="dash-tile">
-                <h3>Pending Review</h3>
-                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.pendingReview}</div>
-                <div className="dash-cell-sub">In Review Complaints</div>
-              </div>
-              <div className="dash-tile">
-                <h3>Approved Today</h3>
-                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.approvedToday}</div>
-                <div className="dash-cell-sub">Decisions made today</div>
-              </div>
-              <div className="dash-tile">
-                <h3>Declined Today</h3>
-                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.declinedToday}</div>
-                <div className="dash-cell-sub">Decisions made today</div>
-              </div>
-              <div className="dash-tile">
-                <h3>Issued Mission Orders</h3>
-                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{generalSummary.moIssued}</div>
-                <div className="dash-cell-sub">Awaiting Director review</div>
-              </div>
-              <div className="dash-tile" style={{ gridColumn: 'span 3' }}>
-                <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-                  <h3 style={{ margin: 0 }}>Complaints Submitted – {generalSummary.timeframeLabel}</h3>
-
-                  {/* Custom date range filter (calendar picker) */}
-                  <div className="date-filter" style={{ marginLeft: 0 }}>
-                    <button
-                      type="button"
-                      className="dash-select date-filter-btn"
-                      onClick={() => {
-                        if (!datePopoverOpen) {
-                          if (appliedRange.start && appliedRange.end) {
-                            setPendingRange({ start: appliedRange.start, end: appliedRange.end });
-                            setDatePreset('custom');
-                            setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
-                          } else {
-                            setCurrentWeekPending();
-                          }
-                        }
-                        setDatePopoverOpen((v) => !v);
-                      }}
-                      aria-haspopup="dialog"
-                      aria-expanded={datePopoverOpen}
-                      title="Filter complaints submitted by date range"
-                    >
-                      {rangeLabel}
-                    </button>
-                    {datePopoverOpen ? (
-                      <div className="date-popover" role="dialog" aria-modal="true">
-                        <div className="date-presets">
-                          <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
-                          <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
-                          <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
-                          <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
-                          <div className="date-apply">
-                            <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
-                          </div>
-                        </div>
-                        <div className="cal-wrap">
-                          <div className="cal-header">
-                            <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
-                            <div className="cal-nav">
-                              <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
-                              <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
-                            </div>
-                          </div>
-                          <div className="cal-grid">
-                            {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
-                              <div key={`h-${d}`} className="cal-dow">{d}</div>
-                            ))}
-                            {calendarGrid(viewMonth).map((d) => {
-                              const inMonth = d.getMonth() === viewMonth.getMonth();
-                              const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
-                              const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
-                              const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
-                              const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
-                              return (
-                                <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
-                              );
-                            })}
-                          </div>
-                          <div className="range-summary">
-                            {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end).replace('Date: ', '') : 'Select a start and end date'}
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {generalSummary.days.map((d) => (
-                    <div key={d.key || d.label} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 40px', alignItems: 'center', gap: 10 }}>
-                      <div className="dash-cell-sub" style={{ fontWeight: 800 }}>{d.label}</div>
-                      <div style={{ background: '#e2e8f0', borderRadius: 999, height: 12, position: 'relative' }}>
-                        <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${Math.round((d.count / (generalSummary.max || 1)) * 100)}%`, background: '#2563eb', borderRadius: 999 }}></div>
-                      </div>
-                      <div style={{ fontWeight: 900, color: '#0f172a', textAlign: 'right' }}>{d.count}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-                          </div>
           ) : tab === 'mission-orders' ? (
             <div style={{ display: 'grid', gap: 20 }}>
               {filteredMissionOrders.length === 0 ? (

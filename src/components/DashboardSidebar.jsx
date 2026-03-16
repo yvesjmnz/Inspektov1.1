@@ -42,12 +42,6 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
     if (normalizedRole === 'director') {
       return [
         {
-          label: 'Dashboard',
-          icon: '/ui_icons/menu.png',
-          href: '/dashboard/director',
-          section: null,
-        },
-        {
           label: 'Complaints',
           section: 'COMPLAINTS',
         },
@@ -87,6 +81,16 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           label: 'Inspections',
           icon: '/ui_icons/inspection.png',
           href: '/dashboard/director?tab=inspection',
+          section: null,
+        },
+        {
+          label: 'Reports',
+          section: 'REPORTS',
+        },
+        {
+          label: 'Performance Report',
+          icon: '/ui_icons/document.png',
+          href: '/dashboard/director?tab=reports',
           section: null,
         },
       ];
@@ -150,6 +154,17 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           section: null,
           tabName: 'inspection-history',
         },
+        {
+          label: 'Analytics',
+          section: 'ANALYTICS',
+        },
+        {
+          label: 'Performance Report',
+          icon: '/ui_icons/document.png',
+          href: '/dashboard/head-inspector',
+          section: null,
+          tabName: 'reports',
+        },
       ];
     }
 
@@ -203,6 +218,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (hash === 'revisions') return 'Mission Order History';
       if (hash === 'inspection') return 'Inspection';
       if (hash === 'inspection-history') return 'Inspection History';
+      if (hash === 'reports') return 'Performance Report';
       return 'Draft'; // default to Draft
     }
 
@@ -218,7 +234,9 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'mission-orders') return 'Review Mission Orders';
       if (tab === 'mission-orders-history') return 'Mission Order History';
       if (tab === 'inspection') return 'Inspections';
-      return 'Dashboard';
+      if (tab === 'reports') return 'Performance Report';
+      // Director dashboard overview tab was removed; default highlight to queue.
+      return 'Review Complaints';
     }
 
     if (path === '/dashboard/head-inspector') {
@@ -228,11 +246,17 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
         if (hash === 'results') return 'Director Approval';
         if (hash === 'for-inspection') return 'Secretary Approval';
         if (hash === 'revisions') return 'Mission Order History';
+        if (hash === 'reports') return 'Performance Report';
+        if (hash === 'inspection') return 'Inspection';
+        if (hash === 'inspection-history') return 'Inspection History';
       }
       if (tab === 'todo') return 'Draft';
       if (tab === 'results') return 'Director Approval';
       if (tab === 'for-inspection') return 'Secretary Approval';
       if (tab === 'revisions') return 'Mission Order History';
+      if (tab === 'reports') return 'Performance Report';
+      if (tab === 'inspection') return 'Inspection';
+      if (tab === 'inspection-history') return 'Inspection History';
       return 'Dashboard';
     }
 
@@ -247,12 +271,19 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
 
   // Filter nav items based on current page
   const filteredNavItems = navItems.filter((item) => {
-  const path = window.location.pathname;
-  // Hide Dashboard item when on mission order page
-  if (path === '/mission-order' && item.label === 'Dashboard') {
-  return false;
-  }
-  return true;
+    const path = window.location.pathname;
+
+    // Hide Dashboard item for Director role (overview tab removed)
+    if (normalizedRole === 'director' && item.label === 'Dashboard') {
+      return false;
+    }
+
+    // Hide Dashboard item when on mission order page
+    if (path === '/mission-order' && item.label === 'Dashboard') {
+      return false;
+    }
+
+    return true;
   });
 
   return (

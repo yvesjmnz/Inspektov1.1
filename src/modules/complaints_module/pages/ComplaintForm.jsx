@@ -902,16 +902,17 @@ export default function ComplaintForm({ verifiedEmail }) {
     if (step === 4) {
       const descText = String(formData.complaint_description || '').trim();
 
-      // Require: at least 1 selected category AND at least 1 selected specific violation (under any selected category)
-      const selectedViolationCount = Object.values(selectedSubcats || {}).reduce((acc, arr) => acc + (arr?.length || 0), 0);
-
+      // Require: at least 1 selected category
       if ((selectedCategories || []).length === 0) {
         setError('Please select at least one Nature of Violation.');
         return;
       }
 
-      if (selectedViolationCount === 0) {
-        setError('Please select at least one Specific Violation under your selected category.');
+      // Rule: for EACH selected Nature of Violation, at least 1 specific violation under it must be checked.
+      const missingSubFor = (selectedCategories || []).find((catKey) => (selectedSubcats?.[catKey]?.length || 0) === 0);
+      if (missingSubFor) {
+        const catLabel = GUIDED_CATEGORIES.find((c) => c.key === missingSubFor)?.label || 'the selected category';
+        setError(`Please select at least one Specific Violation under: ${catLabel}.`);
         return;
       }
 
@@ -1807,6 +1808,11 @@ export default function ComplaintForm({ verifiedEmail }) {
                     type="checkbox"
                     checked={confirmTruth}
                     onChange={(e) => {
+                      // Prevent any implicit form submission behavior that some browsers/extensions
+                      // can trigger when interacting with controls inside a <form>.
+                      e.preventDefault();
+                      e.stopPropagation();
+
                       const checked = e.target.checked;
                       setConfirmTruth(checked);
 
@@ -1819,12 +1825,6 @@ export default function ComplaintForm({ verifiedEmail }) {
                   <label htmlFor="confirmTruth" style={{ margin: 0, fontWeight: 500, color: '#0f172a' }}>
                     I confirm that the details are true and inaccurate information may lead to the non-processing of the complaint.
                   </label>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <div className="inline-note">
-                  Submitting will create a complaint record and you will be redirected to the confirmation page with your complaint ID.
                 </div>
               </div>
             </>
