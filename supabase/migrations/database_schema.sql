@@ -1,0 +1,222 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.businesses (
+  bin text,
+  business_name text,
+  owner_name text,
+  esoa_no text,
+  eor_no text,
+  epermit_no text,
+  brgy_no text,
+  email text,
+  mobile_number text,
+  assessment_status text,
+  business_address text,
+  business_pk integer NOT NULL,
+  business_lat double precision CHECK (business_lat IS NULL OR business_lat >= '-90'::integer::double precision AND business_lat <= 90::double precision),
+  business_lng double precision CHECK (business_lng IS NULL OR business_lng >= '-180'::integer::double precision AND business_lng <= 180::double precision),
+  CONSTRAINT businesses_pkey PRIMARY KEY (business_pk)
+);
+CREATE TABLE public.businesses_additional (
+  bin text NOT NULL,
+  business_name text,
+  owner_name text,
+  address text,
+  male_emp text,
+  female_emp text,
+  total_employees bigint,
+  line_of_business text,
+  businesses_additional_pk integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+  CONSTRAINT businesses_additional_pkey PRIMARY KEY (businesses_additional_pk),
+  CONSTRAINT businesses_additional_businesses_additional_pk_fkey FOREIGN KEY (businesses_additional_pk) REFERENCES public.businesses(business_pk)
+);
+CREATE TABLE public.complaints (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  business_name character varying NOT NULL,
+  business_address text NOT NULL,
+  complaint_description text NOT NULL,
+  reporter_email character varying NOT NULL CHECK (reporter_email::text ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$'::text),
+  image_urls ARRAY DEFAULT '{}'::text[],
+  document_urls ARRAY DEFAULT '{}'::text[],
+  authenticity_level integer NOT NULL DEFAULT 100 CHECK (authenticity_level >= 0 AND authenticity_level <= 100),
+  tags ARRAY DEFAULT '{}'::text[],
+  status text CHECK (status = ANY (ARRAY['Submitted'::character varying::text, 'pending'::character varying::text, 'approved'::character varying::text, 'declined'::character varying::text, 'on_hold'::character varying::text, 'cancelled'::character varying::text])),
+  created_at timestamp with time zone DEFAULT now(),
+  email_verified boolean NOT NULL DEFAULT false,
+  email_verified_at timestamp with time zone,
+  business_pk integer,
+  reporter_lat double precision,
+  reporter_lng double precision,
+  reporter_accuracy double precision,
+  reporter_location_timestamp timestamp with time zone,
+  certification_accepted boolean NOT NULL DEFAULT false,
+  certification_accepted_at timestamp with time zone,
+  authenticity_tier text NOT NULL DEFAULT 'Medium'::text CHECK (authenticity_tier = ANY (ARRAY['Low'::text, 'Medium'::text, 'High'::text])),
+  approved_by uuid,
+  approved_at timestamp with time zone,
+  declined_by uuid,
+  declined_at timestamp with time zone,
+  updated_at timestamp with time zone DEFAULT now(),
+  decline_comment text,
+  CONSTRAINT complaints_pkey PRIMARY KEY (id),
+  CONSTRAINT complaints_business_pk_fkey FOREIGN KEY (business_pk) REFERENCES public.businesses(business_pk),
+  CONSTRAINT complaints_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.profiles(id),
+  CONSTRAINT complaints_declined_by_fkey FOREIGN KEY (declined_by) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.email_verification_tokens (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  email character varying NOT NULL CHECK (email::text ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$'::text),
+  complaint_id uuid,
+  token_hash text NOT NULL,
+  expires_at timestamp with time zone NOT NULL,
+  used_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  form_type text,
+  CONSTRAINT email_verification_tokens_pkey PRIMARY KEY (id),
+  CONSTRAINT email_verification_tokens_complaint_id_fkey FOREIGN KEY (complaint_id) REFERENCES public.complaints(id)
+);
+CREATE TABLE public.inspection_reports (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  mission_order_id uuid NOT NULL,
+  inspector_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'pending inspection'::text CHECK (status = ANY (ARRAY['pending inspection'::text, 'in progress'::text, 'completed'::text])),
+  inspection_comments text,
+  attachment_urls ARRAY,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  no_of_employees integer,
+  estimated_area_sqm numeric,
+  mobile_no text,
+  landline_no text,
+  email_address text,
+  started_at timestamp with time zone DEFAULT now(),
+  completed_at timestamp with time zone,
+  lines_of_business ARRAY DEFAULT '{}'::text[],
+  inspector_signature_url text,
+  owner_signature_url text,
+  bin text,
+  business_name text,
+  owner_name text,
+  business_address text,
+  business_permit_status text DEFAULT 'N/A'::text,
+  cctv_status text DEFAULT 'N/A'::text,
+  signage_status text DEFAULT 'N/A'::text,
+  cctv_count integer DEFAULT 0,
+  inspector_lat double precision,
+  inspector_lng double precision,
+  inspector_location_accuracy_m double precision,
+  inspector_location_captured_at timestamp with time zone,
+  CONSTRAINT inspection_reports_pkey PRIMARY KEY (id),
+  CONSTRAINT inspection_reports_mission_order_id_fkey FOREIGN KEY (mission_order_id) REFERENCES public.mission_orders(id),
+  CONSTRAINT inspection_reports_inspector_id_fkey FOREIGN KEY (inspector_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.mission_order_assignments (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  mission_order_id uuid NOT NULL,
+  inspector_id uuid NOT NULL,
+  assigned_by uuid NOT NULL,
+  assigned_at timestamp with time zone NOT NULL DEFAULT now(),
+  status text NOT NULL DEFAULT 'assigned'::text CHECK (status = ANY (ARRAY['assigned'::text, 'removed'::text])),
+  CONSTRAINT mission_order_assignments_pkey PRIMARY KEY (id),
+  CONSTRAINT mission_order_assignments_mission_order_id_fkey FOREIGN KEY (mission_order_id) REFERENCES public.mission_orders(id),
+  CONSTRAINT mission_order_assignments_inspector_id_fkey FOREIGN KEY (inspector_id) REFERENCES public.profiles(id),
+  CONSTRAINT mission_order_assignments_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.mission_order_ordinances (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  mission_order_id uuid NOT NULL,
+  ordinance_id uuid NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT mission_order_ordinances_pkey PRIMARY KEY (id),
+  CONSTRAINT mission_order_ordinances_mission_order_id_fkey FOREIGN KEY (mission_order_id) REFERENCES public.mission_orders(id),
+  CONSTRAINT mission_order_ordinances_ordinance_id_fkey FOREIGN KEY (ordinance_id) REFERENCES public.ordinances(id)
+);
+CREATE TABLE public.mission_orders (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  complaint_id uuid NOT NULL,
+  created_by uuid NOT NULL,
+  status text NOT NULL DEFAULT 'draft'::text CHECK (status = ANY (ARRAY['draft'::text, 'issued'::text, 'for inspection'::text, 'cancelled'::text, 'awaiting_signature'::text, 'complete'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  title text,
+  content text,
+  last_edited_by uuid,
+  submitted_at timestamp with time zone,
+  submitted_by uuid,
+  reviewed_at timestamp with time zone,
+  reviewed_by uuid,
+  director_comment text,
+  director_signature_url text,
+  date_of_inspection date,
+  date_of_issuance date,
+  template_name text NOT NULL DEFAULT 'MISSION-ORDER-TEMPLATE'::text,
+  generated_docx_url text,
+  generated_docx_created_at timestamp with time zone,
+  generated_docx_created_by uuid,
+  signed_mission_order_url text,
+  secretary_signed_at timestamp with time zone,
+  director_preapproved_at timestamp with time zone,
+  secretary_signed_attachment_url text,
+  secretary_signed_attachment_uploaded_at timestamp with time zone,
+  secretary_signed_attachment_uploaded_by uuid,
+  CONSTRAINT mission_orders_pkey PRIMARY KEY (id),
+  CONSTRAINT mission_orders_complaint_id_fkey FOREIGN KEY (complaint_id) REFERENCES public.complaints(id),
+  CONSTRAINT mission_orders_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id),
+  CONSTRAINT mission_orders_last_edited_by_fkey FOREIGN KEY (last_edited_by) REFERENCES auth.users(id),
+  CONSTRAINT mission_orders_submitted_by_fkey FOREIGN KEY (submitted_by) REFERENCES auth.users(id),
+  CONSTRAINT mission_orders_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES auth.users(id)
+);
+CREATE TABLE public.notification_preferences (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL UNIQUE,
+  mission_order_notifications boolean DEFAULT true,
+  complaint_notifications boolean DEFAULT true,
+  inspection_notifications boolean DEFAULT true,
+  email_notifications boolean DEFAULT true,
+  push_notifications boolean DEFAULT true,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT notification_preferences_pkey PRIMARY KEY (id),
+  CONSTRAINT notification_preferences_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.notifications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  type character varying NOT NULL,
+  title character varying NOT NULL,
+  message text NOT NULL,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  status character varying NOT NULL DEFAULT 'unread'::character varying,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  read_at timestamp with time zone,
+  archived_at timestamp with time zone,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT notifications_pkey PRIMARY KEY (id),
+  CONSTRAINT notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.ordinances (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  code_number text NOT NULL UNIQUE,
+  title text NOT NULL,
+  description text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ordinances_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.profiles (
+  id uuid NOT NULL,
+  role text NOT NULL CHECK (role = ANY (ARRAY['director'::text, 'head_inspector'::text, 'inspector'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  first_name text,
+  middle_name text,
+  last_name text,
+  full_name text DEFAULT (((first_name ||
+CASE
+    WHEN ((middle_name IS NOT NULL) AND (middle_name <> ''::text)) THEN (' '::text || middle_name)
+    ELSE ''::text
+END) || ' '::text) || last_name),
+  fcm_token character varying,
+  CONSTRAINT profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+);

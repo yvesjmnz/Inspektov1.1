@@ -3,6 +3,7 @@ import { MapContainer, Marker, TileLayer, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/complaints';
 import { supabase } from '../../../lib/supabase';
+import { getNearbyBusinesses, formatDistance } from '../../../lib/complaints/nearbyBusinesses';
 import Header from '../../../components/Header.jsx';
 import Stepper from '../../../components/Stepper.jsx';
 import '../../../components/Stepper.css';
@@ -83,6 +84,67 @@ export default function ComplaintForm({ verifiedEmail }) {
   const progressPct = useMemo(() => Math.round((step / TOTAL_STEPS) * 100), [step]);
 
   const descLen = useMemo(() => String(formData.complaint_description || '').length, [formData.complaint_description]);
+
+  // Guided Filing (Step 4) configuration and state
+  const GUIDED_CATEGORIES = [
+    { key: 'cat1', label: 'Business Permit & Licensing Issues' },
+    { key: 'cat2', label: 'Alcohol & Tobacco Violations' },
+    { key: 'cat3', label: 'Sanitation & Environmental Violations' },
+    { key: 'cat4', label: 'Health, Hygiene, & Nutrition' },
+    { key: 'cat5', label: 'Public Security Compliance' },
+  ];
+
+  const GUIDED_SUBCATS = {
+    cat1: [
+      { key: 'cat1-1', label: 'Operating Without a Valid Business Permit' },
+      { key: 'cat1-2', label: 'Missing Commerical Space Clearance' },
+      { key: 'cat1-3', label: 'Unregistered or Untaxed Employees' },
+    ],
+    cat2: [
+      { key: 'cat2-1', label: 'Selling Alcohol Near Schools' },
+      { key: 'cat2-2', label: 'Selling Alcohol to Minors' },
+      { key: 'cat2-3', label: 'Selling Cigarettes to Minors' },
+    ],
+    cat3: [
+      { key: 'cat3-1', label: 'Improper Waste Disposal or Segregation' },
+      { key: 'cat3-2', label: 'Illegal Disposing of Cooking Oil' },
+      { key: 'cat3-3', label: 'Unpaid Garbage Tax' },
+    ],
+    cat4: [
+      { key: 'cat4-1', label: 'Poor Food-Handler Hygiene' },
+      { key: 'cat4-2', label: 'Missing Menu Nutrition Labels' },
+    ],
+    cat5: [
+      { key: 'cat5-1', label: 'CCTV System Non-Compliance' },
+    ],
+  };
+
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [expandedGuided, setExpandedGuided] = useState({});
+  const [selectedSubcats, setSelectedSubcats] = useState({});
+
+  const toggleCategory = (key, checked) => {
+    if (checked) {
+      setSelectedCategories((prev) => Array.from(new Set([...(prev || []), key])));
+      setExpandedGuided((prev) => ({ ...(prev || {}), [key]: true }));
+    } else {
+      setSelectedCategories((prev) => (prev || []).filter((k) => k !== key));
+      setExpandedGuided((prev) => ({ ...(prev || {}), [key]: false }));
+      setSelectedSubcats((prev) => {
+        const copy = { ...(prev || {}) };
+        delete copy[key];
+        return copy;
+      });
+    }
+  };
+
+  const toggleSubcat = (catKey, subKey, checked) => {
+    setSelectedSubcats((prev) => {
+      const cur = (prev && prev[catKey]) || [];
+      const next = checked ? Array.from(new Set([...cur, subKey])) : cur.filter((k) => k !== subKey);
+      return { ...(prev || {}), [catKey]: next };
+    });
+  };
 
   const handleBusinessSearch = async (query) => {
     setSearchQuery(query);
@@ -647,6 +709,39 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
   };
 
+  const findNearbyBusinesses = async () => {
+    setError(null);
+    setLoading(true);
+
+    try {
+      // Get user's current location
+      const coords = await requestDeviceLocation();
+      if (coords?.lat == null || coords?.lng == null) {
+        setError('Unable to get your location. Please enable location services.');
+        setLoading(false);
+        return;
+      }
+
+      // Find nearby businesses (500m radius)
+      const nearby = await getNearbyBusinesses(coords.lat, coords.lng, 200);
+
+      if (nearby.length === 0) {
+        setError('No businesses found within 200m of your location. Try searching manually.');
+        setLoading(false);
+        return;
+      }
+
+      // Display nearby businesses
+      setBusinesses(nearby);
+      setShowBusinessList(true);
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'Failed to find nearby businesses.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Check if manually entered address matches a database business
   useEffect(() => {
     if (!businessNotInDb || !formData.business_address || formData.business_pk) {
@@ -775,6 +870,15 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
 
     try {
+      // Derive Violation tags from selected sub-categories
+      const selectedSubLabels = Object.entries(selectedSubcats || {}).flatMap(([catKey, subKeys]) => {
+        const arr = GUIDED_SUBCATS[catKey] || [];
+        const byKey = new Map(arr.map((s) => [s.key, s.label]));
+        return (subKeys || []).map((k) => byKey.get(k)).filter(Boolean);
+      });
+      const violationTags = selectedSubLabels.map((label) => `Violation: ${label}`);
+      const mergedTags = Array.from(new Set([...(formData.tags || []), ...violationTags]));
+
       const complaintPayload = {
         business_name: formData.business_name,
         business_address: formData.business_address,
@@ -782,7 +886,7 @@ export default function ComplaintForm({ verifiedEmail }) {
         reporter_email: formData.reporter_email,
         // store all images as URLs in image_urls; keep primary first
         image_urls: evidenceImages.filter(Boolean),
-        tags: formData.tags,
+        tags: mergedTags,
         status: 'Submitted',
         email_verified: !!verifiedEmail,
         reporter_lat: formData.reporter_lat,
@@ -889,6 +993,19 @@ export default function ComplaintForm({ verifiedEmail }) {
                       className="form-input"
                       autoComplete="off"
                     />
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={findNearbyBusinesses}
+                        disabled={loading}
+                        className="btn btn-secondary"
+                        style={{ flex: 1 }}
+                      >
+                        {loading ? 'Finding nearby…' : '📍 Find Nearby Businesses'}
+                      </button>
+                      <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>or search above</span>
+                    </div>
 
                     {showBusinessList && businesses.length > 0 ? (
                       <div className="business-list">
@@ -1325,6 +1442,96 @@ export default function ComplaintForm({ verifiedEmail }) {
 
           {step === 4 ? (
             <>
+              {/* Guided Filing: Nature of Violation */}
+              <div className="form-group">
+                <label style={{ marginBottom: 6, fontWeight: 800, color: '#0f172a' }}>Nature of Violation</label>
+                <div>
+                  {GUIDED_CATEGORIES.map((c) => (
+                    <div key={c.key} className="check-row" style={{ marginTop: 6 }}>
+                      <input
+                        id={`guided-cat-${c.key}`}
+                        type="checkbox"
+                        checked={selectedCategories.includes(c.key)}
+                        onChange={(e) => toggleCategory(c.key, e.target.checked)}
+                      />
+                      <label htmlFor={`guided-cat-${c.key}`} style={{ margin: 0 }}>{c.label}</label>
+                    </div>
+                  ))}
+                </div>
+                <div className="inline-note" style={{ marginTop: 6 }}>
+                  You can select more than one category if applicable.
+                </div>
+              </div>
+
+              {/* Guided Filing: Specific Violations (Dynamic Accordions) */}
+              <div className="form-group">
+                <label style={{ marginBottom: 6, fontWeight: 800, color: '#0f172a' }}>Specific Violations</label>
+                {selectedCategories.length === 0 ? (
+                  <div className="inline-note">Select one or more categories above to see specific violations.</div>
+                ) : null}
+
+                {selectedCategories.map((catKey) => {
+                  const cat = GUIDED_CATEGORIES.find((c) => c.key === catKey) || { label: catKey };
+                  const subs = GUIDED_SUBCATS[catKey] || [];
+                  const isOpen = expandedGuided[catKey] !== false; // default open when selected
+
+                  return (
+                    <div key={catKey} style={{ border: '1px solid #e5e7eb', borderRadius: 12, background: '#fff', marginTop: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedGuided((prev) => ({ ...(prev || {}), [catKey]: !isOpen }))}
+                        aria-expanded={isOpen ? 'true' : 'false'}
+                        className="btn"
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 12px',
+                          background: '#fff',
+                          border: 'none',
+                          boxShadow: 'none',
+                          cursor: 'pointer',
+                          borderRadius: 12,
+                        }}
+                      >
+                        <span style={{ fontWeight: 800, color: '#0f172a' }}>{cat.label}</span>
+                        <span style={{ display: 'inline-block', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms ease' }}>⌄</span>
+                      </button>
+
+                      <div
+                        className="accordion-panel"
+                        style={{
+                          overflow: 'hidden',
+                          transition: 'max-height 220ms ease, opacity 220ms ease',
+                          maxHeight: isOpen ? 400 : 0,
+                          opacity: isOpen ? 1 : 0,
+                        }}
+                      >
+                        <div style={{ padding: 12 }}>
+                          {subs.length === 0 ? (
+                            <div className="inline-note">No sub-categories configured.</div>
+                          ) : (
+                            subs.map((sc) => (
+                              <div key={sc.key} className="check-row" style={{ marginTop: 6 }}>
+                                <input
+                                  id={`guided-sub-${catKey}-${sc.key}`}
+                                  type="checkbox"
+                                  checked={(selectedSubcats[catKey] || []).includes(sc.key)}
+                                  onChange={(e) => toggleSubcat(catKey, sc.key, e.target.checked)}
+                                />
+                                <label htmlFor={`guided-sub-${catKey}-${sc.key}`} style={{ margin: 0 }}>{sc.label}</label>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Move Complaint Description textarea to bottom */}
               <div className="form-group">
                 <textarea
                   id="complaint_description"
@@ -1369,16 +1576,50 @@ export default function ComplaintForm({ verifiedEmail }) {
                     <div className="review-value">{formData.reporter_email || '—'}</div>
                   </div>
 
-                  <div className="review-row">
+                  <div className="review-row" style={{ borderBottom: 'none' }}>
                     <div className="review-label">Evidence Photos</div>
-                    <div className="review-value">{evidenceImages.length || 0}</div>
+                    <div className="review-value">
+                      {evidenceImages.length || 0}
+                      {evidenceImages.length > 0 ? (
+                        <div className="review-image-grid" style={{ marginTop: 6 }}>
+                          {evidenceImages.map((url) => (
+                            <img key={url} src={url} alt="Evidence" />
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
 
-                  {evidenceImages.length > 0 ? (
-                    <div className="review-image-grid">
-                      {evidenceImages.map((url) => (
-                        <img key={url} src={url} alt="Evidence" />
-                      ))}
+                  {(selectedCategories.length > 0 || Object.keys(selectedSubcats || {}).length > 0) ? (
+                    <div className="review-row" style={{ alignItems: 'flex-start', borderTop: '1px dashed #e5e7eb', paddingTop: 10, marginTop: 10 }}>
+                      <div className="review-label">Complaint Category</div>
+                      <div className="review-value">
+                        <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
+                          {selectedCategories
+                            .map((catKey) => {
+                              const cat = GUIDED_CATEGORIES.find((c) => c.key === catKey);
+                              if (!cat) return null;
+                              const subs = selectedSubcats[catKey] || [];
+                              const arr = GUIDED_SUBCATS[catKey] || [];
+                              const byKey = new Map(arr.map((s) => [s.key, s.label]));
+                              const subLabels = subs.map((k) => byKey.get(k)).filter(Boolean);
+                              const displayLabel = String(cat.label || '').replace(/\s*&\s*/g, ' and ');
+                              return (
+                                <li key={catKey} style={{ margin: '4px 0' }}>
+                                  <span style={{ fontWeight: 800 }}>{displayLabel}</span>
+                                  {subLabels.length > 0 ? (
+                                    <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
+                                      {subLabels.map((label) => (
+                                        <li key={label} style={{ margin: '2px 0' }}>{label}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </li>
+                              );
+                            })
+                            .filter(Boolean)}
+                        </ul>
+                      </div>
                     </div>
                   ) : null}
 

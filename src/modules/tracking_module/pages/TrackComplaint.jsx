@@ -160,6 +160,17 @@ export default function TrackComplaint() {
                 const inspectionStartedAt = latestInspection?.created_at ? new Date(latestInspection.created_at) : null;
                 const inspectionCompletedAt = latestInspection?.completed_at ? new Date(latestInspection.completed_at) : null;
 
+                // Document Processing (MO) timestamps
+                const hasMo = missionOrders.length > 0;
+                const moCreatedAt = hasMo && missionOrders[0]?.created_at ? new Date(missionOrders[0].created_at) : null;
+                const moPreapprovedAt = (() => {
+                  const times = (missionOrders || [])
+                    .map((m) => m?.director_preapproved_at)
+                    .filter(Boolean)
+                    .map((t) => new Date(t));
+                  return times.length ? times.sort((a, b) => a - b)[0] : null;
+                })();
+
                 // Resolution step rules:
                 // - If declined: resolution is case closed at decision date.
                 // - Else if inspection completed: resolution by inspection completion.
@@ -194,22 +205,28 @@ export default function TrackComplaint() {
                         <div className="vtl-content">
                           <div className="vtl-title">Under Review</div>
                           <div className="vtl-desc">Director is reviewing your complaint</div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{isDecided ? 'Completed' : 'In Progress'}</span></div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(reviewDate)}</span></div>
+                          {isDecided ? (
+                            <div className="vtl-detail"><span className="vtl-detail-label">Director Decision:</span> <span className={`vtl-detail-value ${s === 'approved' ? 'status-approved' : (s === 'declined' || s === 'rejected') ? 'status-declined' : ''}`}>{decisionLabel}</span></div>
+                          ) : null}
+                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(isDecided ? decisionDate : reviewDate)}</span></div>
                         </div>
                       </div>
 
-                      {/* Step 3 - Decision Made */}
-                      <div className={`vtl-step ${isDecided ? 'completed' : 'inactive'}`}>
-                        <div className="vtl-marker">{isDecided ? (s === 'approved' ? '✓' : '✕') : 3}</div>
+                      {/* Step 3 - Document Processing */}
+                      <div className={`vtl-step ${isDeclined ? 'inactive' : (moPreapprovedAt ? 'completed' : ((hasMo || (isDecided && s === 'approved')) ? 'active' : 'inactive'))}`}>
+                        <div className="vtl-marker">{isDeclined ? 3 : (moPreapprovedAt ? '✓' : 3)}</div>
                         <div className="vtl-content">
-                          <div className="vtl-title">Decision Made</div>
-                          <div className="vtl-desc">Director's decision has been issued</div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${s === 'approved' ? 'status-approved' : (s === 'declined' || s === 'rejected') ? 'status-declined' : ''}`}>{decisionLabel}</span></div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Decision Date:</span> <span className="vtl-detail-value">{fmt(decisionDate)}</span></div>
+                          <div className="vtl-title">Document Processing</div>
+                          <div className="vtl-desc">Preparing documents needed for inspection</div>
                           {isDeclined ? (
-                            <div className="vtl-detail"><span className="vtl-detail-label">Note:</span> <span className="vtl-detail-value">Your complaint did not meet the criteria for further action. No inspection will take place.</span></div>
-                          ) : null}
+                            <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">Not applicable</span></div>
+                          ) : (
+                            <>
+                              <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{moPreapprovedAt ? 'Pre-Approved' : (hasMo ? 'In Progress' : (isDecided && s === 'approved' ? 'Pending' : '—'))}</span></div>
+                              <div className="vtl-detail"><span className="vtl-detail-label">Created:</span> <span className="vtl-detail-value">{fmt(moCreatedAt)}</span></div>
+                              <div className="vtl-detail"><span className="vtl-detail-label">Pre-Approved:</span> <span className="vtl-detail-value">{fmt(moPreapprovedAt)}</span></div>
+                            </>
+                          )}
                         </div>
                       </div>
 
@@ -237,9 +254,7 @@ export default function TrackComplaint() {
                         <div className="vtl-content">
                           <div className="vtl-title">Resolution</div>
                           <div className="vtl-desc">{isDeclined ? 'Case closed — no inspection will take place.' : 'Summary of findings without disclosing internal assessments'}</div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{isResolved ? resolutionLabel : 'Pending'}</span></div>
-                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(resolutionDate)}</span></div>
-                        </div>
+                                                  </div>
                       </div>
                     </div>
                   </div>

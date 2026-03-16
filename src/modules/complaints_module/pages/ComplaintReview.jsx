@@ -2,7 +2,76 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import DashboardSidebar from '../../../components/DashboardSidebar';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
+import {
+  getAuthenticityAssessment,
+  getLocationVerificationStatus,
+  getEvidenceQuality,
+  getSuggestedAction,
+  formatConfidence,
+  getActionBadgeStyle,
+  DECLINE_TEMPLATES,
+  formatComplaintDate,
+  daysAgo,
+} from '../../../lib/complaints/decisionSupport';
 import '../../dashboard_module/pages/Dashboard.css';
+
+// Complaint Category grouping (derive from tags like "Violation: <Sub>")
+const GUIDED_CATEGORY_LABELS = [
+  'Business Permit & Licensing Issues',
+  'Alcohol & Tobacco Violations',
+  'Sanitation & Environmental Violations',
+  'Health, Hygiene, & Nutrition',
+  'Public Security Compliance',
+];
+const GUIDED_SUBCAT_BY_CATEGORY = new Map([
+  ['Business Permit & Licensing Issues', [
+    'Operating Without a Valid Business Permit',
+    'Missing Commerical Space Clearance',
+    'Unregistered or Untaxed Employees',
+  ]],
+  ['Alcohol & Tobacco Violations', [
+    'Selling Alcohol Near Schools',
+    'Selling Alcohol to Minors',
+    'Selling Cigarettes to Minors',
+  ]],
+  ['Sanitation & Environmental Violations', [
+    'Improper Waste Disposal or Segregation',
+    'Illegal Disposing of Cooking Oil',
+    'Unpaid Garbage Tax',
+  ]],
+  ['Health, Hygiene, & Nutrition', [
+    'Poor Food-Handler Hygiene',
+    'Missing Menu Nutrition Labels',
+  ]],
+  ['Public Security Compliance', [
+    'CCTV System Non-Compliance',
+  ]],
+]);
+function groupComplaintCategoriesFromTags(tags) {
+  const result = [];
+  if (!Array.isArray(tags) || tags.length === 0) return result;
+  const selectedSubs = tags
+    .map((t) => String(t || ''))
+    .filter((t) => /^Violation:\s*/i.test(t))
+    .map((t) => t.replace(/^Violation:\s*/i, '').trim());
+  if (selectedSubs.length === 0) return result;
+  const subToCat = new Map();
+  for (const cat of GUIDED_CATEGORY_LABELS) {
+    const subs = GUIDED_SUBCAT_BY_CATEGORY.get(cat) || [];
+    subs.forEach((s) => subToCat.set(s, cat));
+  }
+  const byCat = new Map();
+  for (const sub of selectedSubs) {
+    const cat = subToCat.get(sub);
+    if (!cat) continue;
+    if (!byCat.has(cat)) byCat.set(cat, new Set());
+    byCat.get(cat).add(sub);
+  }
+  for (const [cat, setSubs] of byCat) {
+    result.push({ category: cat, subs: Array.from(setSubs) });
+  }
+  return result;
+}
 
 function formatStatus(status) {
   if (!status) return 'Unknown';
@@ -433,6 +502,130 @@ export default function ComplaintReview() {
                 <div className="dash-alert dash-alert-error">No complaint found.</div>
               ) : (
                 <div style={{ display: 'grid', gap: 16, marginTop: 16 }}>
+                  {/* Decision Support Indicators - Only show in queue tab */}
+                  {source !== 'history' && (() => {
+                    const authenticity = getAuthenticityAssessment(complaint.authenticity_level);
+                    const location = getLocationVerificationStatus(complaint.tags);
+                    const evidence = getEvidenceQuality(complaint.image_urls);
+                    const suggestion = getSuggestedAction(complaint);
+                    const actionStyle = getActionBadgeStyle(suggestion.action);
+
+                    return (
+                      <div style={{
+                        background: '#f0f9ff',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: 12,
+                        padding: 16,
+                        display: 'grid',
+                        gap: 12,
+                      }}>
+                        {/* Header */}
+                        <div style={{ fontSize: 13, fontWeight: 800, color: '#1e40af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          Decision Support
+                        </div>
+
+                        {/* Metrics Grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+                          {/* Authenticity Score */}
+                          <div style={{
+                            background: authenticity.bgColor,
+                            border: `1px solid ${authenticity.borderColor}`,
+                            borderRadius: 8,
+                            padding: 12,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                          }}>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: authenticity.color, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                              {authenticity.icon} Credibility
+                            </div>
+                            <div style={{ fontSize: 14, fontWeight: 900, color: authenticity.color }}>
+                              {authenticity.label}
+                            </div>
+                            <div style={{ fontSize: 11, color: authenticity.color, fontWeight: 600 }}>
+                              Score: {complaint.authenticity_level || 0}
+                            </div>
+                          </div>
+
+                          {/* Location Verification */}
+                          {location && (
+                            <div style={{
+                              background: location.bgColor,
+                              border: `1px solid ${location.borderColor}`,
+                              borderRadius: 8,
+                              padding: 12,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 6,
+                            }}>
+                              <div style={{ fontSize: 11, fontWeight: 800, color: location.color, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                                {location.icon} Location
+                              </div>
+                              <div style={{ fontSize: 14, fontWeight: 900, color: location.color }}>
+                                {location.label}
+                              </div>
+                              <div style={{ fontSize: 11, color: location.color, fontWeight: 600 }}>
+                                {location.description}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Evidence Quality */}
+                          <div style={{
+                            background: evidence.bgColor,
+                            border: `1px solid ${evidence.borderColor}`,
+                            borderRadius: 8,
+                            padding: 12,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                          }}>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: evidence.color, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                              {evidence.icon} Evidence
+                            </div>
+                            <div style={{ fontSize: 14, fontWeight: 900, color: evidence.color }}>
+                              {evidence.label}
+                            </div>
+                            <div style={{ fontSize: 11, color: evidence.color, fontWeight: 600 }}>
+                              {evidence.description}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Suggested Action */}
+                        <div style={{
+                          background: actionStyle.background,
+                          border: actionStyle.border,
+                          borderRadius: 8,
+                          padding: 12,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                        }}>
+                          <div style={{ fontSize: 24, fontWeight: 900 }}>
+                            {actionStyle.icon}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 4 }}>
+                              Suggested Action
+                            </div>
+                            <div style={{ fontSize: 16, fontWeight: 900, textTransform: 'capitalize', marginBottom: 4 }}>
+                              {suggestion.action}
+                            </div>
+                            <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.8 }}>
+                              Confidence: {formatConfidence(suggestion.confidence)}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, opacity: 0.7 }}>
+                            {suggestion.reasons.slice(0, 2).map((reason, idx) => (
+                              <div key={idx}>{reason}</div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Professional Header Section */}
                   <div style={{
                     background: '#ffffff',
@@ -489,6 +682,33 @@ export default function ComplaintReview() {
                       {/* Description Value */}
                       <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 15 }}>
                         {complaint.complaint_description || '—'}
+                      </div>
+
+                      {/* Complaint Category Label */}
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaint Category</div>
+                      {/* Complaint Category Value */}
+                      <div>
+                        {(() => {
+                          const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
+                          return groups.length > 0 ? (
+                            <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
+                              {groups.map((g) => (
+                                <li key={g.category} style={{ margin: '4px 0' }}>
+                                  <span style={{ fontWeight: 800 }}>{String(g.category).replace(/\s*&\s*/g, ' and ')}</span>
+                                  {Array.isArray(g.subs) && g.subs.length > 0 ? (
+                                    <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
+                                      {g.subs.map((s) => (
+                                        <li key={s} style={{ margin: '2px 0' }}>{s}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div style={{ color: '#64748b', fontWeight: 700 }}>—</div>
+                          );
+                        })()}
                       </div>
 
                       {/* Evidence Label */}
@@ -670,6 +890,45 @@ export default function ComplaintReview() {
                           </div>
                         </div>
                       </label>
+
+                      {/* Decline Templates - Quick Select Buttons */}
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                          Quick Decline Reasons
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                          {DECLINE_TEMPLATES.map((template) => (
+                            <button
+                              key={template.id}
+                              type="button"
+                              onClick={() => setDeclineComment(template.text)}
+                              style={{
+                                padding: '8px 12px',
+                                background: '#ffffff',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: 8,
+                                color: '#0f172a',
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                textAlign: 'left',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = '#f1f5f9';
+                                e.currentTarget.style.borderColor = '#94a3b8';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = '#ffffff';
+                                e.currentTarget.style.borderColor = '#cbd5e1';
+                              }}
+                              title={template.text}
+                            >
+                              {template.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
 
                       {/* Textarea */}
                       <textarea

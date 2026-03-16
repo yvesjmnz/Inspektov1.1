@@ -4,8 +4,25 @@ import DashboardSidebar from '../../../components/DashboardSidebar';
 import { supabase } from '../../../lib/supabase';
 import { notifyDirectorMissionOrderSubmitted, notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import { buildMissionOrderDocxFileName, generateMissionOrderDocx } from '../lib/docx_template';
+import { groupSubcategories, getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
 import '../../dashboard_module/pages/Dashboard.css';
 import './MissionOrderEditor.css';
+
+// Helper to extract selected subcategory labels from complaint tags
+function listSelectedSubcategories(tags) {
+  if (!Array.isArray(tags) || tags.length === 0) return [];
+  return tags
+    .map((t) => String(t || ''))
+    .filter((t) => /^Violation:\s*/i.test(t))
+    .map((t) => t.replace(/^Violation:\s*/i, '').trim());
+}
+
+// Helper to group violation subcategories from complaint tags for display
+function groupComplaintCategoriesFromTags(tags) {
+  const selectedSubs = listSelectedSubcategories(tags);
+  if (selectedSubs.length === 0) return [];
+  return groupSubcategories(selectedSubs);
+}
 
 function getMissionOrderIdFromQuery() {
   const params = new URLSearchParams(window.location.search);
@@ -212,7 +229,7 @@ export default function MissionOrderEditor() {
       if (mo?.complaint_id) {
         const { data: c, error: cError } = await supabase
           .from('complaints')
-          .select('id, business_name, business_address, complaint_description, reporter_email, created_at, status')
+          .select('id, business_name, business_address, complaint_description, reporter_email, created_at, status, tags')
           .eq('id', mo.complaint_id)
           .single();
         if (cError) throw cError;
@@ -259,6 +276,45 @@ export default function MissionOrderEditor() {
         const prevLen = (prev || []).length;
         return prevLen === next.length ? prev : next;
       });
+
+      // Auto-populate ordinances from complaint violation tags (only for draft status with no assigned ordinances)
+      const isCurrentlyDraft = String(mo?.status || '').toLowerCase() === 'draft';
+      const hasNoAssignedOrdinances = (assignedOrdRows || []).length === 0;
+      
+      if (isCurrentlyDraft && hasNoAssignedOrdinances && complaint?.tags && ordinancesData) {
+        const selectedSubs = listSelectedSubcategories(complaint.tags);
+        if (selectedSubs.length > 0) {
+          const ordinancesToAdd = [];
+          
+          for (const sub of selectedSubs) {
+            const ordinanceData = getOrdinancesForSubcategory(sub);
+            for (const ord of ordinanceData) {
+              // Find the ordinance record by code_number
+              const ordinanceRecord = ordinancesData.find(o => o.code_number === ord.code_number);
+              if (ordinanceRecord && !ordinancesToAdd.includes(ordinanceRecord.id)) {
+                ordinancesToAdd.push(ordinanceRecord.id);
+              }
+            }
+          }
+          
+          // Insert the ordinances if any were found
+          if (ordinancesToAdd.length > 0) {
+            const inserts = ordinancesToAdd.map(ordinanceId => ({
+              mission_order_id: missionOrderId,
+              ordinance_id: ordinanceId
+            }));
+            
+            const { error: insertError } = await supabase
+              .from('mission_order_ordinances')
+              .insert(inserts);
+              
+            if (!insertError) {
+              setAssignedOrdinanceIds(ordinancesToAdd);
+              setToast(`${ordinancesToAdd.length} ordinance(s) auto-populated from complaint`);
+            }
+          }
+        }
+      }
 
       // If doc exists, default open the preview panel (reduces clicks)
       if (mo?.generated_docx_url) {
@@ -1024,6 +1080,36 @@ export default function MissionOrderEditor() {
                       value={complaint?.business_address || ''}
                       style={{ width: '100%', height: 46, borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '0 12px', fontWeight: 700, color: '#94a3b8', fontSize: 16 }}
                     />
+                  </div>
+
+                  {/* Complaint Category (read-only) */}
+                  <div>
+                    <label className="mo-label" style={{ fontSize: 13 }}>Complaint Category (Read Only)</label>
+                    <div
+                      style={{ width: '100%', borderRadius: 14, border: '1px solid #e2e8f0', background: '#fff', padding: '10px 12px', height: 'auto', overflow: 'visible', display: 'block', color: '#94a3b8', fontWeight: 700, fontSize: 15 }}
+                    >
+                      {(() => {
+                        const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
+                        return groups.length > 0 ? (
+                          <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
+                            {groups.map((g) => (
+                              <li key={g.category} style={{ margin: '4px 0' }}>
+                                <span style={{ fontWeight: 800 }}>{String(g.category).replace(/\s*&\s*/g, ' and ')}</span>
+                                {Array.isArray(g.subs) && g.subs.length > 0 ? (
+                                  <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
+                                    {g.subs.map((s) => (
+                                      <li key={s} style={{ margin: '2px 0' }}>{s}</li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div style={{ color: '#94a3b8', fontWeight: 700 }}>—</div>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   {/* 4) Complaint details (read-only) */}

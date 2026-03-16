@@ -3,7 +3,66 @@ import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
 import { cancelInspection as cancelInspectionApi } from '../../../lib/api';
+import DirectorReports from './DirectorReports';
 import './Dashboard.css';
+
+// Complaint category grouping (Director view) from tags like "Violation: <Sub>"
+const GUIDED_CATEGORY_LABELS = [
+  'Business Permit & Licensing Issues',
+  'Alcohol & Tobacco Violations',
+  'Sanitation & Environmental Violations',
+  'Health, Hygiene, & Nutrition',
+  'Public Security Compliance',
+];
+const GUIDED_SUBCAT_BY_CATEGORY = new Map([
+  ['Business Permit & Licensing Issues', [
+    'Operating Without a Valid Business Permit',
+    'Missing Commerical Space Clearance',
+    'Unregistered or Untaxed Employees',
+  ]],
+  ['Alcohol & Tobacco Violations', [
+    'Selling Alcohol Near Schools',
+    'Selling Alcohol to Minors',
+    'Selling Cigarettes to Minors',
+  ]],
+  ['Sanitation & Environmental Violations', [
+    'Improper Waste Disposal or Segregation',
+    'Illegal Disposing of Cooking Oil',
+    'Unpaid Garbage Tax',
+  ]],
+  ['Health, Hygiene, & Nutrition', [
+    'Poor Food-Handler Hygiene',
+    'Missing Menu Nutrition Labels',
+  ]],
+  ['Public Security Compliance', [
+    'CCTV System Non-Compliance',
+  ]],
+]);
+function groupComplaintCategoriesFromTags(tags) {
+  const result = [];
+  if (!Array.isArray(tags) || tags.length === 0) return result;
+  const selectedSubs = tags
+    .map((t) => String(t || ''))
+    .filter((t) => /^Violation:\\s*/i.test(t))
+    .map((t) => t.replace(/^Violation:\\s*/i, '').trim());
+  if (selectedSubs.length === 0) return result;
+  const subToCat = new Map();
+  for (const cat of GUIDED_CATEGORY_LABELS) {
+    const subs = GUIDED_SUBCAT_BY_CATEGORY.get(cat) || [];
+    subs.forEach((s) => subToCat.set(s, cat));
+  }
+  const byCat = new Map();
+  for (const sub of selectedSubs) {
+    const cat = subToCat.get(sub);
+    if (!cat) continue;
+    if (!byCat.has(cat)) byCat.set(cat, new Set());
+    byCat.get(cat).add(sub);
+  }
+  for (const [cat, setSubs] of byCat) {
+    result.push({ category: cat, subs: Array.from(setSubs) });
+  }
+  return result;
+}
 
 function formatStatus(status) {
   if (!status) return 'Unknown';
@@ -109,6 +168,10 @@ export default function DashboardDirector() {
       inspection: {
         title: 'Inspections',
         subtitle: 'View mission orders scheduled for inspection and manage actions.',
+      },
+      reports: {
+        title: 'Performance Report',
+        subtitle: 'Comprehensive metrics and analytics for decision-making.',
       },
     };
 
@@ -1076,6 +1139,18 @@ export default function DashboardDirector() {
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Inspections</span>
                 </button>
               </li>
+
+              <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Reports</span>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'reports' ? 'active' : ''}`} onClick={() => setTab('reports')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/document.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Performance Report</span>
+                </button>
+              </li>
                                                       </ul>
             <button
               type="button"
@@ -1435,7 +1510,9 @@ export default function DashboardDirector() {
 
           {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
-          {tab === 'general' ? (
+          {tab === 'reports' ? (
+            <DirectorReports />
+          ) : tab === 'general' ? (
             <div className="dash-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
               <div className="dash-tile">
                 <h3>Today's New Complaints</h3>
@@ -2217,6 +2294,35 @@ export default function DashboardDirector() {
                     <div style={{ fontWeight: 900, color: '#0f172a' }}>Description</div>
                   </div>
                   <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{fullComplaint.complaint_description || '—'}</div>
+                </div>
+
+                {/* Complaint Category (from tags) */}
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <span aria-hidden>📚</span>
+                    <div style={{ fontWeight: 900, color: '#0f172a' }}>Complaint Category</div>
+                  </div>
+                  {(() => {
+                    const groups = groupComplaintCategoriesFromTags(fullComplaint?.tags || []);
+                    return groups.length > 0 ? (
+                      <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
+                        {groups.map((g) => (
+                          <li key={g.category} style={{ margin: '4px 0' }}>
+                            <span style={{ fontWeight: 800 }}>{String(g.category).replace(/\s*&\s*/g, ' and ')}</span>
+                            {Array.isArray(g.subs) && g.subs.length > 0 ? (
+                              <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
+                                {g.subs.map((s) => (
+                                  <li key={s} style={{ margin: '2px 0' }}>{s}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div style={{ color: '#64748b', fontWeight: 600 }}>—</div>
+                    );
+                  })()}
                 </div>
 
                 {/* Evidence Card */}
