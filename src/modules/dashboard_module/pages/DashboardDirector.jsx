@@ -1664,6 +1664,7 @@ export default function DashboardDirector() {
                           <th style={{ width: 180 }}>Status</th>
                           <th style={{ width: 220 }}>Submitted</th>
                           <th style={{ width: 260 }}>Actions</th>
+                          <th style={{ width: 180 }}>Inspection Slip</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1715,6 +1716,14 @@ export default function DashboardDirector() {
                                 </button>
                               </div>
                             </td>
+                            <td style={{ padding: '12px' }}>
+                              <a
+                                className="dash-btn"
+                                href={`/inspection-slip/review?missionOrderId=${encodeURIComponent(mo.id)}&role=director`}
+                              >
+                                View
+                              </a>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1765,6 +1774,7 @@ export default function DashboardDirector() {
                           <th style={{ width: 180 }}>Status</th>
                           <th style={{ width: 220 }}>Completed</th>
                           <th style={{ width: 220 }}>Mission Order</th>
+                          <th style={{ width: 150 }}>Inspection Slip</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1793,6 +1803,14 @@ export default function DashboardDirector() {
                             </td>
                             <td style={{ padding: '12px' }}>{formatDateNoSeconds(inspection.completed_at)}</td>
                             <td style={{ padding: '12px' }} title={inspection.mission_order_id}>{String(inspection.mission_order_id).slice(0, 8)}…</td>
+                            <td style={{ padding: '12px' }}>
+                              <a
+                                className="dash-btn"
+                                href={`/inspection-slip/review?id=${encodeURIComponent(inspection.id)}&role=director`}
+                              >
+                                View
+                              </a>
+                            </td>
                           </tr>
                         ))}
                       </tbody>

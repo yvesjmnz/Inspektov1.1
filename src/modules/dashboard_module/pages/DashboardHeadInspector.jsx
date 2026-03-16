@@ -1648,10 +1648,10 @@ export default function DashboardHeadInspector() {
                                   <tr
                                     key={`insp-${title}-${c.complaint_id}`}
                                     style={{ borderBottom: '1px solid #e2e8f0', cursor: c.mission_order_id ? 'pointer' : 'default' }}
-                                    title={c.mission_order_id ? 'View mission order' : 'No mission order available'}
+                                    title={c.mission_order_id ? 'View inspection details' : 'No mission order available'}
                                     onClick={() => {
                                       if (c.mission_order_id) {
-                                        window.location.assign(`/mission-order/review?id=${c.mission_order_id}`);
+                                        window.location.assign(`/inspection-slip/review?missionOrderId=${c.mission_order_id}&role=head_inspector`);
                                       }
                                     }}
                                   >
@@ -1768,11 +1768,11 @@ export default function DashboardHeadInspector() {
                                 {dayGroup.items.map((r) => (
                                   <tr
                                     key={`insp-hist-${r.inspection_report_id}`}
-                                    style={{ borderBottom: '1px solid #e2e8f0', cursor: r.mission_order_id ? 'pointer' : 'default' }}
-                                    title={r.mission_order_id ? 'View mission order' : ''}
+                                    style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }}
+                                    title="View inspection slip"
                                     onClick={() => {
-                                      if (r.mission_order_id) {
-                                        window.location.assign(`/mission-order/review?id=${r.mission_order_id}`);
+                                      if (r.inspection_report_id) {
+                                        window.location.assign(`/inspection-slip/review?id=${r.inspection_report_id}&role=head_inspector`);
                                       }
                                     }}
                                   >
