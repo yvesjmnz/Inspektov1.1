@@ -39,13 +39,25 @@ ins as (
 -- Count distinct mission orders assigned to the inspector that are not terminal.
 -- Includes draft/issued/awaiting_signature/etc. as "active/pending".
 active_workload as (
+  -- Primary: count distinct mission_order_ids per inspector from inspection_reports where the report status
+  -- indicates the inspector is actively conducting the inspection.
   select
-    moa.inspector_id,
-    count(distinct moa.mission_order_id)::int as active_pending_count
-  from public.mission_order_assignments moa
-  join public.mission_orders mo on mo.id = moa.mission_order_id
-  where lower(coalesce(mo.status, '')) not in ('complete', 'completed', 'cancelled', 'canceled')
-  group by moa.inspector_id
+    t.inspector_id,
+    count(distinct t.mission_order_id)::int as active_pending_count
+  from (
+    select ir.inspector_id, ir.mission_order_id
+    from public.inspection_reports ir
+    where lower(coalesce(ir.status, '')) in ('in_progress', 'in progress', 'pending_inspection', 'pending inspection')
+
+    union
+
+    -- Fallback: mission_orders with matching busy statuses (for cases where no report exists yet)
+    select moa.inspector_id, moa.mission_order_id
+    from public.mission_order_assignments moa
+    left join public.mission_orders mo on mo.id = moa.mission_order_id
+    where lower(coalesce(mo.status, '')) in ('in_progress', 'in progress', 'pending_inspection', 'pending inspection')
+  ) t
+  group by t.inspector_id
 ),
 last_done as (
   select
@@ -123,7 +135,7 @@ ranked as (
       when e.rule1_blocked then null
       else row_number() over (
         order by
-          e.active_pending_count asc,
+          coalesce(e.active_pending_count, 0) asc,
           e.idle_days desc,
           e.full_name asc
       )::int
@@ -133,7 +145,7 @@ ranked as (
 select
   r.inspector_id,
   r.full_name,
-  r.active_pending_count,
+  coalesce(r.active_pending_count, 0) as active_pending_count,
   r.last_completed_at,
   r.idle_days,
   r.rule1_blocked,

@@ -435,12 +435,34 @@ export default function MissionOrderEditor() {
     })();
   }, [complaint?.business_pk, business?.brgy_no, missionOrderId]);
 
-  // Fallback workload stats: keeps "active workload" accurate even when RPC isn't present.
+  // Fallback workload stats: keep "active workload" accurate even when RPC isn't present.
+  // Primary source: inspection_reports (reflects inspector activity). Fallback: mission_orders statuses.
   useEffect(() => {
     const seq = ++workloadSeqRef.current;
 
     (async () => {
       try {
+        // 1) Count active reports per inspector where report status indicates ongoing work
+        const { data: reportCounts, error: rcErr } = await supabase
+          .from('inspection_reports')
+          .select('inspector_id, mission_order_id, status');
+        if (rcErr) throw rcErr;
+
+        const busyStatuses = new Set(['in_progress', 'in progress', 'pending_inspection', 'pending inspection']);
+
+        const moSetByInspector = new Map();
+
+        for (const r of reportCounts || []) {
+          const inspectorId = r?.inspector_id;
+          const moId = r?.mission_order_id;
+          if (!inspectorId || !moId) continue;
+          const s = String(r.status || '').toLowerCase();
+          if (!busyStatuses.has(s)) continue;
+          if (!moSetByInspector.has(inspectorId)) moSetByInspector.set(inspectorId, new Set());
+          moSetByInspector.get(inspectorId).add(moId);
+        }
+
+        // 2) For mission_orders without inspection_reports, fall back to counting mission_orders with busy statuses
         const { data: assignments, error: aErr } = await supabase
           .from('mission_order_assignments')
           .select('inspector_id, mission_order_id');
@@ -455,26 +477,18 @@ export default function MissionOrderEditor() {
           : { data: [], error: null };
         if (moErr) throw moErr;
 
-        const isActiveStatus = (s) => {
-          const v = String(s || '').toLowerCase();
-          // Treat only truly "in-progress" mission orders as active.
-          // Exclude states that should not contribute to inspector workload balancing.
-          return !['complete', 'completed', 'cancelled', 'canceled', 'draft', 'issued', 'awaiting_signature'].includes(v);
-        };
+        const busyMoIds = new Set((mos || [])
+          .filter((m) => busyStatuses.has(String(m.status || '').toLowerCase()))
+          .map((m) => m.id));
 
-        const inactive = new Set(
-          (mos || [])
-            .filter((mo) => !isActiveStatus(mo.status))
-            .map((mo) => mo.id)
-        );
-
-        // Count DISTINCT mission orders per inspector (avoid double counting if duplicates exist).
-        const moSetByInspector = new Map();
         for (const row of assignments || []) {
           const inspectorId = row?.inspector_id;
           const moId = row?.mission_order_id;
           if (!inspectorId || !moId) continue;
-          if (inactive.has(moId)) continue;
+          // If already counted via inspection_reports, skip
+          const existing = moSetByInspector.get(inspectorId);
+          if (existing && existing.has(moId)) continue;
+          if (!busyMoIds.has(moId)) continue;
           if (!moSetByInspector.has(inspectorId)) moSetByInspector.set(inspectorId, new Set());
           moSetByInspector.get(inspectorId).add(moId);
         }
@@ -1395,22 +1409,24 @@ export default function MissionOrderEditor() {
                         const smartById = new Map((smartInspectorRows || []).map((r) => [r.inspector_id, r]));
 
                         const enrichedInspectorsRaw = availableInspectors
-                          .map((ins) => {
-                            const smart = smartById.get(ins.id) || null;
-                            const isBlocked = !!smart?.rule1_blocked;
-                            const rank = typeof smart?.recommended_rank === 'number' ? smart.recommended_rank : null;
-                            const isTop = !!smart?.is_top_recommended;
-                            const reason = smart?.rule1_reason || '';
-                            const activePending = typeof smart?.active_pending_count === 'number'
-                              ? smart.active_pending_count
-                              : (typeof inspectorActiveWorkloadById?.get?.(ins.id) === 'number' ? inspectorActiveWorkloadById.get(ins.id) : null);
-                            const idleDays = typeof smart?.idle_days === 'number' ? smart.idle_days : null;
-                            return { ...ins, smart, isBlocked, rank, isTop, reason, activePending, idleDays };
-                          })
-                          .filter((ins) => {
-                            if (!q) return true;
-                            return String(ins.full_name || '').toLowerCase().includes(q);
-                          });
+                        .map((ins) => {
+                        const smart = smartById.get(ins.id) || null;
+                        const isBlocked = !!smart?.rule1_blocked;
+                        const rank = typeof smart?.recommended_rank === 'number' ? smart.recommended_rank : null;
+                        const isTop = !!smart?.is_top_recommended;
+                        const reason = smart?.rule1_reason || '';
+                        const activePending = typeof smart?.active_pending_count === 'number'
+                        ? smart.active_pending_count
+                        : (typeof inspectorActiveWorkloadById?.get === 'function' && typeof inspectorActiveWorkloadById.get(ins.id) === 'number'
+                        ? inspectorActiveWorkloadById.get(ins.id)
+                        : 0);
+                        const idleDays = typeof smart?.idle_days === 'number' ? smart.idle_days : null;
+                        return { ...ins, smart, isBlocked, rank, isTop, reason, activePending, idleDays };
+                        })
+                        .filter((ins) => {
+                        if (!q) return true;
+                        return String(ins.full_name || '').toLowerCase().includes(q);
+                        });
 
                         // Fallback ranking (client-side) if RPC didn't return ranks.
                         // Uses the same idea: (1) lowest active workload, (2) highest idle time, (3) name.
@@ -1445,6 +1461,7 @@ export default function MissionOrderEditor() {
                                 .slice()
                                 .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
 
+                              // Ensure that inspectors with undefined activePending (safety) are treated as 0 in sorting
                               return [...eligible, ...blocked];
                             })()
                           : enrichedInspectorsRaw.slice().sort((a, b) => {
