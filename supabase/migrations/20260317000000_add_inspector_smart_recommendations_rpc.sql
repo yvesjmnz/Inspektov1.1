@@ -4,7 +4,8 @@
 
 create or replace function public.get_inspector_smart_recommendations(
   p_business_pk integer,
-  p_brgy_no text
+  p_brgy_no text,
+  p_exclude_mission_order_id uuid default null
 )
 returns table (
   inspector_id uuid,
@@ -25,6 +26,7 @@ params as (
   select
     p_business_pk as business_pk,
     nullif(trim(p_brgy_no), '') as brgy_no,
+    p_exclude_mission_order_id as exclude_mission_order_id,
     date_trunc('month', now()) as month_start,
     (date_trunc('month', now()) + interval '1 month') as month_end
 ),
@@ -33,7 +35,9 @@ ins as (
   from public.profiles p
   where p.role = 'inspector'
 ),
--- Active / pending workload: count distinct mission orders assigned to the inspector that are not completed/cancelled.
+-- Active / pending workload for load balancing:
+-- Count distinct mission orders assigned to the inspector that are not terminal.
+-- Includes draft/issued/awaiting_signature/etc. as "active/pending".
 active_workload as (
   select
     moa.inspector_id,
@@ -52,6 +56,7 @@ last_done as (
   group by ir.inspector_id
 ),
 -- Monthly rotation counts based on THIS calendar month.
+-- NOTE: Excludes the current mission order (if any) so editing doesn’t self-block inspectors already assigned.
 month_rotation as (
   select
     moa.inspector_id,
@@ -70,6 +75,7 @@ month_rotation as (
   cross join params
   where moa.assigned_at >= params.month_start
     and moa.assigned_at < params.month_end
+    and (params.exclude_mission_order_id is null or moa.mission_order_id <> params.exclude_mission_order_id)
     and (
       (params.business_pk is not null and c.business_pk = params.business_pk)
       or
@@ -143,5 +149,5 @@ order by
 $$;
 
 -- Allow authenticated users to call (adjust as needed for your RLS posture).
-grant execute on function public.get_inspector_smart_recommendations(integer, text) to authenticated;
+grant execute on function public.get_inspector_smart_recommendations(integer, text, uuid) to authenticated;
 

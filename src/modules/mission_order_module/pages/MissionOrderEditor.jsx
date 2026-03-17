@@ -172,6 +172,11 @@ export default function MissionOrderEditor() {
   const [smartInspectorsLoading, setSmartInspectorsLoading] = useState(false);
   const smartInspectorsSeqRef = useRef(0);
 
+  // Fallback workload stats when RPC isn't available/complete.
+  // Map<inspector_id, active_pending_count>
+  const [inspectorActiveWorkloadById, setInspectorActiveWorkloadById] = useState(() => new Map());
+  const workloadSeqRef = useRef(0);
+
   const [ordinances, setOrdinances] = useState([]);
   const [assignedOrdinanceIds, setAssignedOrdinanceIds] = useState([]);
   const [selectedOrdinanceId, setSelectedOrdinanceId] = useState('');
@@ -414,6 +419,7 @@ export default function MissionOrderEditor() {
         const { data, error } = await supabase.rpc('get_inspector_smart_recommendations', {
           p_business_pk: businessPk,
           p_brgy_no: brgyNo,
+          p_exclude_mission_order_id: missionOrderId,
         });
         if (seq !== smartInspectorsSeqRef.current) return;
         if (error) throw error;
@@ -427,7 +433,63 @@ export default function MissionOrderEditor() {
         if (seq === smartInspectorsSeqRef.current) setSmartInspectorsLoading(false);
       }
     })();
-  }, [complaint?.business_pk, business?.brgy_no]);
+  }, [complaint?.business_pk, business?.brgy_no, missionOrderId]);
+
+  // Fallback workload stats: keeps "active workload" accurate even when RPC isn't present.
+  useEffect(() => {
+    const seq = ++workloadSeqRef.current;
+
+    (async () => {
+      try {
+        const { data: assignments, error: aErr } = await supabase
+          .from('mission_order_assignments')
+          .select('inspector_id, mission_order_id');
+        if (aErr) throw aErr;
+
+        const moIds = Array.from(new Set((assignments || []).map((r) => r.mission_order_id).filter(Boolean)));
+        const { data: mos, error: moErr } = moIds.length
+          ? await supabase
+              .from('mission_orders')
+              .select('id, status')
+              .in('id', moIds)
+          : { data: [], error: null };
+        if (moErr) throw moErr;
+
+        const isActiveStatus = (s) => {
+          const v = String(s || '').toLowerCase();
+          // Treat only truly "in-progress" mission orders as active.
+          // Exclude states that should not contribute to inspector workload balancing.
+          return !['complete', 'completed', 'cancelled', 'canceled', 'draft', 'issued', 'awaiting_signature'].includes(v);
+        };
+
+        const inactive = new Set(
+          (mos || [])
+            .filter((mo) => !isActiveStatus(mo.status))
+            .map((mo) => mo.id)
+        );
+
+        // Count DISTINCT mission orders per inspector (avoid double counting if duplicates exist).
+        const moSetByInspector = new Map();
+        for (const row of assignments || []) {
+          const inspectorId = row?.inspector_id;
+          const moId = row?.mission_order_id;
+          if (!inspectorId || !moId) continue;
+          if (inactive.has(moId)) continue;
+          if (!moSetByInspector.has(inspectorId)) moSetByInspector.set(inspectorId, new Set());
+          moSetByInspector.get(inspectorId).add(moId);
+        }
+
+        const counts = new Map(Array.from(moSetByInspector.entries()).map(([inspectorId, s]) => [inspectorId, s.size]));
+
+        if (seq !== workloadSeqRef.current) return;
+        setInspectorActiveWorkloadById(counts);
+      } catch (e) {
+        if (seq !== workloadSeqRef.current) return;
+        console.warn('Fallback workload stats unavailable:', e);
+        setInspectorActiveWorkloadById(new Map());
+      }
+    })();
+  }, [missionOrderId]);
 
   const assignedInspectorNames = useMemo(() => {
     const uniqueIds = Array.from(new Set(assignedInspectorIds.filter(Boolean)));
@@ -1332,30 +1394,68 @@ export default function MissionOrderEditor() {
                         const q = inspectorQuery.trim().toLowerCase();
                         const smartById = new Map((smartInspectorRows || []).map((r) => [r.inspector_id, r]));
 
-                        const enrichedInspectors = availableInspectors
+                        const enrichedInspectorsRaw = availableInspectors
                           .map((ins) => {
                             const smart = smartById.get(ins.id) || null;
                             const isBlocked = !!smart?.rule1_blocked;
-                            const rank = smart?.recommended_rank ?? null;
+                            const rank = typeof smart?.recommended_rank === 'number' ? smart.recommended_rank : null;
                             const isTop = !!smart?.is_top_recommended;
                             const reason = smart?.rule1_reason || '';
-                            const activePending = typeof smart?.active_pending_count === 'number' ? smart.active_pending_count : null;
+                            const activePending = typeof smart?.active_pending_count === 'number'
+                              ? smart.active_pending_count
+                              : (typeof inspectorActiveWorkloadById?.get?.(ins.id) === 'number' ? inspectorActiveWorkloadById.get(ins.id) : null);
                             const idleDays = typeof smart?.idle_days === 'number' ? smart.idle_days : null;
                             return { ...ins, smart, isBlocked, rank, isTop, reason, activePending, idleDays };
                           })
                           .filter((ins) => {
                             if (!q) return true;
                             return String(ins.full_name || '').toLowerCase().includes(q);
-                          })
-                          .sort((a, b) => {
-                            // Prefer smart ordering when available; otherwise fallback to name sort.
-                            const ar = a.rank;
-                            const br = b.rank;
-                            if (typeof ar === 'number' && typeof br === 'number') return ar - br;
-                            if (typeof ar === 'number') return -1;
-                            if (typeof br === 'number') return 1;
-                            return String(a.full_name || '').localeCompare(String(b.full_name || ''));
                           });
+
+                        // Fallback ranking (client-side) if RPC didn't return ranks.
+                        // Uses the same idea: (1) lowest active workload, (2) highest idle time, (3) name.
+                        const needsClientRanking = enrichedInspectorsRaw.some((x) => !x.isBlocked && typeof x.rank !== 'number');
+
+                        const enrichedInspectors = (needsClientRanking
+                          ? (() => {
+                              const eligible = enrichedInspectorsRaw
+                                .filter((x) => !x.isBlocked)
+                                .slice()
+                                .sort((a, b) => {
+                                  // Least active first (load balancing)
+                                  const aActive = typeof a.activePending === 'number' ? a.activePending : Number.POSITIVE_INFINITY;
+                                  const bActive = typeof b.activePending === 'number' ? b.activePending : Number.POSITIVE_INFINITY;
+                                  if (aActive !== bActive) return aActive - bActive;
+
+                                  // If tie, prefer MORE idle (hasn't completed recently)
+                                  const aIdle = typeof a.idleDays === 'number' ? a.idleDays : -1;
+                                  const bIdle = typeof b.idleDays === 'number' ? b.idleDays : -1;
+                                  if (aIdle !== bIdle) return bIdle - aIdle;
+
+                                  return String(a.full_name || '').localeCompare(String(b.full_name || ''));
+                                })
+                                .map((x, idx) => ({
+                                  ...x,
+                                  rank: typeof x.rank === 'number' ? x.rank : idx + 1,
+                                  isTop: !!x.isTop || (typeof x.rank !== 'number' && idx === 0),
+                                }));
+
+                              const blocked = enrichedInspectorsRaw
+                                .filter((x) => x.isBlocked)
+                                .slice()
+                                .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
+
+                              return [...eligible, ...blocked];
+                            })()
+                          : enrichedInspectorsRaw.slice().sort((a, b) => {
+                              // Prefer smart ordering when available; otherwise fallback to name sort.
+                              const ar = a.rank;
+                              const br = b.rank;
+                              if (typeof ar === 'number' && typeof br === 'number') return ar - br;
+                              if (typeof ar === 'number') return -1;
+                              if (typeof br === 'number') return 1;
+                              return String(a.full_name || '').localeCompare(String(b.full_name || ''));
+                            }));
 
                         return (
                           <div ref={inspectorDropdownRef} className="mo-multi-select-dropdown" role="listbox">
@@ -1376,6 +1476,8 @@ export default function MissionOrderEditor() {
                               if (typeof ins.idleDays === 'number') metaParts.push(`${ins.idleDays}d idle`);
                               const meta = metaParts.join(' • ');
 
+                              const isRecommended = !ins.isBlocked && typeof ins.rank === 'number' && ins.rank <= 3;
+
                               return (
                                 <button
                                   key={ins.id}
@@ -1395,7 +1497,8 @@ export default function MissionOrderEditor() {
                                   <div className="mo-multi-select-option-row">
                                     <div className="mo-multi-select-option-name">
                                       {label}
-                                      {ins.isTop ? <span className="mo-multi-select-badge">Top Recommended</span> : null}
+                                      {ins.isTop ? <span className="mo-multi-select-badge">Most Recommended</span> : null}
+                                      {!ins.isTop && isRecommended ? <span className="mo-multi-select-badge">Recommended</span> : null}
                                       {ins.isBlocked ? <span className="mo-multi-select-badge mo-multi-select-badge--muted">Rotation limit</span> : null}
                                     </div>
                                     {meta ? <div className="mo-multi-select-option-meta">{meta}</div> : null}
