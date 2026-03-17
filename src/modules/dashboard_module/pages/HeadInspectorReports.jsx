@@ -17,10 +17,11 @@ function formatDuration(hours) {
 
 function formatMinutes(minutes) {
   if (minutes === null || minutes === undefined) return '—';
-  if (minutes < 60) return `${Math.round(minutes)}m`;
-  const h = Math.floor(minutes / 60);
-  const m = Math.round(minutes % 60);
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  // Convert fractional minutes to total seconds
+  const totalSeconds = Math.round(minutes * 60);
+  const mm = Math.floor(totalSeconds / 60);
+  const ss = totalSeconds % 60;
+  return `${mm}:${String(ss).padStart(2, '0')} min`;
 }
 
 export default function HeadInspectorReports() {
@@ -330,7 +331,7 @@ export default function HeadInspectorReports() {
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, fontSize: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, fontSize: 12 }}>
                       <div>
                         <div style={{ color: '#64748b', marginBottom: 4 }}>Completion Rate</div>
                         <div style={{ fontWeight: 700, color: '#0f172a' }}>
@@ -339,8 +340,14 @@ export default function HeadInspectorReports() {
                       </div>
                       <div>
                         <div style={{ color: '#64748b', marginBottom: 4 }}>Avg Duration</div>
-                        <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                        <div style={{ fontWeight: 700, color: inspector.avgDuration != null && inspector.avgDuration <= 42 ? '#22c55e' : '#ef4444' }}>
                           {formatMinutes(inspector.avgDuration)}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ color: '#64748b', marginBottom: 4 }}>Pace (Target 42m)</div>
+                        <div style={{ fontWeight: 700, color: inspector.avgDuration != null && inspector.avgDuration <= 42 ? '#22c55e' : '#ef4444' }}>
+                          {inspector.avgDuration != null ? `${inspector.avgDuration}m` : '—'}
                         </div>
                       </div>
                       <div>

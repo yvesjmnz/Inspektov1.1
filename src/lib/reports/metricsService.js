@@ -134,6 +134,36 @@ export async function getHeadInspectorMetrics(dateRange = null) {
 
     if (moErr || iErr || aErr || cErr) throw new Error('Failed to fetch head inspector metrics');
 
+    // compute inspection KPI: durations, avg, compliance (<=42 minutes), per-inspector averages
+    const inspectionDurations = (inspections || [])
+      .filter(i => (i.completed_at) && (i.started_at || i.created_at))
+      .map(i => {
+        const start = i.started_at || i.created_at;
+        const mins = (new Date(i.completed_at).getTime() - new Date(start).getTime()) / (1000 * 60);
+        return { inspector_id: i.inspector_id, mission_order_id: i.mission_order_id, mins };
+      });
+
+    const overallAvgInspection = inspectionDurations.length > 0
+      ? Number((inspectionDurations.reduce((a,b) => a + b.mins, 0) / inspectionDurations.length).toFixed(1))
+      : null;
+    const overallCompliance = inspectionDurations.length > 0
+      ? Number(((inspectionDurations.filter(d => d.mins <= 42).length / inspectionDurations.length) * 100).toFixed(1))
+      : null;
+
+    // per-inspector averages
+    const perInspectorMap = new Map();
+    for (const d of inspectionDurations) {
+      if (!d.inspector_id) continue;
+      if (!perInspectorMap.has(d.inspector_id)) perInspectorMap.set(d.inspector_id, []);
+      perInspectorMap.get(d.inspector_id).push(d.mins);
+    }
+    const perInspector = Array.from(perInspectorMap.entries()).map(([inspectorId, arr]) => ({
+      inspectorId,
+      avg_inspection_minutes: arr.length > 0 ? Number((arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(1)) : null,
+      inspections_count: arr.length,
+      compliance_rate: arr.length > 0 ? Number(((arr.filter(x=>x<=42).length/arr.length)*100).toFixed(1)) : null,
+    }));
+
     const metrics = {
       missionOrders: calculateMissionOrderMetrics(missionOrders || [], complaints || []),
       inspections: calculateInspectionMetrics(inspections || []),
@@ -141,6 +171,11 @@ export async function getHeadInspectorMetrics(dateRange = null) {
       performance: calculateInspectorPerformance(inspections || [], assignments || []),
       timeline: calculateInspectionTimeline(inspections || []),
       complaintToMOPreapproval: calculateComplaintToMOPreapprovalTime(complaints || [], missionOrders || []),
+      inspectionKpi: {
+        overallAvgInspection,
+        overallCompliance,
+        perInspector,
+      },
     };
 
     return metrics;
@@ -355,18 +390,37 @@ function calculateAssignmentMetrics(assignments) {
  * Calculate inspector performance
  */
 function calculateInspectorPerformance(inspections, assignments) {
-  const assignmentMap = new Map();
-  assignments.forEach(a => {
-    if (!assignmentMap.has(a.mission_order_id)) {
-      assignmentMap.set(a.mission_order_id, []);
-    }
-    assignmentMap.get(a.mission_order_id).push(a.inspector_id);
+  // Build a set of inspectors from assignments first (to include inspectors with zero inspections)
+  const inspectorsSet = new Set();
+  (assignments || []).forEach(a => {
+    if (a.inspector_id) inspectorsSet.add(a.inspector_id);
+  });
+
+  // Also include any inspectors present on inspection records
+  (inspections || []).forEach(i => {
+    if (i.inspector_id) inspectorsSet.add(i.inspector_id);
   });
 
   const byInspector = new Map();
+  // initialize inspector entries
+  inspectorsSet.forEach(id => {
+    byInspector.set(id, {
+      inspectorId: id,
+      total: 0,
+      completed: 0,
+      inProgress: 0,
+      pending: 0,
+      avgDuration: null,
+      durations: [],
+    });
+  });
 
+  // If there are no inspectors from assignments or inspections, return empty array
+  if (byInspector.size === 0) return [];
+
+  // Aggregate inspection stats; if an inspection has no assignment mapping, still attribute to its inspector_id
   inspections.forEach(i => {
-    const inspectorIds = assignmentMap.get(i.mission_order_id) || [];
+    const inspectorIds = i.inspector_id ? [i.inspector_id] : [];
     inspectorIds.forEach(inspectorId => {
       if (!byInspector.has(inspectorId)) {
         byInspector.set(inspectorId, {
@@ -388,14 +442,15 @@ function calculateInspectorPerformance(inspections, assignments) {
       else if (['in progress', 'in_progress'].includes(status)) entry.inProgress += 1;
       else entry.pending += 1;
 
-      if (i.started_at && i.completed_at) {
-        const duration = (new Date(i.completed_at).getTime() - new Date(i.started_at).getTime()) / (1000 * 60);
-        entry.durations.push(duration);
+      if ((i.started_at || i.created_at) && i.completed_at) {
+        const start = i.started_at || i.created_at;
+        const duration = (new Date(i.completed_at).getTime() - new Date(start).getTime()) / (1000 * 60);
+        if (Number.isFinite(duration) && duration >= 0) entry.durations.push(duration);
       }
     });
   });
 
-  // Calculate averages
+  // Calculate averages and ensure inspectors with zero inspections are present
   const performance = Array.from(byInspector.values()).map(p => ({
     ...p,
     completionRate: p.total > 0 ? Number(((p.completed / p.total) * 100).toFixed(1)) : 0,
@@ -404,7 +459,11 @@ function calculateInspectorPerformance(inspections, assignments) {
       : null,
   }));
 
-  return performance.sort((a, b) => b.completed - a.completed);
+  // Sort: show inspectors with most completed inspections first, then by inspectorId
+  return performance.sort((a, b) => {
+    if (b.completed !== a.completed) return b.completed - a.completed;
+    return String(a.inspectorId).localeCompare(String(b.inspectorId));
+  });
 }
 
 /**
