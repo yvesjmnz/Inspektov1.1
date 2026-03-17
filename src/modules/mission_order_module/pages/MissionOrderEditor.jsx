@@ -159,6 +159,7 @@ export default function MissionOrderEditor() {
 
   const [missionOrder, setMissionOrder] = useState(null);
   const [complaint, setComplaint] = useState(null);
+  const [business, setBusiness] = useState(null);
 
   const [inspectors, setInspectors] = useState([]);
   const [assignedInspectorIds, setAssignedInspectorIds] = useState([]);
@@ -167,6 +168,9 @@ export default function MissionOrderEditor() {
   const [inspectorDropdownOpen, setInspectorDropdownOpen] = useState(false);
   const inspectorInputRef = useRef(null);
   const inspectorDropdownRef = useRef(null);
+  const [smartInspectorRows, setSmartInspectorRows] = useState([]);
+  const [smartInspectorsLoading, setSmartInspectorsLoading] = useState(false);
+  const smartInspectorsSeqRef = useRef(0);
 
   const [ordinances, setOrdinances] = useState([]);
   const [assignedOrdinanceIds, setAssignedOrdinanceIds] = useState([]);
@@ -263,16 +267,30 @@ export default function MissionOrderEditor() {
       if (mo?.complaint_id) {
         const { data: c, error: cError } = await supabase
           .from('complaints')
-          .select('id, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls')
+          .select('id, business_pk, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls')
           .eq('id', mo.complaint_id)
           .single();
         if (cError) throw cError;
         complaintForAutoPopulate = c;
         setComplaint(c);
         setEvidencePreviewUrl('');
+
+        // Load registered business details (used by smart inspector recommendations).
+        if (c?.business_pk) {
+          const { data: biz, error: bizErr } = await supabase
+            .from('businesses')
+            .select('business_pk, business_name, brgy_no')
+            .eq('business_pk', c.business_pk)
+            .single();
+          if (!bizErr) setBusiness(biz);
+          else setBusiness(null);
+        } else {
+          setBusiness(null);
+        }
       } else {
         complaintForAutoPopulate = null;
         setComplaint(null);
+        setBusiness(null);
         setEvidencePreviewUrl('');
       }
 
@@ -362,6 +380,7 @@ export default function MissionOrderEditor() {
       setError(e?.message || 'Failed to load mission order.');
       setMissionOrder(null);
       setComplaint(null);
+      setBusiness(null);
       setInspectors([]);
       setAssignedInspectorIds([]);
       setOrdinances([]);
@@ -375,6 +394,40 @@ export default function MissionOrderEditor() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missionOrderId]);
+
+  // Smart inspector recommendations: recompute when business/barangay changes.
+  useEffect(() => {
+    const businessPk = complaint?.business_pk ? Number(complaint.business_pk) : null;
+    const brgyNo = business?.brgy_no ? String(business.brgy_no) : null;
+
+    // If we don't have primary filters, don’t show stale recommendations.
+    if (!businessPk && !brgyNo) {
+      setSmartInspectorRows([]);
+      return;
+    }
+
+    const seq = ++smartInspectorsSeqRef.current;
+    setSmartInspectorsLoading(true);
+
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc('get_inspector_smart_recommendations', {
+          p_business_pk: businessPk,
+          p_brgy_no: brgyNo,
+        });
+        if (seq !== smartInspectorsSeqRef.current) return;
+        if (error) throw error;
+        setSmartInspectorRows(Array.isArray(data) ? data : []);
+      } catch (e) {
+        if (seq !== smartInspectorsSeqRef.current) return;
+        // Don’t hard-fail the editor if recommendations aren’t available yet (e.g., migration not applied).
+        setSmartInspectorRows([]);
+        console.warn('Smart inspector recommendations unavailable:', e);
+      } finally {
+        if (seq === smartInspectorsSeqRef.current) setSmartInspectorsLoading(false);
+      }
+    })();
+  }, [complaint?.business_pk, business?.brgy_no]);
 
   const assignedInspectorNames = useMemo(() => {
     const uniqueIds = Array.from(new Set(assignedInspectorIds.filter(Boolean)));
@@ -1277,26 +1330,81 @@ export default function MissionOrderEditor() {
                         if (availableInspectors.length === 0) return null;
 
                         const q = inspectorQuery.trim().toLowerCase();
-                        const filteredInspectors = availableInspectors.filter((ins) => {
-                          if (!q) return true;
-                          return String(ins.full_name || '').toLowerCase().includes(q);
-                        });
+                        const smartById = new Map((smartInspectorRows || []).map((r) => [r.inspector_id, r]));
+
+                        const enrichedInspectors = availableInspectors
+                          .map((ins) => {
+                            const smart = smartById.get(ins.id) || null;
+                            const isBlocked = !!smart?.rule1_blocked;
+                            const rank = smart?.recommended_rank ?? null;
+                            const isTop = !!smart?.is_top_recommended;
+                            const reason = smart?.rule1_reason || '';
+                            const activePending = typeof smart?.active_pending_count === 'number' ? smart.active_pending_count : null;
+                            const idleDays = typeof smart?.idle_days === 'number' ? smart.idle_days : null;
+                            return { ...ins, smart, isBlocked, rank, isTop, reason, activePending, idleDays };
+                          })
+                          .filter((ins) => {
+                            if (!q) return true;
+                            return String(ins.full_name || '').toLowerCase().includes(q);
+                          })
+                          .sort((a, b) => {
+                            // Prefer smart ordering when available; otherwise fallback to name sort.
+                            const ar = a.rank;
+                            const br = b.rank;
+                            if (typeof ar === 'number' && typeof br === 'number') return ar - br;
+                            if (typeof ar === 'number') return -1;
+                            if (typeof br === 'number') return 1;
+                            return String(a.full_name || '').localeCompare(String(b.full_name || ''));
+                          });
 
                         return (
                           <div ref={inspectorDropdownRef} className="mo-multi-select-dropdown" role="listbox">
-                            {filteredInspectors.slice(0, 10).map((ins) => (
-                              <button
-                                key={ins.id}
-                                type="button"
-                                className="mo-multi-select-option"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => setSelectedInspectorId(ins.id)}
-                              >
-                                {ins.full_name || ins.id}
-                              </button>
-                            ))}
+                            {smartInspectorsLoading ? (
+                              <div className="mo-multi-select-empty">Updating recommendations…</div>
+                            ) : null}
 
-                            {filteredInspectors.length === 0 ? (
+                            {enrichedInspectors.slice(0, 12).map((ins) => {
+                              const label = ins.full_name || ins.id;
+                              const tip = ins.isBlocked
+                                ? (ins.reason || 'Rotation limit reached this month for this Business or Barangay.')
+                                : ins.isTop
+                                  ? 'Top Recommended based on workload + idle time.'
+                                  : '';
+
+                              const metaParts = [];
+                              if (typeof ins.activePending === 'number') metaParts.push(`${ins.activePending} active`);
+                              if (typeof ins.idleDays === 'number') metaParts.push(`${ins.idleDays}d idle`);
+                              const meta = metaParts.join(' • ');
+
+                              return (
+                                <button
+                                  key={ins.id}
+                                  type="button"
+                                  className={[
+                                    'mo-multi-select-option',
+                                    ins.isBlocked ? 'mo-multi-select-option--disabled' : '',
+                                    ins.isTop ? 'mo-multi-select-option--top' : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' ')}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => (ins.isBlocked ? null : setSelectedInspectorId(ins.id))}
+                                  disabled={ins.isBlocked}
+                                  title={tip}
+                                >
+                                  <div className="mo-multi-select-option-row">
+                                    <div className="mo-multi-select-option-name">
+                                      {label}
+                                      {ins.isTop ? <span className="mo-multi-select-badge">Top Recommended</span> : null}
+                                      {ins.isBlocked ? <span className="mo-multi-select-badge mo-multi-select-badge--muted">Rotation limit</span> : null}
+                                    </div>
+                                    {meta ? <div className="mo-multi-select-option-meta">{meta}</div> : null}
+                                  </div>
+                                </button>
+                              );
+                            })}
+
+                            {enrichedInspectors.length === 0 ? (
                               <div className="mo-multi-select-empty">No matches.</div>
                             ) : null}
                           </div>
