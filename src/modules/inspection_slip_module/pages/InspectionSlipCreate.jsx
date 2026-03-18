@@ -42,6 +42,7 @@ export default function InspectionSlipCreate() {
   const [checkingBusiness, setCheckingBusiness] = useState(false);
 
   const [ownerDetails, setOwnerDetails] = useState({
+    fullName: '',
     lastName: '',
     firstName: '',
     middleName: '',
@@ -490,15 +491,11 @@ export default function InspectionSlipCreate() {
           setCctvCount(explicitReport.cctv_count != null ? String(explicitReport.cctv_count) : '');
 
           if (explicitReport.owner_name) {
-            const ownerName = String(explicitReport.owner_name || '');
+            const ownerName = String(explicitReport.owner_name || '').trim();
             if (ownerName) {
-              const [lastPart, rest] = ownerName.split(',').map((s) => s.trim());
-              const restParts = (rest || '').split(' ').filter(Boolean);
               setOwnerDetails((prev) => ({
                 ...prev,
-                lastName: lastPart || prev.lastName,
-                firstName: restParts[0] || prev.firstName,
-                middleName: restParts.slice(1).join(' ') || prev.middleName,
+                fullName: ownerName,
               }));
             }
           }
@@ -627,16 +624,11 @@ export default function InspectionSlipCreate() {
           setCctvCount(existingReport.cctv_count != null ? String(existingReport.cctv_count) : '');
 
           if (existingReport.owner_name) {
-            const ownerName = String(existingReport.owner_name || '');
+            const ownerName = String(existingReport.owner_name || '').trim();
             if (ownerName) {
-              // best-effort split "Last, First Middle" style
-              const [lastPart, rest] = ownerName.split(',').map((s) => s.trim());
-              const restParts = (rest || '').split(' ').filter(Boolean);
               setOwnerDetails((prev) => ({
                 ...prev,
-                lastName: lastPart || prev.lastName,
-                firstName: restParts[0] || prev.firstName,
-                middleName: restParts.slice(1).join(' ') || prev.middleName,
+                fullName: ownerName,
               }));
             }
           }
@@ -907,21 +899,26 @@ export default function InspectionSlipCreate() {
       businessName: b.business_name || prev.businessName,
     }));
 
-    // Only autofill owner personal name fields + additional business info for Sole Proprietor
+    // Autofill owner full name for BOTH Sole Proprietor and Corporation.
+    // Source priority:
+    // 1) businesses.owner_name (if present)
+    // 2) composed from legacy name parts (if present)
     const isSole = ownerType === 'sole';
 
-    if (isSole) {
-      const lastName = b.owner_last_name || b.last_name || b.lastname || '';
-      const firstName = b.owner_first_name || b.first_name || b.firstname || '';
-      const middleName = b.owner_middle_name || b.middle_name || b.middlename || '';
+    const directOwnerName = String(b?.owner_name || '').trim();
+    const lastName = b.owner_last_name || b.last_name || b.lastname || '';
+    const firstName = b.owner_first_name || b.first_name || b.firstname || '';
+    const middleName = b.owner_middle_name || b.middle_name || b.middlename || '';
+    const composed = [firstName, middleName, lastName].map((s) => String(s || '').trim()).filter(Boolean).join(' ');
 
-      setOwnerDetails((prev) => ({
-        ...prev,
-        lastName: lastName || prev.lastName,
-        firstName: firstName || prev.firstName,
-        middleName: middleName || prev.middleName,
-      }));
-    }
+    setOwnerDetails((prev) => ({
+      ...prev,
+      fullName: directOwnerName || composed || prev.fullName,
+      // keep legacy fields populated when available (harmless, helps backward compatibility)
+      lastName: lastName || prev.lastName,
+      firstName: firstName || prev.firstName,
+      middleName: middleName || prev.middleName,
+    }));
 
     const bin = b.epermit_no || b.permit_number || '';
 
@@ -937,36 +934,50 @@ export default function InspectionSlipCreate() {
     }));
 
     // Pull multi-line LOB + total_employees from businesses_additional based on BIN.
-    if (isSole) {
-      try {
-        const businessBin = String(b?.bin || '').trim();
-        if (!businessBin) return;
+    // LOB should be autofilled for BOTH Sole Proprietor and Corporation.
+    try {
+      const businessBin = String(b?.bin || '').trim();
+      if (!businessBin) return;
 
-        const { data: addRows, error: addErr } = await supabase
-          .from('businesses_additional')
-          .select('line_of_business, total_employees')
-          .eq('bin', businessBin);
+      const { data: addRows, error: addErr } = await supabase
+        .from('businesses_additional')
+        .select('line_of_business, total_employees, owner_name')
+        .eq('bin', businessBin);
 
-        if (addErr) throw addErr;
-        if (!addRows || addRows.length === 0) return;
+      if (addErr) throw addErr;
+      if (!addRows || addRows.length === 0) return;
 
-        const lobs = addRows
-          .flatMap((r) => {
-            const v = r?.line_of_business ?? '';
-            if (typeof v === 'string') {
-              return v
-                .split(/\r?\n|\s*;\s*|\s*,\s*/g)
-                .map((s) => s.trim())
-                .filter(Boolean);
-            }
-            return [];
-          })
-          .filter((val, idx, arr) => arr.indexOf(val) === idx);
+      const lobs = addRows
+        .flatMap((r) => {
+          const v = r?.line_of_business ?? '';
+          if (typeof v === 'string') {
+            return v
+              .split(/\r?\n|\s*;\s*|\s*,\s*/g)
+              .map((s) => s.trim())
+              .filter(Boolean);
+          }
+          return [];
+        })
+        .filter((val, idx, arr) => arr.indexOf(val) === idx);
 
-        if (lobs.length > 0) {
-          setLineOfBusinessList(lobs);
-        }
+      if (lobs.length > 0) {
+        setLineOfBusinessList(lobs);
+      }
 
+      // If businesses_additional has an owner_name, use it as a fallback.
+      const additionalOwnerName = addRows
+        .map((r) => String(r?.owner_name || '').trim())
+        .find(Boolean);
+
+      if (additionalOwnerName) {
+        setOwnerDetails((prev) => ({
+          ...prev,
+          fullName: prev.fullName || additionalOwnerName,
+        }));
+      }
+
+      // Keep employee autofill only for Sole Proprietor (existing behavior)
+      if (isSole) {
         const maxEmployees = addRows
           .map((r) => Number(r?.total_employees || 0))
           .filter((n) => Number.isFinite(n) && n > 0)
@@ -978,9 +989,9 @@ export default function InspectionSlipCreate() {
             numberOfEmployees: String(maxEmployees),
           }));
         }
-      } catch {
-        // Silent fail
       }
+    } catch {
+      // Silent fail
     }
   };
 
@@ -1110,6 +1121,11 @@ export default function InspectionSlipCreate() {
   };
 
   const toOwnerNameString = () => {
+    // Prefer the new single-field full name.
+    const full = String(ownerDetails.fullName || '').trim();
+    if (full) return full;
+
+    // Backward compatibility (older drafts / state)
     const ln = (ownerDetails.lastName || '').trim();
     const fn = (ownerDetails.firstName || '').trim();
     const mn = (ownerDetails.middleName || '').trim();
@@ -1273,8 +1289,7 @@ export default function InspectionSlipCreate() {
 
     // Owner name is required for Sole Proprietor
     if (ownerType === 'sole') {
-      if (!String(ownerDetails.lastName || '').trim()) missing.push('Owner Last Name');
-      if (!String(ownerDetails.firstName || '').trim()) missing.push('Owner First Name');
+      if (!String(ownerDetails.fullName || '').trim()) missing.push('Owner Full Name');
     }
 
     // At least one line of business
@@ -1965,33 +1980,13 @@ export default function InspectionSlipCreate() {
                       className="is-grid"
                       style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
                     >
-                      <div className="is-field">
-                        <label>Last Name</label>
+                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                        <label>Owner Full Name</label>
                         <input
                           className="is-input"
-                          value={ownerDetails.lastName}
-                          onChange={(e) => setOwnerDetails((prev) => ({ ...prev, lastName: e.target.value }))}
-                          placeholder="Enter last name"
-                        />
-                      </div>
-
-                      <div className="is-field">
-                        <label>First Name</label>
-                        <input
-                          className="is-input"
-                          value={ownerDetails.firstName}
-                          onChange={(e) => setOwnerDetails((prev) => ({ ...prev, firstName: e.target.value }))}
-                          placeholder="Enter first name"
-                        />
-                      </div>
-
-                      <div className="is-field">
-                        <label>Middle Name</label>
-                        <input
-                          className="is-input"
-                          value={ownerDetails.middleName}
-                          onChange={(e) => setOwnerDetails((prev) => ({ ...prev, middleName: e.target.value }))}
-                          placeholder="Enter middle name"
+                          value={ownerDetails.fullName}
+                          onChange={(e) => setOwnerDetails((prev) => ({ ...prev, fullName: e.target.value }))}
+                          placeholder="Enter full name"
                         />
                       </div>
 
