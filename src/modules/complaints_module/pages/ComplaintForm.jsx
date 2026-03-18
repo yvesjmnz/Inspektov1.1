@@ -57,6 +57,20 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [proximityTag, setProximityTag] = useState(null);
   const [businessCoords, setBusinessCoords] = useState(null); // Store geocoded business location
 
+  // Manila City jurisdiction check (whitelist approach)
+  // If the address does NOT clearly indicate "Manila" / "City of Manila" / "Maynila",
+  // treat it as outside jurisdiction.
+  const isOutsideManilaCity = useMemo(() => {
+    const addr = String(formData.business_address || '').toLowerCase();
+    if (!addr) return false; // don't block while empty
+
+    const withinManila = /\b(manila|city of manila|maynila)\b/.test(addr);
+    return !withinManila;
+  }, [formData.business_address]);
+
+  const OUTSIDE_JURISDICTION_MESSAGE =
+    'Location Outside Jurisdiction: This business address falls outside the City of Manila. Digital inspections are currently restricted to Manila City limits.';
+
   const withinRange = proximityTag === 'Location Verified';
   const outOfRange = proximityTag === 'Failed Location Verification';
   const [locationCheckAttempted, setLocationCheckAttempted] = useState(false);
@@ -883,6 +897,11 @@ export default function ComplaintForm({ verifiedEmail }) {
         setError('Please provide a business name and address.');
         return;
       }
+
+      if (isOutsideManilaCity) {
+        setError(OUTSIDE_JURISDICTION_MESSAGE);
+        return;
+      }
     }
 
     if (step === 2) {
@@ -1262,7 +1281,12 @@ export default function ComplaintForm({ verifiedEmail }) {
                       aria-readonly={formData.business_pk ? 'true' : 'false'}
                       required
                     />
-                                      </div>
+                    {isOutsideManilaCity ? (
+                      <div className="error-message" style={{ marginTop: 8 }}>
+                        {OUTSIDE_JURISDICTION_MESSAGE}
+                      </div>
+                    ) : null}
+                  </div>
 
                   <div className="form-group">
                     <label htmlFor="reporter_email">Your Email</label>
