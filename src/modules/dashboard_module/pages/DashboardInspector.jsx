@@ -573,14 +573,33 @@ export default function DashboardInspector() {
                                   ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
                                   : `/inspection-slip/create?missionOrderId=${r.mission_order_id}`;
 
-                              // Row should be clickable only on the scheduled inspection date.
-                              // Exception: allow in-progress inspections to be continued regardless of date.
                               const statusLower = String(r.inspection_status || '').toLowerCase();
                               const isInProgress = statusLower === 'in progress' || statusLower === 'in_progress';
 
+                              // Determine if this inspection should be treated as "missed"
+                              let isMissed = false;
+                              if (insp) {
+                                const startOfToday = new Date(
+                                  today.getFullYear(),
+                                  today.getMonth(),
+                                  today.getDate()
+                                ).getTime();
+                                const inspDay = new Date(
+                                  insp.getFullYear(),
+                                  insp.getMonth(),
+                                  insp.getDate()
+                                ).getTime();
+                                const isPast = inspDay < startOfToday;
+                                const isCompleted = statusLower === 'completed' || statusLower === 'complete';
+                                if (isPast && !isInProgress && !isCompleted) {
+                                  isMissed = true;
+                                }
+                              }
+
+                              // Row should be clickable only on the scheduled inspection date,
+                              // or when an inspection is already in progress.
                               const isRowEnabled = isInProgress || isToday;
 
-                              
                               return (
                                 <tr
                                   key={r.mission_order_id}
@@ -595,7 +614,9 @@ export default function DashboardInspector() {
                                   title={
                                     isRowEnabled
                                       ? 'Open inspection'
-                                      : 'This inspection will be available on its scheduled inspection date.'
+                                      : isMissed
+                                        ? 'This inspection has passed its scheduled date and is marked as missed.'
+                                        : 'This inspection will be available on its scheduled inspection date.'
                                   }
                                   onClick={() => {
                                     if (!isRowEnabled) return;
@@ -610,9 +631,21 @@ export default function DashboardInspector() {
                                   }}
                                 >
                                   <td style={{ padding: '12px' }}>
-                                    <span className={statusBadgeClass(r.inspection_status)} style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
-                                      {formatStatus(r.inspection_status)}
-                                    </span>
+                                    {isMissed ? (
+                                      <span
+                                        className="status-badge status-danger"
+                                        style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}
+                                      >
+                                        Missed Inspection
+                                      </span>
+                                    ) : (
+                                      <span
+                                        className={statusBadgeClass(r.inspection_status)}
+                                        style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}
+                                      >
+                                        {formatStatus(r.inspection_status)}
+                                      </span>
+                                    )}
                                   </td>
                                   <td style={{ padding: '12px' }}>
                                     <div className="dash-cell-title">{r.business_name || '—'}</div>

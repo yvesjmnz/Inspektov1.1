@@ -31,6 +31,153 @@ function statusBadgeClass(status) {
   return 'status-badge';
 }
 
+// Live inspection pacing hook, driven by inspection_reports.started_at / completed_at
+function useInspectionPace({ status, startedAt, completedAt }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!startedAt || String(status || '').toLowerCase().indexOf('in progress') === -1) return;
+
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [startedAt, status]);
+
+  const startMs = startedAt ? new Date(startedAt).getTime() : null;
+  const endMs =
+    String(status || '').toLowerCase().indexOf('in progress') !== -1 || !completedAt
+      ? now
+      : new Date(completedAt).getTime();
+
+  let elapsedMinutes = 0;
+  if (startMs && endMs && endMs > startMs) {
+    elapsedMinutes = Math.floor((endMs - startMs) / 60000);
+  }
+
+  const TARGET_MINUTES = 42;
+  const overByMinutes = Math.max(0, elapsedMinutes - TARGET_MINUTES);
+
+  let phase = 'green';
+  if (elapsedMinutes >= 42) {
+    phase = 'red';
+  } else if (elapsedMinutes >= 31) {
+    phase = 'yellow';
+  }
+
+  const rawPercent = (elapsedMinutes / TARGET_MINUTES) * 100;
+  const percentOfTarget = Math.max(0, Math.min(rawPercent, 160));
+
+  const color =
+    phase === 'green'
+      ? '#22c55e'
+      : phase === 'yellow'
+        ? '#eab308'
+        : '#ef4444';
+
+  return {
+    elapsedMinutes,
+    overByMinutes,
+    phase,
+    color,
+    percentOfTarget,
+  };
+}
+
+function InspectionPaceWidget({ status, startedAt, completedAt }) {
+  const { elapsedMinutes, overByMinutes, phase, color, percentOfTarget } = useInspectionPace({
+    status,
+    startedAt,
+    completedAt,
+  });
+
+  if (!startedAt) return null;
+
+  const label =
+    phase === 'green'
+      ? 'On Track'
+      : phase === 'yellow'
+        ? 'Approaching Limit'
+        : 'Target Exceeded';
+
+  const overLabel = overByMinutes > 0 ? `+${overByMinutes}m` : '';
+
+  return (
+    <div
+      className="pace-widget"
+      style={{
+        minWidth: 220,
+        padding: 12,
+        borderRadius: 12,
+        background: '#0f172a',
+        color: '#e5e7eb',
+        boxShadow: '0 8px 20px rgba(15,23,42,0.35)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: '#9ca3af',
+          marginBottom: 4,
+        }}
+      >
+        Pace
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 8,
+          marginBottom: 6,
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontSize: 22, fontWeight: 900, color: '#f9fafb' }}>{elapsedMinutes}m</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color }}>
+            {label} {overLabel && <span style={{ marginLeft: 4 }}>{overLabel}</span>}
+          </span>
+        </div>
+        <div
+          style={{
+            padding: '3px 8px',
+            borderRadius: 999,
+            border: `1px solid ${color}`,
+            fontSize: 11,
+            fontWeight: 800,
+            color,
+            background: 'rgba(15,23,42,0.7)',
+          }}
+        >
+          Target: 42m
+        </div>
+      </div>
+
+      <div
+        style={{
+          width: '100%',
+          height: 8,
+          borderRadius: 999,
+          background: '#020617',
+          overflow: 'hidden',
+        }}
+        aria-label="Inspection pacing progress"
+      >
+        <div
+          style={{
+            height: '100%',
+            width: `${percentOfTarget}%`,
+            maxWidth: '100%',
+            background: color,
+            transition: 'width 0.3s ease-out, background 0.2s ease-out',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function InspectorInspectionDetails() {
   const missionOrderId = useMemo(() => getMissionOrderIdFromQuery(), []);
 
@@ -39,6 +186,7 @@ export default function InspectorInspectionDetails() {
 
   const [missionOrder, setMissionOrder] = useState(null);
   const [complaint, setComplaint] = useState(null);
+  const [inspectionReport, setInspectionReport] = useState(null);
 
   const handleLogout = async () => {
     setError('');
@@ -111,12 +259,25 @@ export default function InspectorInspectionDetails() {
 
       if (cError) throw cError;
 
+      // Load latest inspection report for this inspector + mission order, if any.
+      const { data: reportRows, error: reportError } = await supabase
+        .from('inspection_reports')
+        .select('id, status, started_at, completed_at')
+        .eq('inspector_id', userId)
+        .eq('mission_order_id', missionOrderId)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (reportError) throw reportError;
+
       setMissionOrder(mo);
       setComplaint(c);
+      setInspectionReport(reportRows && reportRows.length ? reportRows[0] : null);
     } catch (e) {
       setError(e?.message || 'Failed to load inspection details.');
       setMissionOrder(null);
       setComplaint(null);
+      setInspectionReport(null);
     } finally {
       setLoading(false);
     }
@@ -166,7 +327,14 @@ export default function InspectorInspectionDetails() {
               <h2 className="dash-title">Inspection Details</h2>
               <p className="dash-subtitle">Mission order + business details for your assigned inspection.</p>
             </div>
-            <div className="dash-actions">
+            <div className="dash-actions" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {inspectionReport?.started_at && String(inspectionReport?.status || '').toLowerCase().includes('in progress') ? (
+                <InspectionPaceWidget
+                  status={inspectionReport.status}
+                  startedAt={inspectionReport.started_at}
+                  completedAt={inspectionReport.completed_at}
+                />
+              ) : null}
               <button className="dash-logout" type="button" onClick={handleLogout}>
                 Logout
               </button>
