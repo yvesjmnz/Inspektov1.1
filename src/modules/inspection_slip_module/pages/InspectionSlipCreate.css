@@ -121,6 +121,140 @@
   transform: translateY(-1px);
 }
 
+/* Camera preview */
+.is-camera-shell{
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: fit-content; /* shrink-wrap to preview width */
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+/* Ensure the shell doesn't expand due to flex/grid parents */
+.is-camera-shell{
+  flex: 0 0 auto;
+}
+
+.is-camera-preview{
+  width: 520px; /* fixed so the preview doesn't stretch to the row width */
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b1220;
+  border: 1px solid #e2e8f0;
+  position: relative; /* anchor overlay buttons */
+}
+
+.is-camera-video{
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain; /* show full height; switch to cover if you prefer fill */
+  object-position: center;
+}
+
+.is-camera-switch{
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(15,23,42,0.55);
+  cursor: pointer;
+  z-index: 3;
+}
+
+.is-camera-switch:hover{
+  background: rgba(15,23,42,0.75);
+}
+
+.is-camera-shutter{
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  border: 2px solid rgba(255,255,255,0.55);
+  background: #2563eb; /* blue */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 3;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.35);
+}
+
+.is-camera-shutter:hover{
+  background: #1d4ed8;
+}
+
+.is-camera-shutter:disabled,
+.is-camera-switch:disabled{
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.is-camera-shutter:focus-visible,
+.is-camera-switch:focus-visible{
+  outline: none;
+  box-shadow: 0 0 0 3px var(--is-focus);
+}
+
+/* Evidence thumbnail + delete button */
+.is-thumb{
+  position: relative;
+}
+
+.is-thumb-delete{
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.35);
+  background: rgba(15,23,42,0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  font-weight: 900;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.is-thumb-delete > *{
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+}
+
+.is-thumb-delete:hover{
+  background: rgba(15,23,42,0.75);
+}
+
+.is-thumb-delete:focus-visible{
+  outline: none;
+  box-shadow: 0 0 0 3px var(--is-focus);
+}
+
 /* Signature */
 .is-sign-wrap{
   position: relative;

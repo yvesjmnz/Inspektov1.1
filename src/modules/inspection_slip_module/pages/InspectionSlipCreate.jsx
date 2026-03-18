@@ -1465,9 +1465,25 @@ export default function InspectionSlipCreate() {
             </div>
 
             <div className="mo-actions">
-              <a className="mo-link" href="/dashboard/inspector">
-                Back
-              </a>
+              {completionKnown ? (
+                <span
+                  className="mo-link"
+                  aria-disabled="true"
+                  title="Back is disabled once the inspection has started to protect data integrity."
+                  style={{
+                    opacity: 0.55,
+                    cursor: 'not-allowed',
+                    pointerEvents: 'none',
+                    userSelect: 'none',
+                  }}
+                >
+                  Back
+                </span>
+              ) : (
+                <a className="mo-link" href="/dashboard/inspector">
+                  Back
+                </a>
+              )}
               <button
                 type="button"
                 className="mo-btn mo-btn-secondary"
@@ -2241,7 +2257,37 @@ export default function InspectionSlipCreate() {
                           marginBottom: 10,
                         }}
                       >
-                        <video ref={videoRef} playsInline muted autoPlay style={{ width: '100%', height: 260, objectFit: 'cover' }} />
+                        <div className="is-camera-shell">
+                          <div className="is-camera-preview">
+                            <video ref={videoRef} playsInline muted autoPlay className="is-camera-video" />
+
+                            <button
+                              type="button"
+                              onClick={switchCamera}
+                              disabled={cameraBusy}
+                              className="is-camera-switch"
+                              aria-label="Switch Camera"
+                              title="Switch Camera"
+                            >
+                              <img src="/ui_icons/switch-camera.png" alt="Switch" style={{ width: 18, height: 18 }} />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={captureFromCamera}
+                              disabled={cameraBusy}
+                              className="is-camera-shutter"
+                              aria-label="Capture photo"
+                              title="Capture"
+                            >
+                              <img
+                                src="/ui_icons/camera.png"
+                                alt="Capture"
+                                style={{ width: 26, height: 26, filter: 'invert(1) brightness(2) contrast(100%)' }}
+                              />
+                            </button>
+                          </div>
+                        </div>
 
                         <div
                           style={{
