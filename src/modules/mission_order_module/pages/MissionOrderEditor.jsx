@@ -526,7 +526,8 @@ export default function MissionOrderEditor() {
   }, [assignedOrdinanceIds, ordinances]);
 
   const canSave = !loading && !!missionOrderId && !isReadOnly;
-  const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection;
+  const hasGeneratedDocx = !!missionOrder?.generated_docx_url;
+  const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection && hasGeneratedDocx;
   const isDraft = statusLower === 'draft';
   // Allow generating an UNSIGNED doc even after submit (issued), so the director can see the latest draft output.
   // Director approval will overwrite it with the SIGNED template automatically.
@@ -568,6 +569,13 @@ export default function MissionOrderEditor() {
   const handleSubmitToDirector = async () => {
     setError('');
     setToast('');
+
+    // Enforce: document must be generated before submission.
+    if (!missionOrder?.generated_docx_url) {
+      setError('Please generate the document (DOCX) before submitting.');
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -606,6 +614,24 @@ export default function MissionOrderEditor() {
       }
 
       setToast('Submitted');
+
+      // Close this window/tab to signal the Head Inspector is finished creating.
+      // If the browser blocks it (not opened by script), fall back to navigating back to dashboard.
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch {
+          // ignore
+        }
+        // If still open, navigate away.
+        try {
+          if (!window.closed) {
+            window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
+          }
+        } catch {
+          // ignore
+        }
+      }, 250);
     } catch (e) {
       setError(e?.message || 'Failed to submit to Director.');
     } finally {
@@ -1180,7 +1206,15 @@ export default function MissionOrderEditor() {
                         onClick={handleSubmitToDirector}
                         disabled={!canSubmit || submitting}
                         style={{ background: '#0b2249', color: '#fff', border: '1px solid #0b2249' }}
-                        title={assignedInspectorIds.length === 0 ? 'Assign at least one inspector.' : !dateOfInspection ? 'Set the date of inspection.' : 'Submit to Director'}
+                        title={
+                          assignedInspectorIds.length === 0
+                            ? 'Assign at least one inspector.'
+                            : !dateOfInspection
+                              ? 'Set the date of inspection.'
+                              : !missionOrder?.generated_docx_url
+                                ? 'Generate the document (DOCX) before submitting.'
+                                : 'Submit to Director'
+                        }
                       >
                         {submitting ? 'Submitting…' : 'Submit'}
                       </button>

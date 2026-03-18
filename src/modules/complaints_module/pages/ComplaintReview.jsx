@@ -132,6 +132,21 @@ function getComplaintIdFromQuery() {
   return params.get('id');
 }
 
+function formatDatePipe(isoString) {
+  if (!isoString) return '—';
+  const date = new Date(isoString);
+  const datePart = date.toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+  const timePart = date.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `${datePart} | ${timePart}`;
+}
+
 export default function ComplaintReview() {
   const complaintId = useMemo(() => getComplaintIdFromQuery(), []);
 
@@ -150,6 +165,9 @@ export default function ComplaintReview() {
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
 
+  const [showGeneralCommentsEditor, setShowGeneralCommentsEditor] = useState(false);
+  const [showRightCommentsEditor, setShowRightCommentsEditor] = useState(false);
+
   // Determine which tab the user came from (queue or history)
   const [source, setSource] = useState('queue');
   useEffect(() => {
@@ -162,8 +180,6 @@ export default function ComplaintReview() {
   const handleCopyId = () => {
     if (complaint?.id) {
       navigator.clipboard.writeText(complaint.id);
-      setCopiedId(true);
-      setTimeout(() => setCopiedId(false), 2000);
     }
   };
 
@@ -392,43 +408,58 @@ export default function ComplaintReview() {
           {/* Content */}
           <div className="dash-maincol">
             <div className="dash-card">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
-                {/* Back Button - Top Left */}
-                <a
-                  href={source === 'history' ? '/dashboard/director?tab=history' : '/dashboard/director?tab=queue'}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 12px',
-                    background: 'transparent',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 8,
-                    color: '#0f172a',
-                    fontWeight: 700,
-                    fontSize: 14,
-                    textDecoration: 'none',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#f1f5f9';
-                    e.currentTarget.style.borderColor = '#94a3b8';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'transparent';
-                    e.currentTarget.style.borderColor = '#cbd5e1';
-                  }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
-                    <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Back to {source === 'history' ? 'Complaint History' : 'Review Complaints'}
-                </a>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', flex: '0 0 auto' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.location.assign(source === 'history' ? '/dashboard/director?tab=history' : '/dashboard/director?tab=queue');
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '6px 10px',
+                        background: 'transparent',
+                        border: 'none',
+                        borderRadius: 8,
+                        color: '#334155',
+                        fontWeight: 800,
+                        fontSize: 14,
+                        textDecoration: 'none',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s ease, color 0.2s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f1f5f9';
+                        e.currentTarget.style.color = '#0f172a';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = '#334155';
+                      }}
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Back
+                    </button>
+                  </div>
+
+                  <span aria-hidden="true" style={{ width: 1, height: 36, background: '#e2e8f0', display: 'inline-block', marginTop: 2 }} />
+
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 1000, fontSize: 20, color: '#0f172a' }}>Complaint Review</div>
+                    <div style={{ color: '#475569', fontWeight: 800, marginTop: 6, fontSize: 14 }}>
+                      {complaint?.business_name || '—'}
+                    </div>
+                  </div>
+                </div>
 
                 {/* Action Buttons - Top Right (Only show if from queue tab) */}
-                {source !== 'history' && (
-                  <div style={{ display: 'flex', gap: 10 }}>
+                {source !== 'history' ? (
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button
                       type="button"
                       className="dash-btn"
@@ -450,48 +481,10 @@ export default function ComplaintReview() {
                       {savingDecision ? 'Saving…' : 'Decline'}
                     </button>
                   </div>
-                )}
+                ) : null}
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
-                <h2 className="dash-title" style={{ margin: 0 }}>Complaint Review</h2>
-                {/* Complaint ID - Copyable Chip - Smaller */}
-                <button
-                  type="button"
-                  onClick={handleCopyId}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 8px',
-                    background: '#f1f5f9',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 4,
-                    color: '#0f172a',
-                    fontWeight: 700,
-                    fontSize: 11,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#e2e8f0';
-                    e.currentTarget.style.borderColor = '#94a3b8';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = '#f1f5f9';
-                    e.currentTarget.style.borderColor = '#cbd5e1';
-                  }}
-                  title="Click to copy Complaint ID"
-                >
-                  <span style={{ fontSize: 9, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.3px' }}>ID</span>
-                  <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{complaint?.id ? String(complaint.id).slice(0, 8) + '…' : 'Loading…'}</span>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
-                    <path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-                {copiedId && <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 700 }}>✓ Copied!</div>}
-              </div>
-
+              
               {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
               {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
               {declineCommentError ? <div className="dash-alert dash-alert-error">{declineCommentError}</div> : null}
@@ -501,223 +494,300 @@ export default function ComplaintReview() {
               ) : !complaint ? (
                 <div className="dash-alert dash-alert-error">No complaint found.</div>
               ) : (
-                <div style={{ display: 'grid', gap: 16, marginTop: 16 }}>
-                  {/* Decision Support Indicators - Only show in queue tab */}
-                  {source !== 'history' && (() => {
-                    const authenticity = getAuthenticityAssessment(complaint.authenticity_level);
-                    const location = getLocationVerificationStatus(complaint.tags);
-                    const evidence = getEvidenceQuality(complaint.image_urls);
-                    const suggestion = getSuggestedAction(complaint);
-                    const actionStyle = getActionBadgeStyle(suggestion.action);
-
-                    return (
-                      <div style={{
-                        background: '#f0f9ff',
-                        border: '1px solid #bfdbfe',
-                        borderRadius: 12,
-                        padding: 16,
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, alignItems: 'start', marginTop: 16 }}>
+                  {/* LEFT COLUMN */}
+                  <div style={{ display: 'grid', gap: 16, alignSelf: 'start' }}>
+                    {/* Summary / Details (MO Editor-style blue header card) */}
+                    <div
+                      id="complaint-summary-ribbon"
+                      style={{
+                        marginBottom: 0,
                         display: 'grid',
-                        gap: 12,
-                      }}>
-                        {/* Header */}
-                        <div style={{ fontSize: 13, fontWeight: 800, color: '#1e40af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                          Decision Support
-                        </div>
+                        gridTemplateColumns: '1fr',
+                        gap: 14,
+                        padding: '20px 22px',
+                        border: '1px solid #0b2249',
+                        borderRadius: 14,
+                        background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                        color: '#fff',
+                        boxShadow: '0 8px 16px rgba(2,6,23,0.25)',
+                        position: 'relative',
+                      }}
+                    >
+                      <style>{`
+#complaint-summary-ribbon span[aria-hidden="true"] { color: #fff !important; opacity: 0.95; }
+#complaint-summary-ribbon span[aria-hidden="true"] svg path { fill: #fff !important; stroke: #fff !important; }
+`}</style>
 
-                        {/* Metrics Grid */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-                          {/* Authenticity Score */}
-                          <div style={{
-                            background: authenticity.bgColor,
-                            border: `1px solid ${authenticity.borderColor}`,
-                            borderRadius: 8,
-                            padding: 12,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 6,
-                          }}>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: authenticity.color, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                              {authenticity.icon} Credibility
+                      {/* Top row: Business name + ID chip + urgency/status */}
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap' }}>
+                        <div style={{ minWidth: 0, flex: '1 1 620px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: 17, fontWeight: 1000, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+                              {complaint.business_name || '—'}
                             </div>
-                            <div style={{ fontSize: 14, fontWeight: 900, color: authenticity.color }}>
-                              {authenticity.label}
-                            </div>
-                            <div style={{ fontSize: 11, color: authenticity.color, fontWeight: 600 }}>
-                              Score: {complaint.authenticity_level || 0}
-                            </div>
+
+                            <button
+                              type="button"
+                              onClick={handleCopyId}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                padding: '4px 8px',
+                                background: 'rgba(255,255,255,0.12)',
+                                border: '1px solid rgba(255,255,255,0.18)',
+                                borderRadius: 999,
+                                color: '#fff',
+                                fontWeight: 900,
+                                fontSize: 11,
+                                cursor: 'pointer',
+                              }}
+                              title="Click to copy Complaint ID"
+                            >
+                              <span style={{ fontSize: 9, fontWeight: 1000, color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>ID</span>
+                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{complaint?.id ? String(complaint.id).slice(0, 8) + '…' : '—'}</span>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }} aria-hidden="true">
+                                <path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
                           </div>
 
-                          {/* Location Verification */}
-                          {location && (
-                            <div style={{
-                              background: location.bgColor,
-                              border: `1px solid ${location.borderColor}`,
-                              borderRadius: 8,
-                              padding: 12,
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: 6,
-                            }}>
-                              <div style={{ fontSize: 11, fontWeight: 800, color: location.color, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                                {location.icon} Location
-                              </div>
-                              <div style={{ fontSize: 14, fontWeight: 900, color: location.color }}>
-                                {location.label}
-                              </div>
-                              <div style={{ fontSize: 11, color: location.color, fontWeight: 600 }}>
-                                {location.description}
-                              </div>
+                          <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                            <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95, paddingTop: 1 }}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 22s8-4.5 8-10V6l-8-4-8 4v6c0 5.5 8 10 8 10Z" fill="#0b2249"/>
+                              </svg>
+                            </span>
+                            <div
+                              style={{
+                                fontSize: 12.5,
+                                fontWeight: 800,
+                                color: 'rgba(255,255,255,0.9)',
+                                lineHeight: 1.35,
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {complaint.business_address || '—'}
                             </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', gap: 10, flex: '0 0 auto' }}>
+                          {source === 'history' ? (
+                            <span className={statusBadgeClass(complaint?.status)} style={{ fontWeight: 900, whiteSpace: 'nowrap' }}>
+                              {formatStatus(complaint?.status) ?? '—'}
+                            </span>
+                          ) : (
+                            <span
+                              className="status-badge"
+                              style={{
+                                ...getUrgencyStyle(complaint?.authenticity_level).badge,
+                                fontWeight: 900,
+                                fontSize: 12,
+                                padding: '6px 10px',
+                                borderRadius: 999,
+                                display: 'inline-block',
+                                whiteSpace: 'nowrap',
+                                // keep original urgency colors (no forced white pill)
+                                border: '1px solid rgba(0,0,0,0.08)',
+                              }}
+                            >
+                              {getUrgencyText(complaint?.authenticity_level)}
+                            </span>
                           )}
-
-                          {/* Evidence Quality */}
-                          <div style={{
-                            background: evidence.bgColor,
-                            border: `1px solid ${evidence.borderColor}`,
-                            borderRadius: 8,
-                            padding: 12,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 6,
-                          }}>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: evidence.color, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                              {evidence.icon} Evidence
-                            </div>
-                            <div style={{ fontSize: 14, fontWeight: 900, color: evidence.color }}>
-                              {evidence.label}
-                            </div>
-                            <div style={{ fontSize: 11, color: evidence.color, fontWeight: 600 }}>
-                              {evidence.description}
-                            </div>
-                          </div>
                         </div>
+                      </div>
 
-                        {/* Suggested Action */}
-                        <div style={{
-                          background: actionStyle.background,
-                          border: actionStyle.border,
-                          borderRadius: 8,
-                          padding: 12,
-                          display: 'flex',
+                      {/* Row: labels */}
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                          gap: 22,
                           alignItems: 'center',
-                          gap: 12,
-                        }}>
-                          <div style={{ fontSize: 24, fontWeight: 900 }}>
-                            {actionStyle.icon}
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 4 }}>
-                              Suggested Action
-                            </div>
-                            <div style={{ fontSize: 16, fontWeight: 900, textTransform: 'capitalize', marginBottom: 4 }}>
-                              {suggestion.action}
-                            </div>
-                            <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.8 }}>
-                              Confidence: {formatConfidence(suggestion.confidence)}
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, opacity: 0.7 }}>
-                            {suggestion.reasons.slice(0, 2).map((reason, idx) => (
-                              <div key={idx}>{reason}</div>
-                            ))}
-                          </div>
+                          marginTop: 10,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95 }}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M12 12c2.761 0 5-2.686 5-6s-2.239-5-5-5-5 2.686-5 6 2.239 5 5 5Zm0 2c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5Z" fill="#0b2249"/>
+                            </svg>
+                          </span>
+                          <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Reported By</span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95 }}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 1 1 2 0v1Zm13 7H4v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9ZM5 7h14V6H5v1Z" fill="#0b2249"/>
+                            </svg>
+                          </span>
+                          <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Date Filed</span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95 }}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" fill="#0b2249"/>
+                            </svg>
+                          </span>
+                          <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Violations</span>
                         </div>
                       </div>
-                    );
-                  })()}
 
-                  {/* Professional Header Section */}
-                  <div style={{
-                    background: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 12,
-                    padding: 24,
-                    position: 'relative',
-                  }}>
-                    {/* Badge - Top Right (Urgency for queue, Status for history) */}
-                    <div style={{ position: 'absolute', top: 24, right: 24 }}>
-                      {source === 'history' ? (
-                        <span className={statusBadgeClass(complaint?.status)} style={{ fontWeight: 800, fontSize: 14, padding: '8px 14px' }}>
-                          {formatStatus(complaint?.status) ?? '—'}
-                        </span>
-                      ) : (
-                        <span className="status-badge" style={{ ...getUrgencyStyle(complaint?.authenticity_level).badge, fontWeight: 800, fontSize: 12, padding: '6px 10px', borderRadius: 999, display: 'inline-block', whiteSpace: 'nowrap', border: '1px solid rgba(0,0,0,0.08)' }}>
-                          {getUrgencyText(complaint?.authenticity_level)}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Business Name - Large Title */}
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 18, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        {complaint.business_name || '—'}
+                      {/* Row: values */}
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                          gap: 22,
+                          alignItems: 'center',
+                          marginTop: -2,
+                        }}
+                      >
+                        <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 13.5 }}>{complaint.reporter_email || '—'}</div>
+                        <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 13.5 }}>{formatDatePipe(complaint.created_at)}</div>
+                        <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 13.5 }}>
+                          {(() => {
+                            const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
+                            const total = groups.reduce((acc, g) => acc + (Array.isArray(g.subs) ? g.subs.length : 0), 0);
+                            const cats = groups.length;
+                            if (!total) return '—';
+                            return `${total} across ${cats} ${cats === 1 ? 'category' : 'categories'}`;
+                          })()}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Address with Icon */}
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'flex-start' }}>
-                      <span style={{ fontSize: 18, marginTop: -2 }}>📍</span>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
-                        {complaint.business_address || '—'}
+                    {/* Complaint Description + Violations (simplified dropdown tags) */}
+                    <div style={{
+                      background: '#ffffff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 12,
+                      padding: 16,
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                        Complaint Description
                       </div>
-                    </div>
 
-                    {/* Divider */}
-                    <div style={{ height: 1, background: '#e2e8f0', margin: '20px 0' }} />
-
-                    {/* Details Grid - Form style: labels on left, values on right */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: '16px 24px', alignItems: 'start' }}>
-                      {/* Reported By Label */}
-                      <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Reported By</div>
-                      {/* Reported By Value */}
-                      <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>{complaint.reporter_email || '—'}</div>
-
-                      {/* Submitted Label */}
-                      <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</div>
-                      {/* Submitted Value */}
-                      <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>{complaint.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}</div>
-
-                      {/* Description Label */}
-                      <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Description</div>
-                      {/* Description Value */}
-                      <div style={{ color: '#0f172a', whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 15 }}>
+                      <div style={{ marginTop: 12, color: '#0f172a', whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 15 }}>
                         {complaint.complaint_description || '—'}
                       </div>
 
-                      {/* Complaint Category Label */}
-                      <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaint Category</div>
-                      {/* Complaint Category Value */}
-                      <div>
+                      {/* Violations: compact dropdown tags (full category names) */}
+                      <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                         {(() => {
                           const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
-                          return groups.length > 0 ? (
-                            <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
-                              {groups.map((g) => (
-                                <li key={g.category} style={{ margin: '4px 0' }}>
-                                  <span style={{ fontWeight: 800 }}>{String(g.category).replace(/\s*&\s*/g, ' and ')}</span>
-                                  {Array.isArray(g.subs) && g.subs.length > 0 ? (
-                                    <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
-                                      {g.subs.map((s) => (
-                                        <li key={s} style={{ margin: '2px 0' }}>{s}</li>
-                                      ))}
-                                    </ul>
-                                  ) : null}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <div style={{ color: '#64748b', fontWeight: 700 }}>—</div>
-                          );
+                          if (!groups.length) return null;
+
+                          return groups.map((g) => (
+                            <details key={g.category} style={{ position: 'relative' }}>
+                              <summary
+                                style={{
+                                  cursor: 'pointer',
+                                  listStyle: 'none',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  padding: '4px 8px',
+                                  borderRadius: 10,
+                                  border: '1px solid #e2e8f0',
+                                  background: '#f1f5f9',
+                                  color: '#0f172a',
+                                  fontWeight: 900,
+                                  fontSize: 11,
+                                  maxWidth: 520,
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  boxShadow: '0 1px 0 rgba(2,6,23,0.03)',
+                                }}
+                                title={String(g.category)}
+                              >
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {String(g.category).replace(/\s*&\s*/g, ' and ')}
+                                </span>
+                                <span
+                                  style={{
+                                    marginLeft: 2,
+                                    color: '#475569',
+                                    fontWeight: 1000,
+                                    fontSize: 11,
+                                    flex: '0 0 auto',
+                                    background: '#e2e8f0',
+                                    borderRadius: 8,
+                                    padding: '0px 5px',
+                                    lineHeight: '16px',
+                                    height: 16,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                  }}
+                                >
+                                  {Array.isArray(g.subs) ? g.subs.length : 0}
+                                </span>
+                              </summary>
+
+                              {Array.isArray(g.subs) && g.subs.length > 0 ? (
+                                <div
+                                  style={{
+                                    position: 'absolute',
+                                    left: 0,
+                                    top: 'calc(100% + 8px)',
+                                    zIndex: 20,
+                                    minWidth: 260,
+                                    maxWidth: 520,
+                                    background: '#ffffff',
+                                    border: '1px solid #e2e8f0',
+                                    borderRadius: 14,
+                                    boxShadow: '0 14px 34px rgba(2,6,23,0.18)',
+                                    padding: 10,
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                    {g.subs.map((s) => (
+                                      <span
+                                        key={s}
+                                        style={{
+                                          background: '#f1f5f9',
+                                          border: '1px solid #e2e8f0',
+                                          borderRadius: 10,
+                                          padding: '5px 7px',
+                                          fontWeight: 900,
+                                          color: '#0f172a',
+                                          fontSize: 11,
+                                          boxShadow: '0 1px 0 rgba(2,6,23,0.03)',
+                                        }}
+                                      >
+                                        {s}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </details>
+                          ));
                         })()}
                       </div>
+                    </div>
 
-                      {/* Evidence Label */}
-                      <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Evidence</div>
-                      {/* Evidence Value */}
-                      <div>
+                    {/* Submitted Evidence */}
+                    <div style={{
+                      background: '#ffffff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 12,
+                      padding: 16,
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                        Submitted Evidence
+                      </div>
+                      <div style={{ marginTop: 12 }}>
                         {Array.isArray(complaint.image_urls) && complaint.image_urls.length > 0 ? (
                           <div style={{ display: 'grid', gap: 8 }}>
-                            {/* Hero image - larger preview */}
                             <div style={{ position: 'relative', width: 320, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 240 }}>
                               <img
                                 src={complaint.image_urls[evidenceIndex]}
@@ -800,7 +870,7 @@ export default function ComplaintReview() {
                                 {evidenceIndex + 1} / {complaint.image_urls.length}
                               </div>
                             </div>
-                            {/* Thumbnails - compact */}
+
                             {complaint.image_urls.length > 1 ? (
                               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                 {complaint.image_urls.map((url, idx) => (
@@ -828,149 +898,353 @@ export default function ComplaintReview() {
                           <div style={{ color: '#64748b', fontWeight: 700, fontSize: 13 }}>No images</div>
                         )}
                       </div>
-
-                      {/* Tags removed for history view */}
                     </div>
-                  </div>
 
-                  {/* General Comments Card */}
-                  {source === 'history' ? (
-                    <div style={{
-                      background: '#f8fafc',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 16,
-                      boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
-                      padding: 16,
-                    }}>
-                      <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 16, marginBottom: 12 }}>
-                        General Comments
-                      </div>
+                    {/* General Comments moved to right column under Case Evaluation */}
+                    {source === 'history' ? (
                       <div style={{
-                        background: '#ffffff',
+                        background: '#f8fafc',
                         border: '1px solid #e2e8f0',
-                        borderRadius: 12,
-                        padding: 12,
-                        color: '#0f172a',
-                        fontSize: 14,
-                        lineHeight: 1.6,
-                        whiteSpace: 'pre-wrap',
-                        minHeight: 110,
+                        borderRadius: 16,
+                        boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
+                        padding: 16,
                       }}>
-                        {declineComment || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No comments</span>}
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{
-                      background: '#f8fafc',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 16,
-                      boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
-                      padding: 16,
-                    }}>
-                      <style>{`
-                        textarea:focus {
-                          border-color: #2563eb !important;
-                          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
-                        }
-                      `}</style>
-                      
-                      {/* Title */}
-                      <label htmlFor="declineComment" style={{ display: 'block', marginBottom: 12 }}>
-                        <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 16, marginBottom: 8 }}>
+                        <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 16, marginBottom: 12 }}>
                           General Comments
                         </div>
-                        
-                        {/* Rule Hints - Small rows */}
-                        <div style={{ display: 'grid', gap: 4 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                            <span style={{ color: '#dc2626', fontWeight: 800 }}>•</span> Required if Declining
-                          </div>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                            <span style={{ color: '#22c55e', fontWeight: 800 }}>•</span> Optional if Approving
-                          </div>
-                        </div>
-                      </label>
-
-                      {/* Decline Templates - Quick Select Buttons */}
-                      <div style={{ marginBottom: 12 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                          Quick Decline Reasons
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
-                          {DECLINE_TEMPLATES.map((template) => (
-                            <button
-                              key={template.id}
-                              type="button"
-                              onClick={() => setDeclineComment(template.text)}
-                              style={{
-                                padding: '8px 12px',
-                                background: '#ffffff',
-                                border: '1px solid #cbd5e1',
-                                borderRadius: 8,
-                                color: '#0f172a',
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                transition: 'all 0.2s ease',
-                                textAlign: 'left',
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.background = '#f1f5f9';
-                                e.currentTarget.style.borderColor = '#94a3b8';
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.background = '#ffffff';
-                                e.currentTarget.style.borderColor = '#cbd5e1';
-                              }}
-                              title={template.text}
-                            >
-                              {template.label}
-                            </button>
-                          ))}
+                        <div style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          padding: 12,
+                          color: '#0f172a',
+                          fontSize: 14,
+                          lineHeight: 1.6,
+                          whiteSpace: 'pre-wrap',
+                          minHeight: 110,
+                        }}>
+                          {declineComment || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No comments</span>}
                         </div>
                       </div>
+                    ) : null}
+                  </div>
 
-                      {/* Textarea */}
-                      <textarea
-                        id="declineComment"
-                        value={declineComment}
-                        onChange={(e) => setDeclineComment(e.target.value)}
-                        placeholder="Provide the reason for declining, or optional instructions if approving…"
-                        disabled={loading || savingDecision}
-                        style={{
-                          width: '100%',
-                          minHeight: 110,
-                          borderRadius: 12,
-                          border: declineCommentError ? '1px solid #ef4444' : '1px solid #cbd5e1',
-                          background: '#fff',
-                          color: '#0f172a',
-                          padding: 12,
-                          outline: 'none',
-                          fontSize: 14,
-                          fontFamily: 'inherit',
-                          transition: 'all 0.2s ease',
-                          resize: 'vertical',
-                          marginTop: 8,
-                        }}
-                      />
+                  {/* RIGHT COLUMN */}
+                  <div style={{ display: 'grid', gap: 16, alignSelf: 'start', position: 'sticky', top: 14 }}>
+                    {/* Case Evaluation (Decision Support) */}
+                    {source !== 'history' ? (() => {
+                      const authenticity = getAuthenticityAssessment(complaint.authenticity_level);
+                      const location = getLocationVerificationStatus(complaint.tags);
+                      const evidence = getEvidenceQuality(complaint.image_urls);
+                      const suggestion = getSuggestedAction(complaint);
 
-                      {/* Validation Message - Only show when declining and empty */}
-                      {declineCommentError && (
+                      const statusText = (x) => {
+                        const s = String(x || '').toLowerCase();
+                        if (s.includes('very high') || s.includes('high') || s.includes('verified')) return 'VERIFIED';
+                        if (s.includes('minimal') || s.includes('review') || s.includes('low')) return 'REVIEW';
+                        return 'REVIEW';
+                      };
+
+                      const statusColor = (t) => (t === 'VERIFIED' ? '#16a34a' : '#f59e0b');
+
+                      const Row = ({ icon, title, left, right }) => (
                         <div style={{
-                          marginTop: 8,
-                          padding: 8,
-                          background: '#fee2e2',
-                          border: '1px solid #fecaca',
-                          borderRadius: 8,
-                          color: '#991b1b',
-                          fontSize: 12,
-                          fontWeight: 700,
+                          display: 'grid',
+                          gridTemplateColumns: '22px 1fr auto',
+                          gap: 10,
+                          alignItems: 'center',
+                          padding: '12px 0',
+                          borderTop: '1px solid #e2e8f0',
                         }}>
-                          {declineCommentError}
+                          <div style={{ width: 22, height: 22, display: 'grid', placeItems: 'center' }}>{icon}</div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 900, color: '#0f172a' }}>{title}</div>
+                            <div style={{ marginTop: 2, color: '#64748b', fontWeight: 700, fontSize: 13 }}>{left}</div>
+                          </div>
+                          <div style={{ fontWeight: 1000, letterSpacing: 0.6, color: statusColor(right), fontSize: 13 }}>{right}</div>
                         </div>
-                      )}
-                    </div>
-                  )}
+                      );
+
+                      const verifiedIcon = (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                          <path d="M9 12l2 2 4-4" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Z" stroke="#16a34a" strokeWidth="2" />
+                        </svg>
+                      );
+
+                      const warnIcon = (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                          <path d="M12 9v4" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" />
+                          <path d="M12 17h.01" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round" />
+                          <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" stroke="#f59e0b" strokeWidth="2" strokeLinejoin="round" />
+                        </svg>
+                      );
+
+                      const shieldIcon = (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                          <path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="#1e40af" strokeWidth="2" strokeLinejoin="round" />
+                        </svg>
+                      );
+
+                      const recommendationText = String(suggestion?.action || '').toLowerCase().includes('approve')
+                        ? 'Approve for Inspection'
+                        : String(suggestion?.action || '').toLowerCase().includes('decline')
+                          ? 'Decline'
+                          : String(suggestion?.action || 'Review');
+
+                      const authStatus = statusText(authenticity?.label);
+                      const locStatus = statusText(location?.label);
+                      const evStatus = statusText(evidence?.label);
+
+                      return (
+                        <div style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          overflow: 'hidden',
+                        }}>
+                          <div style={{
+                            padding: '14px 16px',
+                            borderBottom: '1px solid #e2e8f0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                          }}>
+                            {shieldIcon}
+                            <div style={{ fontSize: 13, fontWeight: 1000, color: '#0f172a', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                              Case Evaluation
+                            </div>
+                          </div>
+
+                          <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+                            <div style={{
+                              background: '#f8fafc',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: 12,
+                              padding: 14,
+                              display: 'grid',
+                              gridTemplateColumns: '56px 1fr',
+                              gap: 12,
+                              alignItems: 'center',
+                            }}>
+                              <div style={{
+                                width: 56,
+                                height: 56,
+                                borderRadius: 12,
+                                background: '#e0e7ff',
+                                display: 'grid',
+                                placeItems: 'center',
+                              }}>
+                                <div style={{
+                                  width: 34,
+                                  height: 34,
+                                  borderRadius: 999,
+                                  background: '#dbeafe',
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  border: '2px solid #2563eb',
+                                }}>
+                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                    <path d="M20 6 9 17l-5-5" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                </div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 1000, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                                  Recommendation
+                                </div>
+                                <div style={{ marginTop: 4, fontSize: 18, fontWeight: 1000, color: '#0f172a' }}>
+                                  {recommendationText}
+                                </div>
+                              </div>
+                            </div>
+
+                            <Row
+                              icon={authStatus === 'VERIFIED' ? verifiedIcon : warnIcon}
+                              title="Reporter Credibility"
+                              left={`Score: ${complaint.authenticity_level || 0}/100`}
+                              right={authStatus}
+                            />
+
+                            {location ? (
+                              <Row
+                                icon={locStatus === 'VERIFIED' ? verifiedIcon : warnIcon}
+                                title="Location Verification"
+                                left={location.description}
+                                right={locStatus}
+                              />
+                            ) : null}
+
+                            <Row
+                              icon={evStatus === 'VERIFIED' ? verifiedIcon : warnIcon}
+                              title="Evidence Sufficiency"
+                              left={evidence.description}
+                              right={evStatus}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })() : null}
+
+                    {/* Add Comments (below Case Evaluation) */}
+                    {source !== 'history' ? (
+                      <div style={{
+                        background: 'transparent',
+                        border: 'none',
+                        borderRadius: 0,
+                        boxShadow: 'none',
+                        padding: 0,
+                      }}>
+                        <style>{`
+                          textarea:focus {
+                            border-color: #2563eb !important;
+                            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+                          }
+                        `}</style>
+
+                        <button
+                          type="button"
+                          className="dash-btn"
+                          onClick={() => setShowRightCommentsEditor((v) => !v)}
+                          style={{
+                            width: '100%',
+                            background: '#0b2249',
+                            color: '#fff',
+                            padding: '14px 16px',
+                            fontSize: 15,
+                            fontWeight: 1000,
+                            borderRadius: 14,
+                            justifyContent: 'center',
+                            outline: 'none',
+                            boxShadow: 'none',
+                            border: 'none',
+                          }}
+                        >
+                          {showRightCommentsEditor ? 'Hide Comment Field' : 'Add Comment'}
+                        </button>
+
+                        <div
+                          style={{
+                            overflow: 'hidden',
+                            maxHeight: showRightCommentsEditor ? 520 : 0,
+                            opacity: showRightCommentsEditor ? 1 : 0,
+                            transform: showRightCommentsEditor ? 'translateY(0px)' : 'translateY(-6px)',
+                            transition: 'max-height 260ms ease, opacity 200ms ease, transform 200ms ease',
+                          }}
+                        >
+                          <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+                            <div style={{ marginTop: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                                Quick Decline Reasons
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                                {DECLINE_TEMPLATES.map((template) => (
+                                  <button
+                                    key={template.id}
+                                    type="button"
+                                    onClick={() => setDeclineComment(template.text)}
+                                    style={{
+                                      padding: '8px 12px',
+                                      background: '#ffffff',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: 8,
+                                      color: '#0f172a',
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      transition: 'all 0.2s ease',
+                                      textAlign: 'left',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.background = '#f1f5f9';
+                                      e.currentTarget.style.borderColor = '#94a3b8';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.background = '#ffffff';
+                                      e.currentTarget.style.borderColor = '#cbd5e1';
+                                    }}
+                                    title={template.text}
+                                  >
+                                    {template.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <textarea
+                              id="declineComment"
+                              value={declineComment}
+                              onChange={(e) => setDeclineComment(e.target.value)}
+                              placeholder="Provide the reason for declining, or optional instructions if approving…"
+                              disabled={loading || savingDecision}
+                              style={{
+                                width: '100%',
+                                minHeight: 110,
+                                borderRadius: 12,
+                                border: declineCommentError ? '1px solid #ef4444' : '1px solid #cbd5e1',
+                                background: '#fff',
+                                color: '#0f172a',
+                                padding: 12,
+                                outline: 'none',
+                                fontSize: 14,
+                                fontFamily: 'inherit',
+                                transition: 'all 0.2s ease',
+                                resize: 'vertical',
+                                marginTop: 12,
+                              }}
+                            />
+
+                            {declineCommentError && (
+                              <div style={{
+                                marginTop: 8,
+                                padding: 8,
+                                background: '#fee2e2',
+                                border: '1px solid #fecaca',
+                                borderRadius: 8,
+                                color: '#991b1b',
+                                fontSize: 12,
+                                fontWeight: 700,
+                              }}>
+                                {declineCommentError}
+                              </div>
+                            )}
+
+                            <div style={{ marginTop: 10, display: 'grid', gap: 4 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
+                                <span style={{ color: '#dc2626', fontWeight: 800 }}>•</span> Required if Declining
+                              </div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
+                                <span style={{ color: '#22c55e', fontWeight: 800 }}>•</span> Optional if Approving
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* Complaint History (layout placeholder) */}
+                    {(() => {
+                      const s = String(complaint?.status || '').toLowerCase();
+                      const showHistory = ['approved', 'pre-approved', 'pre_approved', 'jected'].includes(s);
+                      if (!showHistory) return null;
+
+                      return (
+                        <div style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          padding: 16,
+                        }}>
+                          <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                            Complaint History
+                          </div>
+                          <div style={{ marginTop: 12, color: '#64748b', fontWeight: 700, fontSize: 13 }}>
+                            —
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>
               )}
             </div>

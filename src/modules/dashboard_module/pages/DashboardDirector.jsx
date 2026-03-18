@@ -125,7 +125,17 @@ function getUrgencyStyle(urgency) {
 function formatDateNoSeconds(isoString) {
   if (!isoString) return '—';
   const date = new Date(isoString);
-  return date.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  // Example: "18 March 2026 | 04:36 PM"
+  const datePart = date.toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+  const timePart = date.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `${datePart} | ${timePart}`;
 }
 
 export default function DashboardDirector() {
