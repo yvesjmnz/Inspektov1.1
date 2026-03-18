@@ -496,11 +496,72 @@ export default function DashboardHeadInspector() {
 
     try {
       setLoading(true);
+      console.log('[CORE IDENTITY] Starting secretary document verification for mission order:', missionOrderId);
+
+      // 1) Convert file to base64 for Edge Function
+      const fileBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result;
+          if (typeof result === 'string') {
+            resolve(result.split(',')[1]); // Remove data:image/png;base64, prefix
+          } else {
+            reject(new Error('Failed to read file'));
+          }
+        };
+        reader.onerror = () => reject(new Error('File read error'));
+        reader.readAsDataURL(file);
+      });
+
+      console.log('[CORE IDENTITY] File converted to base64. Size:', fileBase64.length);
+
+      // 2) Call Supabase Edge Function for document verification
+      console.log('[CORE IDENTITY] Calling verify-secretary-document Edge Function');
+
+      const { data: verificationResult, error: verificationError } = await supabase.functions.invoke(
+        'verify-secretary-document',
+        {
+          body: {
+            missionOrderId,
+            fileBase64,
+            fileName: file.name,
+          },
+        }
+      );
+
+      if (verificationError) {
+        console.error('[CORE IDENTITY] Edge Function error:', verificationError);
+        throw verificationError;
+      }
+
+      console.log('[CORE IDENTITY] Document verification result:', verificationResult);
+
+      if (!verificationResult.success && verificationResult.error) {
+        setError(`Document verification failed: ${verificationResult.error}`);
+        return;
+      }
+
+      // Show verification warnings if any
+      if (verificationResult.warnings && verificationResult.warnings.length > 0) {
+        console.warn('[CORE IDENTITY] Document verification warnings:', verificationResult.warnings);
+      }
+
+      if (!verificationResult.success) {
+  console.log('[CORE IDENTITY] Document rejected due to low verification score');
+
+  setError(
+    `Document verification failed (${verificationResult.matchScore}%). ` +
+    `Please upload a valid mission order document.`
+  );
+
+  return; // 🚫 STOP here — no archiving
+}
+
+      console.log('[CORE IDENTITY] Document verification passed. Proceeding with upload.');
+
       const nowIso = new Date().toISOString();
 
-      // 1) Upload attachment to Supabase Storage
-      // Bucket name: 'mission-orders' (must exist in Supabase Storage)
-      // Path: mission-orders/<missionOrderId>/secretary-signed/<timestamp>_<filename>
+      // 3) Upload attachment to Supabase Storage
       const safeName = String(file.name || 'attachment')
         .replace(/[^a-zA-Z0-9._-]/g, '_')
         .slice(0, 120);
@@ -516,7 +577,7 @@ export default function DashboardHeadInspector() {
       const { data: publicUrlData } = supabase.storage.from('mission-orders').getPublicUrl(storagePath);
       const attachmentUrl = publicUrlData?.publicUrl || null;
 
-      // 2) Patch mission order as archived/complete + store attachment URL
+      // 4) Patch mission order as archived/complete + store attachment URL + verification result
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData?.user?.id || null;
 
@@ -527,6 +588,8 @@ export default function DashboardHeadInspector() {
         secretary_signed_attachment_url: attachmentUrl,
         secretary_signed_attachment_uploaded_at: nowIso,
         secretary_signed_attachment_uploaded_by: userId,
+        secretary_signed_attachment_verification_score: verificationResult.matchScore,
+        secretary_signed_attachment_verification_details: JSON.stringify(verificationResult.details),
       };
 
       const { error: updateError } = await supabase
@@ -536,7 +599,7 @@ export default function DashboardHeadInspector() {
 
       if (updateError) throw updateError;
 
-      // Optimistic local update so it disappears from Awaiting Signature and appears in History.
+      // Optimistic local update
       setComplaints((prev) =>
         (prev || []).map((r) =>
           r.mission_order_id === missionOrderId
@@ -550,8 +613,10 @@ export default function DashboardHeadInspector() {
         )
       );
 
-      setToast('Mission order archived (attachment uploaded).');
+      console.log('[CORE IDENTITY] Mission order archived successfully with verification score:', verificationResult.matchScore);
+      setToast(`Mission order archived (verification score: ${verificationResult.matchScore}%).`);
     } catch (e) {
+      console.error('[CORE IDENTITY] Error during document verification and archival:', e);
       setError(e?.message || 'Failed to archive mission order.');
     } finally {
       setLoading(false);
