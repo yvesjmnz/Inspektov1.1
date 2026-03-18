@@ -260,8 +260,14 @@
   border-radius: 10px;
   background: #2563eb;
   color: #fff;
-  font-weight: 800;
+  font-weight: 700 !important; /* uniform font-weight */
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  letter-spacing: 0.2px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
 
 .dash-btn-icon {
@@ -279,10 +285,27 @@
   cursor: not-allowed;
 }
 
-.dash-btn-success { background: #16a34a; }
+/* Reusable dark pill action for mission-order review controls */
+.dash-btn.mo-action {
+  background: #08204a !important;
+  color: #ffffff !important;
+  border-radius: 999px !important;
+  padding: 0 18px !important;
+  min-width: 96px !important;
+  height: 40px !important;
+  font-weight: 700 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-transform: lowercase !important;
+  letter-spacing: 0.2px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+}
+
+.dash-btn-success { background: #16a34a; text-transform: lowercase; font-weight: 700; }
 .dash-btn-success:hover { background: #15803d; }
 
-.dash-btn-danger { background: #ef4444; }
+.dash-btn-danger { background: #ef4444; text-transform: lowercase; font-weight: 700; }
 .dash-btn-danger:hover { background: #dc2626; }
 
 .dash-row-actions {

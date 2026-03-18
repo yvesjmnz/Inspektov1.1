@@ -551,7 +551,19 @@ export default function MissionOrderReview() {
                         type="button"
                         className="dash-btn"
                         onClick={() => setComplaintExpanded((v) => !v)}
-                        style={{ background: '#fff', border: '1px solid #e2e8f0' }}
+                        style={{
+                          background: '#08204a',
+                          color: '#fff',
+                          borderRadius: 999,
+                          padding: '0 18px',
+                          minWidth: 96,
+                          height: 40,
+                          fontWeight: 900,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          border: 'none'
+                        }}
                       >
                         {complaintExpanded ? 'Hide Details' : 'Show Details'}
                       </button>
@@ -576,7 +588,25 @@ export default function MissionOrderReview() {
                         </div>
                         {complaint?.id ? (
                           <div style={{ marginTop: 12 }}>
-                            <a className="dash-btn" href={`/complaints/view?id=${complaint.id}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                            <a
+                              className="dash-btn"
+                              href={`/complaints/view?id=${complaint.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                textDecoration: 'none',
+                                background: '#08204a',
+                                color: '#fff',
+                                borderRadius: 999,
+                                padding: '0 18px',
+                                minWidth: 96,
+                                height: 40,
+                                fontWeight: 900,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
                               Open Full Complaint
                             </a>
                           </div>
@@ -601,7 +631,19 @@ export default function MissionOrderReview() {
                           setDocxPreviewOpen((v) => !v);
                           setDocxPreviewError(false);
                         }}
-                        style={{ background: '#fff', border: '1px solid #e2e8f0' }}
+                        style={{
+                          background: '#08204a',
+                          color: '#fff',
+                          borderRadius: 999,
+                          padding: '0 18px',
+                          minWidth: 96,
+                          height: 40,
+                          fontWeight: 900,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          border: 'none'
+                        }}
                       >
                         {docxPreviewOpen ? 'Hide Preview' : 'Show Preview'}
                       </button>

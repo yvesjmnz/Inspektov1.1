@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getHeadInspectorMetrics } from '../../../lib/reports/metricsService';
+import { supabase } from '../../../lib/supabase';
 import './Dashboard.css';
 
 function formatDuration(hours) {
@@ -30,6 +31,7 @@ export default function HeadInspectorReports() {
   const [error, setError] = useState('');
   const [dateRange, setDateRange] = useState(null);
   const [expandedSection, setExpandedSection] = useState('overview');
+  const [inspector1Name, setInspector1Name] = useState(null);
 
   useEffect(() => {
     const loadMetrics = async () => {
@@ -38,6 +40,28 @@ export default function HeadInspectorReports() {
       try {
         const data = await getHeadInspectorMetrics(dateRange);
         setMetrics(data);
+        // Fetch profile for the first inspector (Inspector 1) to display a real name
+        try {
+          const firstId = data?.performance && data.performance.length > 0 ? data.performance[0].inspectorId : null;
+          if (firstId) {
+            const { data: profile, error: pErr } = await supabase
+              .from('profiles')
+              .select('full_name, first_name, last_name')
+              .eq('id', firstId)
+              .single();
+            if (!pErr && profile) {
+              const fullName = profile.full_name || [profile.first_name, profile.last_name].filter(Boolean).join(' ') || null;
+              setInspector1Name(fullName);
+            } else {
+              setInspector1Name(null);
+            }
+          } else {
+            setInspector1Name(null);
+          }
+        } catch (pe) {
+          console.warn('Failed to load inspector 1 profile', pe);
+          setInspector1Name(null);
+        }
       } catch (err) {
         setError(err.message || 'Failed to load metrics');
         console.error(err);
@@ -315,7 +339,7 @@ export default function HeadInspectorReports() {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center' }}>
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
-                          Inspector {idx + 1}
+                          {idx === 0 && inspector1Name ? inspector1Name : `Inspector ${idx + 1}`}
                         </div>
                         <div style={{ fontSize: 12, color: '#64748b' }}>
                           ID: {String(inspector.inspectorId).slice(0, 8)}...
