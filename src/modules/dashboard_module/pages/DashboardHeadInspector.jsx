@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import HeadInspectorReports from './HeadInspectorReports';
+import MissionOrderHistory from '../components/MissionOrderHistory';
 import './Dashboard.css';
 
 function formatStatus(status) {

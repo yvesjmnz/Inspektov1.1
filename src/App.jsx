@@ -70,7 +70,7 @@ function App() {
     if (path === '/dashboard/inspector/inspection') return normalizedRole === 'inspector' || normalizedRole === 'head_inspector';
 
     // Mission order pages
-    if (path === '/mission-order') return normalizedRole === 'head_inspector';
+    if (path === '/mission-order') return normalizedRole === 'head_inspector' || normalizedRole === 'director';
     if (path === '/mission-order/review') return normalizedRole === 'director';
 
     // Inspection slip

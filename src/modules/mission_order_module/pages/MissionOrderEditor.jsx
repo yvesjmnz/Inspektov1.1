@@ -1153,7 +1153,25 @@ export default function MissionOrderEditor() {
                     <button
                       type="button"
                       onClick={() => {
-                        window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
+                        try {
+                          const path = (window.location.pathname || '').toLowerCase();
+                          if (path.includes('director')) {
+                            window.location.assign(`/dashboard/director#${sourceTab}`);
+                            return;
+                          }
+                          if (path.includes('head-inspector') || path.includes('head_inspector')) {
+                            window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
+                            return;
+                          }
+                          const ref = (document.referrer || '').toLowerCase();
+                          if (ref.includes('director')) {
+                            window.location.assign(`/dashboard/director#${sourceTab}`);
+                            return;
+                          }
+                          window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
+                        } catch (e) {
+                          window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
+                        }
                       }}
                       style={{
                         display: 'inline-flex',

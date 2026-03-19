@@ -4,6 +4,7 @@ import NotificationBell from '../../../components/NotificationBell';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
 import { cancelInspection as cancelInspectionApi } from '../../../lib/api';
 import DirectorReports from './DirectorReports';
+import MissionOrderHistory from '../components/MissionOrderHistory';
 import './Dashboard.css';
 
 // Complaint category grouping (Director view) from tags like "Violation: <Sub>"
@@ -79,6 +80,47 @@ function statusBadgeClass(status) {
   if (['declined', 'rejected', 'invalid'].includes(s)) return 'status-badge status-danger';
   if (['submitted', 'pending', 'new'].includes(s)) return 'status-badge status-warning';
   if (['on hold', 'on_hold', 'hold'].includes(s)) return 'status-badge status-info';
+  return 'status-badge';
+}
+
+// Head Inspector-style status formatting (use these for the Mission Order History view so labels and colors match)
+function formatStatusHI(status) {
+  if (!status) return 'Unknown';
+  const s = String(status).toLowerCase().trim();
+
+  // inspection_reports statuses
+  if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 'Pending Inspection';
+  if (s === 'in progress' || s === 'in_progress') return 'In Progress';
+  if (s === 'completed') return 'Completed';
+
+  // mission_orders statuses
+  if (s === 'cancelled' || s === 'canceled') return 'Cancelled';
+  if (s === 'for inspection' || s === 'for_inspection') return 'Pre-Approved';
+
+  return String(status)
+    .replace(/_/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function statusBadgeClassHI(status) {
+  const s = String(status || '').toLowerCase().trim();
+
+  // inspection_reports status color coding
+  if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 'status-badge status-warning';
+  if (s === 'in progress' || s === 'in_progress') return 'status-badge status-info';
+  if (s === 'completed') return 'status-badge status-success';
+
+  // Mission order status color coding
+  if (s === 'for inspection' || s === 'for_inspection') return 'status-badge status-success';
+  if (s === 'issued') return 'status-badge status-warning';
+  if (s === 'awaiting_signature') return 'status-badge status-accent';
+  if (s === 'complete') return 'status-badge status-success';
+  if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
+  if (s === 'draft') return 'status-badge status-info';
+
+  if (!s) return 'status-badge status-info';
   return 'status-badge';
 }
 
@@ -347,6 +389,7 @@ export default function DashboardDirector() {
   const [navCollapsed, setNavCollapsed] = useState(false);
   const currentYear = new Date().getFullYear();
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [expandedComplaintId, setExpandedComplaintId] = useState(null);
 
   // Get current user on mount
   useEffect(() => {
@@ -465,14 +508,180 @@ export default function DashboardDirector() {
       if (tab === 'mission-orders') {
         query = query.eq('status', 'issued');
       } else if (tab === 'mission-orders-history') {
-        // Show completed mission orders
-        query = query.eq('status', 'complete');
+        // Use merged complaint-level dataset (same as Head Inspector) for Director history
+        try {
+          let complaintQuery = supabase
+            .from('complaints')
+            .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
+            .in('status', ['approved', 'Approved']);
 
-        // Apply submitted_at date range for Mission Order History using the calendar date range picker
-        if (appliedRange?.start && appliedRange?.end) {
-          const start = new Date(appliedRange.start.getFullYear(), appliedRange.start.getMonth(), appliedRange.start.getDate());
-          const endExclusive = new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), appliedRange.end.getDate() + 1);
-          query = query.gte('submitted_at', start.toISOString()).lt('submitted_at', endExclusive.toISOString());
+          // Apply date range to approved_at (same as Head Inspector)
+          if (appliedRange?.start && appliedRange?.end) {
+            const start = new Date(appliedRange.start.getFullYear(), appliedRange.start.getMonth(), appliedRange.start.getDate());
+            const endExclusive = new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), appliedRange.end.getDate() + 1);
+            complaintQuery = complaintQuery.gte('approved_at', start.toISOString()).lt('approved_at', endExclusive.toISOString());
+          }
+
+          const { data: complaintRows, error: complaintError } = await complaintQuery;
+          if (complaintError) throw complaintError;
+
+          const complaintIds = Array.from(new Set((complaintRows || []).map((c) => c.id).filter(Boolean)));
+
+          const { data: missionOrderRows, error: moError } = complaintIds.length
+            ? await supabase
+                .from('mission_orders')
+                .select('id, complaint_id, status, created_at, submitted_at, date_of_inspection, updated_at, secretary_signed_at, director_preapproved_at, title')
+                .in('complaint_id', complaintIds)
+                .order('created_at', { ascending: false })
+                .limit(500)
+            : { data: [], error: null };
+
+          if (moError) throw moError;
+
+          // Keep the latest MO per complaint
+          const latestMoByComplaintId = new Map();
+          (missionOrderRows || []).forEach((mo) => {
+            if (!mo?.complaint_id) return;
+            if (!latestMoByComplaintId.has(mo.complaint_id)) {
+              latestMoByComplaintId.set(mo.complaint_id, mo);
+            }
+          });
+
+          const missionOrderIds = Array.from(new Set((Array.from(latestMoByComplaintId.values()) || []).map((m) => m.id).filter(Boolean)));
+
+          const { data: assignmentRows, error: assignmentError } = missionOrderIds.length
+            ? await supabase
+                .from('mission_order_assignments')
+                .select('mission_order_id, inspector_id')
+                .in('mission_order_id', missionOrderIds)
+            : { data: [], error: null };
+
+          if (assignmentError) throw assignmentError;
+
+          const { data: reportRows, error: reportErr } = missionOrderIds.length
+            ? await supabase
+                .from('inspection_reports')
+                .select('mission_order_id, status, updated_at, created_at, completed_at')
+                .in('mission_order_id', missionOrderIds)
+                .order('updated_at', { ascending: false })
+                .limit(2000)
+            : { data: [], error: null };
+
+          if (reportErr) throw reportErr;
+
+          // Fetch revision counts for mission orders so Director can see #revisions like Head Inspector
+          const { data: revisionRows, error: revisionErr } = missionOrderIds.length
+            ? await supabase
+                .from('mission_order_revisions')
+                .select('mission_order_id')
+                .in('mission_order_id', missionOrderIds)
+            : { data: [], error: null };
+
+          if (revisionErr) {
+            // non-fatal: continue without revisions
+            console.warn('Failed to load mission order revisions', revisionErr);
+          }
+
+          const revisionCountByMoId = new Map();
+          (revisionRows || []).forEach((r) => {
+            if (!r?.mission_order_id) return;
+            revisionCountByMoId.set(r.mission_order_id, (revisionCountByMoId.get(r.mission_order_id) || 0) + 1);
+          });
+
+          const normalizeInspectionStatus = (v) => String(v || '').toLowerCase().trim();
+          const inspectionPriority = (v) => {
+            const s = normalizeInspectionStatus(v);
+            if (s === 'in progress' || s === 'in_progress') return 3;
+            if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 2;
+            if (s === 'completed' || s === 'complete') return 1;
+            return 0;
+          };
+
+          const inspectionStatusByMissionOrderId = new Map();
+          for (const r of reportRows || []) {
+            const moId = r?.mission_order_id;
+            if (!moId) continue;
+            const cur = inspectionStatusByMissionOrderId.get(moId);
+            if (!cur) {
+              inspectionStatusByMissionOrderId.set(moId, r?.status || null);
+              continue;
+            }
+            if (inspectionPriority(r?.status) > inspectionPriority(cur)) {
+              inspectionStatusByMissionOrderId.set(moId, r?.status || null);
+            }
+          }
+
+          const inspectorIds = Array.from(new Set((assignmentRows || []).map((a) => a?.inspector_id).filter(Boolean)));
+
+          const { data: profileRows, error: profileError } = inspectorIds.length
+            ? await supabase
+                .from('profiles')
+                .select('id, full_name, first_name, middle_name, last_name')
+                .in('id', inspectorIds)
+            : { data: [], error: null };
+
+          if (profileError) throw profileError;
+
+          const profileById = new Map((profileRows || []).map((p) => [p.id, p]));
+
+          const inspectorNamesByMissionOrderId = new Map();
+          (assignmentRows || []).forEach((a) => {
+            if (!a?.mission_order_id || !a?.inspector_id) return;
+            const p = profileById.get(a.inspector_id) || {};
+            const displayName =
+              p?.full_name || [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') || String(a.inspector_id).slice(0, 8);
+            const arr = inspectorNamesByMissionOrderId.get(a.mission_order_id) || [];
+            arr.push(displayName);
+            inspectorNamesByMissionOrderId.set(a.mission_order_id, arr);
+          });
+
+          const merged = (complaintRows || []).map((c) => {
+            const mo = latestMoByComplaintId.get(c.id) || null;
+            const revCount = mo?.id ? (revisionCountByMoId.get(mo.id) || 0) : 0;
+            return {
+              complaint_id: c.id,
+              business_name: c.business_name,
+              business_address: c.business_address,
+              reporter_email: c.reporter_email,
+              approved_at: c.approved_at,
+              created_at: c.created_at,
+              mission_order_id: mo?.id || null,
+              mission_order_status: mo?.status || null,
+              inspection_status: mo?.id ? inspectionStatusByMissionOrderId.get(mo.id) || null : null,
+              mission_order_created_at: mo?.created_at || null,
+              date_of_inspection: mo?.date_of_inspection || null,
+              mission_order_updated_at: mo?.updated_at || null,
+              secretary_signed_at: mo?.secretary_signed_at || null,
+              director_preapproved_at: mo?.director_preapproved_at || null,
+              title: mo?.title || null,
+              inspector_names: mo?.id ? inspectorNamesByMissionOrderId.get(mo.id) || [] : [],
+              revision_count: revCount,
+            };
+          });
+
+          // Only include completed mission orders for the History view (match Head Inspector 'revisions' tab)
+          const statusFiltered = (tab === 'mission-orders-history')
+            ? (merged || []).filter((r) => String(r.mission_order_status || '').toLowerCase() === 'complete')
+            : merged;
+
+          const searchVal = search.trim().toLowerCase();
+          const filtered = !searchVal
+            ? statusFiltered
+            : statusFiltered.filter((r) => {
+                const hay = [r.business_name, r.business_address, r.reporter_email, r.complaint_id, r.mission_order_id]
+                  .filter(Boolean)
+                  .join(' ')
+                  .toLowerCase();
+                return hay.includes(searchVal);
+              });
+
+          setMissionOrders(filtered);
+          // allow finally to unset loading
+          return;
+        } catch (e) {
+          setError(e?.message || 'Failed to load mission orders.');
+          setMissionOrders([]);
+          return;
         }
       } else if (tab === 'inspection') {
         // Director Inspection tab: show MOs marked for inspection
@@ -657,27 +866,34 @@ export default function DashboardDirector() {
     return { groups, sortedKeys };
   }, [filteredComplaints, tab]);
 
-  // Group mission orders by day for Mission Order History
+  // Group mission orders by day for Mission Order History (match Head Inspector behavior)
   const missionOrdersByDay = useMemo(() => {
     if (tab !== 'mission-orders-history') return { groups: {}, sortedKeys: [] };
     const groups = {};
+
     for (const mo of filteredMissionOrders) {
-      const d = mo.submitted_at ? new Date(mo.submitted_at) : null;
-      const key = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10) : 'unknown';
+      // Bucket rows by the most relevant timestamp for the current view.
+      // Prefer mission order creation date, then complaint approval, then complaint created.
+      const dtRaw = mo.mission_order_created_at || mo.approved_at || mo.created_at || null;
+      const dt = dtRaw ? new Date(dtRaw) : null;
+      const key = dt ? `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` : 'unknown';
+
       if (!groups[key]) {
-        const label = d ? d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }) : 'Unknown Date';
+        const label = dt ? dt.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : 'Unknown Date';
         groups[key] = { label, items: [] };
       }
       groups[key].items.push(mo);
     }
-    // Sort items within each day by submitted_at descending (newest first)
+
+    // Sort items within each day by mission_order_created_at (newest first), fallback to submitted_at
     for (const key in groups) {
       groups[key].items.sort((a, b) => {
-        const timeA = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
-        const timeB = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
+        const timeA = a.mission_order_created_at ? new Date(a.mission_order_created_at).getTime() : a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+        const timeB = b.mission_order_created_at ? new Date(b.mission_order_created_at).getTime() : b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
         return timeB - timeA;
       });
     }
+
     const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
     return { groups, sortedKeys };
   }, [filteredMissionOrders, tab]);
@@ -1545,8 +1761,133 @@ export default function DashboardDirector() {
 
           {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
-          {tab === 'reports' ? (
+          {tab === 'mission-orders-history' ? (
+            <MissionOrderHistory
+              missionOrdersByDay={missionOrdersByDay}
+              expandedComplaintId={expandedComplaintId}
+              setExpandedComplaintId={setExpandedComplaintId}
+              onRowClick={(mo) => window.location.assign(`/mission-order?id=${encodeURIComponent(mo.mission_order_id || mo.id || mo.mission_order_id)}`)}
+              formatStatus={formatStatusHI}
+              statusBadgeClass={statusBadgeClassHI}
+            />
+          ) : tab === 'reports' ? (
             <DirectorReports />
+          ) : tab === 'mission-orders-history' ? (
+            <div style={{ display: 'grid', gap: 20 }}>
+              {missionOrdersByDay.sortedKeys.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                  {loading ? 'Loading…' : 'No mission orders found.'}
+                </div>
+              ) : (
+                missionOrdersByDay.sortedKeys.map((dayKey) => {
+                  const dayGroup = missionOrdersByDay.groups[dayKey];
+                  const count = dayGroup?.items?.length || 0;
+                  if (count === 0) return null;
+
+                  return (
+                    <div
+                      key={`day-card-${dayKey}`}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 14,
+                        boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                        overflow: 'hidden',
+                        transition: 'box-shadow 0.2s ease',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)'; }}
+                    >
+                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                          {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
+                        </h3>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
+                          <span>{count} Mission Order{count !== 1 ? 's' : ''}</span>
+                        </div>
+                      </div>
+
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                              <th style={{ width: 40, padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: 12, color: '#64748b' }}></th>
+                              <th style={{ width: 150, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
+                              <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Mission Order</th>
+                              <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase' }}>Inspection Date</th>
+                              <th style={{ width: 140, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase' }}>Inspectors</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dayGroup.items.map((mo) => (
+                              <>
+                                <tr
+                                  key={mo.id}
+                                  onClick={() => { window.location.assign(`/mission-order?id=${encodeURIComponent(mo.id)}`); }}
+                                  style={{ cursor: 'pointer', borderBottom: '1px solid #e2e8f0', transition: 'background-color 0.2s ease', position: 'relative' }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = '#ffffff'; }}
+                                >
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); setExpandedComplaintId(expandedComplaintId === mo.complaint_id ? null : mo.complaint_id); }} style={{ background: 'none', border: 'none', outline: 'none', cursor: 'pointer', padding: 0, color: '#64748b', transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)', transform: expandedComplaintId === mo.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24 }}>
+                                      <svg width="20" height="20" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M80 160L256 320L432 160" stroke="currentColor" strokeWidth="40" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                    </button>
+                                  </td>
+                                  <td>
+                                    <span className={statusBadgeClass(mo.mission_order_status || mo.status)}>{formatStatus(mo.mission_order_status || mo.status)}</span>
+                                  </td>
+                                  <td>
+                                    <div className="dash-cell-title">{mo.business_name || mo.title || 'Mission Order'}</div>
+                                    <div className="dash-cell-sub">{mo.business_address || (mo.complaint_id ? ('Complaint: ' + (String(mo.complaint_id).slice(0, 8) + '…')) : '')}</div>
+                                  </td>
+                                  <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                    {mo.date_of_inspection ? new Date(mo.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                  </td>
+                                  <td>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 30, alignItems: 'center', fontSize: 12 }}>
+                                      {(mo.inspector_names || []).length === 0 ? (
+                                        <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                      ) : (
+                                        (mo.inspector_names || []).map((name, idx) => (
+                                          <span key={`${mo.complaint_id}-${idx}`} style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}>
+                                            {name}
+                                          </span>
+                                        ))
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+
+                                {expandedComplaintId === mo.complaint_id && (
+                                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', animation: 'slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
+                                    <td colSpan="3" style={{ padding: '16px 24px' }}>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b' }}>{mo.submitted_at ? new Date(mo.submitted_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(mo.submitted_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+                                          <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>Mission Order Submitted</div>
+                                        </div>
+
+                                        {mo.created_at && (
+                                          <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                            <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b' }}>{new Date(mo.created_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) + ' ' + new Date(mo.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</div>
+                                            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>Mission Order Created</div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           ) : tab === 'mission-orders' ? (
             <div style={{ display: 'grid', gap: 20 }}>
               {filteredMissionOrders.length === 0 ? (
