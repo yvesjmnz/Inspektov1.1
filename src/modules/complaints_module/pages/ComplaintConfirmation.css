@@ -78,25 +78,8 @@
   font-size: 22px;
 }
 
-.confirm-copy-btn {
-  padding: 6px 12px;
-  border-radius: 6px;
-  background: #2563eb;
-  color: #fff;
-  border: none;
-  font-weight: 700;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-
-.confirm-copy-btn:hover {
-  background: #1d4ed8;
-}
-
-.confirm-copy-btn:active {
-  transform: scale(0.98);
-}
+/* Buttons now reuse the ComplaintForm button system (.btn/.btn-primary/.btn-secondary).
+   Keep this file focused on layout only. */
 
 .confirm-actions {
   display: flex;
@@ -105,30 +88,26 @@
   flex-wrap: wrap;
 }
 
-.confirm-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 42px;
-  padding: 0 14px;
-  border-radius: 10px;
-  background: #2563eb;
-  color: #fff;
-  font-weight: 900;
-  text-decoration: none;
+/* Remove default anchor focus/hover inner highlight (browser outline/ink) */
+.confirm-actions a.btn {
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.confirm-btn:hover {
-  background: #1d4ed8;
+.confirm-actions a.btn:focus,
+.confirm-actions a.btn:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
-.confirm-btn-secondary {
-  background: #0f172a;
+/* Copy button slightly smaller than primary actions */
+.confirm-id-wrapper .btn {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 13px;
 }
 
-.confirm-btn-secondary:hover {
-  background: #111827;
-}
 
 .confirm-note {
   margin-top: 14px;

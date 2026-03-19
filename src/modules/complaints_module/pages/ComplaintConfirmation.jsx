@@ -33,7 +33,7 @@ export default function ComplaintConfirmation() {
             <div className="confirm-id-wrapper">
               <div className="confirm-id-value">{id || '—'}</div>
               <button 
-                className="confirm-copy-btn" 
+                className="btn btn-primary" 
                 onClick={handleCopyId}
                 title="Copy Complaint ID"
               >
@@ -43,10 +43,10 @@ export default function ComplaintConfirmation() {
           </div>
 
           <div className="confirm-actions">
-            <a className="confirm-btn" href={id ? `/track-complaint` : '/track-complaint'}>
+            <a className="btn btn-primary" href={id ? `/track-complaint` : '/track-complaint'}>
               Track Complaint
             </a>
-            <a className="confirm-btn confirm-btn-secondary" href="/">
+            <a className="btn btn-secondary" href="/">
               Back to Home
             </a>
           </div>

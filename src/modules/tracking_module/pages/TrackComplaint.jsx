@@ -13,6 +13,27 @@ function formatStatus(status) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function formatDateTime(date) {
+  if (!date) return '—';
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return '—';
+
+  // Month day, yyyy (word format) + time (no milliseconds)
+  const datePart = d.toLocaleDateString(undefined, {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  const timePart = d.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+  return `${datePart} | ${timePart}`;
+}
+
 function statusBadgeClass(status) {
   const s = String(status || '').toLowerCase();
   if (['resolved', 'closed', 'completed', 'done'].includes(s)) return 'status-badge status-success';
@@ -103,7 +124,7 @@ export default function TrackComplaint() {
                     value={complaintId}
                     onChange={(e) => setComplaintId(e.target.value)}
                   />
-                  <button className="track-btn" type="submit" disabled={!canSearch || loading}>
+                  <button className="btn btn-primary" type="submit" disabled={!canSearch || loading}>
                     {loading ? 'Checking…' : 'Check Status'}
                   </button>
                 </div>
@@ -157,6 +178,7 @@ export default function TrackComplaint() {
                 const latestInspection = hasAnyInspection ? inspections[inspections.length - 1] : null;
                 const inspectionStatus = latestInspection ? String(latestInspection.status || '').toLowerCase() : '';
                 const inspectionCompleted = inspectionStatus === 'completed';
+                const inspectionInProgress = ['in_progress', 'in progress', 'ongoing', 'processing'].includes(inspectionStatus);
                 const inspectionStartedAt = latestInspection?.created_at ? new Date(latestInspection.created_at) : null;
                 const inspectionCompletedAt = latestInspection?.completed_at ? new Date(latestInspection.completed_at) : null;
 
@@ -180,7 +202,7 @@ export default function TrackComplaint() {
                 const resolutionLabel = isDeclined ? 'Case Closed' : (inspectionCompleted ? 'Inspection Completed' : (s === 'approved' ? 'Approved' : 'Pending'));
 
                 // Utility to render date nicely
-                const fmt = (d) => (d ? d.toLocaleString() : '—');
+                const fmt = (d) => formatDateTime(d);
 
                 return (
                   <div className="progress-card">
@@ -231,7 +253,7 @@ export default function TrackComplaint() {
                       </div>
 
                       {/* Step 4 - Inspection (MO Workflow + Inspection Workflow) */}
-                      <div className={`vtl-step ${isDeclined ? 'inactive' : (inspectionCompleted ? 'completed' : (hasAnyInspection ? 'active' : (isDecided && s === 'approved' ? 'active' : 'inactive')))}`}>
+                      <div className={`vtl-step ${isDeclined ? 'inactive' : (inspectionCompleted ? 'completed' : (inspectionInProgress ? 'active' : 'inactive'))}`}>
                         <div className="vtl-marker">{isDeclined ? 4 : (inspectionCompleted ? '✓' : 4)}</div>
                         <div className="vtl-content">
                           <div className="vtl-title">Inspection</div>
@@ -240,7 +262,7 @@ export default function TrackComplaint() {
                             <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">Not applicable</span></div>
                           ) : (
                             <>
-                              <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{inspectionCompleted ? 'Completed' : (hasAnyInspection ? 'In Progress' : (isDecided && s === 'approved' ? 'Scheduled' : '—'))}</span></div>
+                              <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{inspectionCompleted ? 'Completed' : (inspectionInProgress ? 'In Progress' : '—')}</span></div>
                               <div className="vtl-detail"><span className="vtl-detail-label">Started:</span> <span className="vtl-detail-value">{fmt(inspectionStartedAt)}</span></div>
                               <div className="vtl-detail"><span className="vtl-detail-label">Completed:</span> <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span></div>
                             </>
@@ -294,19 +316,13 @@ export default function TrackComplaint() {
                         {complaint.complaint_description || '—'}
                       </span>
                     </div>
-                    <div className="summary-card-footer">
-                      <span className="summary-footer-label">Submitted on:</span>
-                      <span className="summary-footer-value">
-                        {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
-                      </span>
-                    </div>
-                  </div>
+                                      </div>
                 </div>
               </div>
 
               <div className="track-result-actions">
                 <button 
-                  className="track-btn-back"
+                  className="btn btn-primary"
                   onClick={() => {
                     setComplaint(null);
                     setComplaintId('');
