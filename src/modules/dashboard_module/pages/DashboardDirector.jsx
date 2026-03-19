@@ -220,11 +220,11 @@ export default function DashboardDirector() {
       },
       inspection: {
         title: 'Inspections',
-        subtitle: 'View mission orders scheduled for inspection and manage actions.',
+        subtitle: 'Track ongoing inspections.',
       },
       'inspection-history': {
         title: 'Inspection History',
-        subtitle: 'Browse all completed inspections and review findings.',
+        subtitle: 'History for all completed inspections (from inspection reports).',
       },
       reports: {
         title: 'Performance Report',
@@ -684,8 +684,144 @@ export default function DashboardDirector() {
           return;
         }
       } else if (tab === 'inspection') {
-        // Director Inspection tab: show MOs marked for inspection
-        query = query.in('status', ['for inspection', 'for_inspection']);
+        // Director Inspection tab: show all pending and in-progress inspections.
+        // Use a broader selection: include mission orders that are explicitly 'for inspection'
+        // OR mission orders referenced by inspection_reports in pending/in progress.
+        try {
+          // 1) Load mission orders with status 'for inspection' (pre-approved)
+          const { data: moForInspectionRows, error: moForErr } = await supabase
+            .from('mission_orders')
+            .select('id, complaint_id, status, date_of_inspection, title, created_at')
+            .in('status', ['for inspection', 'for_inspection'])
+            .order('created_at', { ascending: false })
+            .limit(500);
+
+          if (moForErr) throw moForErr;
+
+          // 2) Load inspection reports that are pending or in-progress so we can include MOs with active reports
+          const { data: reportRows, error: reportErr } = await supabase
+            .from('inspection_reports')
+            .select('mission_order_id, status')
+            .in('status', ['pending inspection', 'pending_inspection', 'pending', 'in progress', 'in_progress'])
+            .limit(2000);
+
+          if (reportErr) throw reportErr;
+
+          const reportMoIds = Array.from(new Set((reportRows || []).map((r) => r?.mission_order_id).filter(Boolean)));
+
+          // 3) Combine mission order ids (from for-inspection rows + those referenced in active reports)
+          const moIdsSet = new Set((moForInspectionRows || []).map((m) => m.id).filter(Boolean));
+          reportMoIds.forEach((id) => moIdsSet.add(id));
+
+          const missionOrderIds = Array.from(moIdsSet);
+
+          // 4) Fetch mission orders for these ids (to get complaint_id and date info)
+          const { data: moRows, error: moErr } = missionOrderIds.length
+            ? await supabase
+                .from('mission_orders')
+                .select('id, complaint_id, status, date_of_inspection, title, created_at')
+                .in('id', missionOrderIds)
+            : { data: [], error: null };
+
+          if (moErr) throw moErr;
+
+          const complaintIds = Array.from(new Set((moRows || []).map((m) => m?.complaint_id).filter(Boolean)));
+
+          // Fetch complaint info (business name/address)
+          const complaintMap = new Map();
+          if (complaintIds.length) {
+            const { data: complaintRows, error: complaintErr } = await supabase
+              .from('complaints')
+              .select('id, business_name, business_address')
+              .in('id', complaintIds);
+            if (complaintErr) console.warn('Failed to load complaints', complaintErr);
+            (complaintRows || []).forEach((c) => complaintMap.set(c?.id, c));
+          }
+
+          // Load assignments -> profiles for inspector display names
+          const inspectorNamesByMoId = new Map();
+          if (missionOrderIds.length) {
+            const { data: assignmentRows, error: assignmentErr } = await supabase
+              .from('mission_order_assignments')
+              .select('mission_order_id, inspector_id')
+              .in('mission_order_id', missionOrderIds);
+            if (assignmentErr) console.warn('Failed to load assignments', assignmentErr);
+            else if ((assignmentRows || []).length) {
+              const inspectorIds = Array.from(new Set((assignmentRows || []).map((a) => a?.inspector_id).filter(Boolean)));
+              let profileById = new Map();
+              if (inspectorIds.length) {
+                const { data: profileRows, error: profileErr } = await supabase
+                  .from('profiles')
+                  .select('id, full_name, first_name, middle_name, last_name')
+                  .in('id', inspectorIds);
+                if (profileErr) console.warn('Failed to load profiles', profileErr);
+                else profileById = new Map((profileRows || []).map((p) => [p.id, p]));
+              }
+              (assignmentRows || []).forEach((a) => {
+                if (!a?.mission_order_id || !a?.inspector_id) return;
+                const p = profileById.get(a.inspector_id) || {};
+                const displayName = p?.full_name || [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') || String(a.inspector_id).slice(0, 8);
+                const arr = inspectorNamesByMoId.get(a.mission_order_id) || [];
+                arr.push(displayName);
+                inspectorNamesByMoId.set(a.mission_order_id, arr);
+              });
+            }
+          }
+
+          // Load inspection reports for these mission orders to compute inspection status (choose highest priority)
+          const inspectionStatusByMoId = new Map();
+          if (missionOrderIds.length) {
+            const { data: allReports, error: allReportsErr } = await supabase
+              .from('inspection_reports')
+              .select('mission_order_id, status, updated_at, created_at, completed_at')
+              .in('mission_order_id', missionOrderIds)
+              .order('updated_at', { ascending: false })
+              .limit(2000);
+
+            if (allReportsErr) console.warn('Failed to load inspection reports', allReportsErr);
+            else {
+              const normalizeInspectionStatus = (v) => String(v || '').toLowerCase().trim();
+              const inspectionPriority = (v) => {
+                const s = normalizeInspectionStatus(v);
+                if (s === 'in progress' || s === 'in_progress') return 3;
+                if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 2;
+                if (s === 'completed' || s === 'complete') return 1;
+                return 0;
+              };
+              for (const r of allReports || []) {
+                const moId = r?.mission_order_id;
+                if (!moId) continue;
+                const cur = inspectionStatusByMoId.get(moId);
+                if (!cur) {
+                  inspectionStatusByMoId.set(moId, r?.status || 'pending inspection');
+                  continue;
+                }
+                if (inspectionPriority(r?.status) > inspectionPriority(cur)) {
+                  inspectionStatusByMoId.set(moId, r?.status || 'pending inspection');
+                }
+              }
+            }
+          }
+
+          // Merge all data
+          const merged = (moRows || []).map((mo) => ({
+            ...mo,
+            mission_order_id: mo.id,
+            business_name: complaintMap.get(mo.complaint_id)?.business_name || '—',
+            business_address: complaintMap.get(mo.complaint_id)?.business_address || '',
+            inspection_status: inspectionStatusByMoId.get(mo.id) || 'pending inspection',
+            inspector_names: inspectorNamesByMoId.get(mo.id) || [],
+          }));
+
+          setMissionOrders(merged);
+          setLoading(false);
+          return;
+        } catch (e) {
+          console.warn('Failed to load director inspection rows', e);
+          setMissionOrders([]);
+          setLoading(false);
+          return;
+        }
       } else if (tab === 'inspection-history') {
         // Inspection History: show completed inspections via inspection_reports
         // We need to join with inspection_reports to get completed inspections
@@ -2092,113 +2228,127 @@ export default function DashboardDirector() {
             </div>
           ) : tab === 'inspection' ? (
             <div style={{ display: 'grid', gap: 20 }}>
-              {filteredMissionOrders.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                  {loading ? 'Loading…' : 'No inspections found.'}
-                </div>
-              ) : (
-                <div
-                  style={{
-                    background: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 14,
-                    boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
-                    overflow: 'hidden',
-                    transition: 'box-shadow 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
-                  }}
-                >
-                  {/* Header */}
-                  <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
-                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Inspections</h3>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
-                      <span>{filteredMissionOrders.length} {filteredMissionOrders.length === 1 ? 'Record' : 'Records'}</span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const normalize = (v) => String(v || '').toLowerCase().trim();
+                    const pending = (filteredMissionOrders || [])
+                      .filter((c) => normalize(c.inspection_status) === 'pending inspection')
+                      .sort((a, b) => {
+                        const tA = a.date_of_inspection ? new Date(a.date_of_inspection).getTime() : 0;
+                        const tB = b.date_of_inspection ? new Date(b.date_of_inspection).getTime() : 0;
+                        return tA - tB;
+                      });
 
-                  {/* Table */}
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                          <th style={{ width: 120 }}>MO ID</th>
-                          <th>Title</th>
-                          <th style={{ width: 180 }}>Status</th>
-                          <th style={{ width: 220 }}>Submitted</th>
-                          <th style={{ width: 260 }}>Actions</th>
-                          </tr>
-                      </thead>
-                      <tbody>
-                        {filteredMissionOrders.map((mo) => (
-                          <tr
-                            key={mo.id}
-                            style={{
-                              cursor: 'default',
-                              borderBottom: '1px solid #e2e8f0',
-                              transition: 'background-color 0.2s ease',
-                              position: 'relative',
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = '#f8fafc';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = '#ffffff';
-                            }}
-                          >
-                            <td style={{ padding: '12px' }} title={mo.id}>{String(mo.id).slice(0, 8)}…</td>
-                            <td style={{ padding: '12px' }}>
-                              <div className="dash-cell-title">{mo.title || 'Mission Order'}</div>
-                              <div className="dash-cell-sub">Complaint: {mo.complaint_id ? String(mo.complaint_id).slice(0, 8) + '…' : '—'}</div>
-                            </td>
-                            <td style={{ padding: '12px' }}>
-                              <span className={statusBadgeClass(mo.status)}>{formatStatus(mo.status)}</span>
-                            </td>
-                            <td style={{ padding: '12px' }}>{formatDateNoSeconds(mo.submitted_at)}</td>
-                            <td style={{ padding: '12px' }}>
-                              <div className="dash-row-actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                <button
-                                  className="dash-btn"
-                                  onClick={async () => {
-                                    try {
-                                      if (!window.confirm('Cancel this inspection?')) return;
-                                      setLoading(true);
-                                      await cancelInspectionApi(mo.id);
-                                      // Refresh list and provide minimal feedback
-                                      await loadMissionOrders();
-                                      alert('Inspection cancelled.');
-                                    } catch (e) {
-                                      alert(e?.message || 'Failed to cancel inspection.');
-                                    } finally {
-                                      setLoading(false);
-                                    }
-                                  }}
-                                >
-                                  Cancel inspection
-                                </button>
-                              </div>
-                            </td>
-                            <td style={{ padding: '12px' }}>
-                              <a
-                                className="dash-btn"
-                                href={`/inspection-slip/review?missionOrderId=${encodeURIComponent(mo.id)}&role=director`}
-                              >
-                                View
-                              </a>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                    const inProgress = (filteredMissionOrders || [])
+                      .filter((c) => normalize(c.inspection_status) === 'in progress')
+                      .sort((a, b) => {
+                        const tA = a.date_of_inspection ? new Date(a.date_of_inspection).getTime() : 0;
+                        const tB = b.date_of_inspection ? new Date(b.date_of_inspection).getTime() : 0;
+                        return tA - tB;
+                      });
+
+                    const Table = ({ title, rows, dotColor, countLabelSingular, countLabelPlural }) => (
+                      <div
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 14,
+                          boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>{title}</h3>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: dotColor, marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: dotColor, flexShrink: 0 }}></div>
+                            <span>{rows.length} {rows.length === 1 ? countLabelSingular : countLabelPlural}</span>
+                          </div>
+                        </div>
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION STATUS</th>
+                                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>BUSINESS & ADDRESS</th>
+                                <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION DATE</th>
+                                <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTORS</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.length === 0 ? (
+                                <tr>
+                                  <td colSpan="4" style={{ textAlign: 'center', padding: 24, color: '#475569' }}>
+                                    {loading ? 'Loading…' : 'No records found.'}
+                                  </td>
+                                </tr>
+                              ) : (
+                                rows.map((c) => (
+                                  <tr
+                                    key={`insp-${title}-${c.mission_order_id || c.complaint_id}`}
+                                    style={{ borderBottom: '1px solid #e2e8f0', cursor: c.mission_order_id ? 'pointer' : 'default' }}
+                                    title={c.mission_order_id ? 'View inspection details' : 'No mission order available'}
+                                    onClick={() => {
+                                      if (c.mission_order_id) {
+                                        window.location.assign(`/inspection-slip/review?missionOrderId=${c.mission_order_id}&role=director`);
+                                      }
+                                    }}
+                                  >
+                                    <td style={{ padding: '12px' }}>
+                                      <span
+                                        className={statusBadgeClassHI(c.inspection_status)}
+                                        style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}
+                                      >
+                                        {formatStatusHI(c.inspection_status)}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '12px' }}>
+                                      <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                      <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                    </td>
+                                    <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                      {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+                                    </td>
+                                    <td style={{ padding: '12px' }}>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                        {(c.inspector_names || []).length === 0 ? (
+                                          <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                        ) : (
+                                          (c.inspector_names || []).map((name, idx) => (
+                                            <span key={`${c.mission_order_id || c.complaint_id}-${idx}`} style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}>
+                                              {name}
+                                            </span>
+                                          ))
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+
+                    return (
+                      <>
+                        <Table
+                          title="Pending Inspection"
+                          rows={pending}
+                          dotColor="#F2B705"
+                          countLabelSingular="Pending Inspection"
+                          countLabelPlural="Pending Inspections"
+                        />
+                        <Table
+                          title="In Progress"
+                          rows={inProgress}
+                          dotColor="#60a5fa"
+                          countLabelSingular="Ongoing Inspection"
+                          countLabelPlural="Ongoing Inspections"
+                        />
+                      </>
+                    );
+                  })()}
                 </div>
-              )}
-            </div>
           ) : tab === 'inspection-history' ? (
             <div style={{ display: 'grid', gap: 20 }}>
               {filteredMissionOrders.length === 0 ? (
