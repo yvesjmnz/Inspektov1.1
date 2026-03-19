@@ -67,7 +67,9 @@ export async function getComplaintTracking(complaintId) {
     const moIds = missionOrders.map((m) => m.id);
     const { data: reports, error: repErr } = await supabase
       .from('inspection_reports')
-      .select('id, mission_order_id, status, created_at, completed_at, updated_at')
+      .select(
+        'id, mission_order_id, status, created_at, completed_at, updated_at, generated_docx_url, generated_docx_created_at, business_permit_status, cctv_status, signage_status, cctv_count, no_of_employees'
+      )
       .in('mission_order_id', moIds)
       .order('created_at', { ascending: true });
     if (repErr) throw new Error(repErr.message);

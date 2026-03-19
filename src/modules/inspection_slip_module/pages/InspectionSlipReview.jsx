@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import DashboardSidebar from '../../../components/DashboardSidebar';
 import '../../dashboard_module/pages/Dashboard.css';
 import './InspectionSlipCreate.css';
+import { generateInspectionSlipDocx } from '../lib/docx_template';
 
 function getInspectionReportIdFromQuery() {
   const params = new URLSearchParams(window.location.search);
@@ -62,6 +63,20 @@ function statusBadgeStyle(status) {
   };
 }
 
+function buildOfficeViewerUrl(docxUrl) {
+  if (!docxUrl) return '';
+  const src = encodeURIComponent(docxUrl);
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${src}`;
+}
+
+function appendUrlCacheBuster(url, cacheBuster) {
+  if (!url) return '';
+  const b = String(cacheBuster ?? '').trim();
+  if (!b) return url;
+  const joiner = url.includes('?') ? '&' : '?';
+  return `${url}${joiner}v=${encodeURIComponent(b)}`;
+}
+
 export default function InspectionSlipReview() {
   const inspectionReportId = useMemo(() => getInspectionReportIdFromQuery(), []);
   const missionOrderIdFromQuery = useMemo(() => getMissionOrderIdFromQuery(), []);
@@ -69,6 +84,10 @@ export default function InspectionSlipReview() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [toast, setToast] = useState('');
+  const [generatingDocx, setGeneratingDocx] = useState(false);
+  const [downloadingDocx, setDownloadingDocx] = useState(false);
+  const [docxPreviewError, setDocxPreviewError] = useState(false);
 
   const [missionOrder, setMissionOrder] = useState(null);
   const [complaint, setComplaint] = useState(null);
@@ -77,6 +96,8 @@ export default function InspectionSlipReview() {
     uploadedAt: null,
     uploadedBy: null,
   });
+
+  const [inspectionReport, setInspectionReport] = useState(null);
 
   const [ownerDetails, setOwnerDetails] = useState({
     lastName: '',
@@ -120,7 +141,9 @@ export default function InspectionSlipReview() {
   useEffect(() => {
     const load = async () => {
       setError('');
+      setToast('');
       setLoading(true);
+      setInspectionReport(null);
 
       try {
         // Two entry modes:
@@ -151,6 +174,7 @@ export default function InspectionSlipReview() {
 
           missionOrderId = report.mission_order_id || missionOrderId;
           setHasInspectionData(true);
+          setInspectionReport(report);
 
           // Hydrate from inspection report (mirror InspectionSlipCreate explicitReport logic)
           setAdditionalComments(report.inspection_comments || '');
@@ -210,6 +234,7 @@ export default function InspectionSlipReview() {
         } else {
           // No inspection report yet; this is a pending inspection view.
           setHasInspectionData(false);
+          setInspectionReport(null);
         }
 
         if (missionOrderId) {
@@ -256,6 +281,7 @@ export default function InspectionSlipReview() {
         setError(e?.message || 'Failed to load inspection slip.');
         setMissionOrder(null);
         setComplaint(null);
+        setInspectionReport(null);
       } finally {
         setLoading(false);
       }
@@ -264,10 +290,305 @@ export default function InspectionSlipReview() {
     load();
   }, [inspectionReportId, missionOrderIdFromQuery, hasInspectionData]);
 
+  const handleGenerateInspectionSlipDocx = async () => {
+    if (!inspectionReportId) {
+      setError('Missing inspection report identifier.');
+      return;
+    }
+
+    setError('');
+    setToast('');
+    setGeneratingDocx(true);
+
+    try {
+      // Re-fetch to enforce: only after completion.
+      const { data: freshReport, error: freshErr } = await supabase
+        .from('inspection_reports')
+        .select('*')
+        .eq('id', inspectionReportId)
+        .single();
+      if (freshErr) throw freshErr;
+      if (!freshReport) throw new Error('Inspection report not found.');
+
+      const freshStatus = String(freshReport?.status || '').toLowerCase();
+      if (freshStatus !== 'completed') {
+        throw new Error('DOCX can only be generated after the inspection report is marked as completed.');
+      }
+
+      const INSPECTION_BUCKET = 'inspection';
+
+      // Template (stored as `template_uis.docx` in the inspection bucket).
+      const { data: tplSigned, error: tplErr } = await supabase.storage
+        .from(INSPECTION_BUCKET)
+        .createSignedUrl('Template/template_uis.docx', 60 * 60 * 24 * 7);
+
+      if (tplErr) throw tplErr;
+      if (!tplSigned?.signedUrl) throw new Error('Failed to create signed URL for inspection-slip template.');
+
+      const templateUrl = tplSigned.signedUrl;
+
+      // Mission order date (preferred) + time from the report timestamps.
+      const missionOrderId = freshReport?.mission_order_id || missionOrder?.id || missionOrderIdFromQuery;
+
+      let dateOfInspection = null;
+      if (missionOrderId) {
+        const { data: mo, error: moErr } = await supabase
+          .from('mission_orders')
+          .select('id, date_of_inspection')
+          .eq('id', missionOrderId)
+          .single();
+        if (moErr) throw moErr;
+        dateOfInspection = mo?.date_of_inspection || null;
+      }
+
+      if (!dateOfInspection) {
+        dateOfInspection = freshReport?.started_at || freshReport?.completed_at || null;
+      }
+
+      const timeOfInspection = freshReport?.completed_at || freshReport?.started_at || null;
+
+      // Inspector name(s): use mission_order_assignments if possible, fall back to report.inspector_id.
+      let inspectorNames = '';
+
+      if (missionOrderId) {
+        const { data: assignedRows, error: assignedErr } = await supabase
+          .from('mission_order_assignments')
+          .select('inspector_id, assigned_at')
+          .eq('mission_order_id', missionOrderId)
+          .order('assigned_at', { ascending: true });
+        if (assignedErr) throw assignedErr;
+
+        const ids = Array.from(new Set((assignedRows || []).map((r) => r.inspector_id).filter(Boolean)));
+        if (ids.length) {
+          const { data: profiles, error: profilesErr } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', ids);
+          if (profilesErr) throw profilesErr;
+
+          const nameById = new Map((profiles || []).map((p) => [p.id, p.full_name]));
+          inspectorNames = (assignedRows || [])
+            .map((r) => nameById.get(r.inspector_id))
+            .filter(Boolean)
+            .filter((v, i, a) => a.indexOf(v) === i)
+            .join(', ');
+        }
+      }
+
+      if (!inspectorNames && freshReport?.inspector_id) {
+        const { data: prof, error: profErr } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', freshReport.inspector_id)
+          .single();
+        if (!profErr && prof?.full_name) inspectorNames = prof.full_name;
+      }
+
+      const ownerNameFromState = `${ownerDetails.lastName || ''}${ownerDetails.lastName && (ownerDetails.firstName || ownerDetails.middleName) ? ', ' : ''}${ownerDetails.firstName || ''}${ownerDetails.middleName ? ` ${ownerDetails.middleName}` : ''}`.trim();
+      const owner_name = freshReport?.owner_name || ownerNameFromState || '';
+      const business_name = freshReport?.business_name || ownerDetails?.businessName || '';
+
+      // Signature placeholders (if template uses them).
+      let inspector_signature_url = null;
+      if (freshReport?.inspector_signature_url) {
+        try {
+          const raw = String(freshReport.inspector_signature_url || '').trim();
+          // Some records store a full public URL; others store a storage path.
+          // Support both so signatures render reliably.
+          if (/^https?:\/\//i.test(raw)) {
+            inspector_signature_url = raw;
+          } else {
+            const { data: sigSigned, error: sigErr } = await supabase.storage
+              .from(INSPECTION_BUCKET)
+              .createSignedUrl(raw, 60 * 60 * 24 * 7);
+            if (sigErr) throw sigErr;
+            inspector_signature_url = sigSigned?.signedUrl || null;
+          }
+        } catch {
+          inspector_signature_url = null;
+        }
+      }
+
+      let owner_signature_url = null;
+      if (freshReport?.owner_signature_url) {
+        try {
+          const raw = String(freshReport.owner_signature_url || '').trim();
+          if (/^https?:\/\//i.test(raw)) {
+            owner_signature_url = raw;
+          } else {
+            const { data: sigSigned, error: sigErr } = await supabase.storage
+              .from(INSPECTION_BUCKET)
+              .createSignedUrl(raw, 60 * 60 * 24 * 7);
+            if (sigErr) throw sigErr;
+            owner_signature_url = sigSigned?.signedUrl || null;
+          }
+        } catch {
+          owner_signature_url = null;
+        }
+      }
+
+      const blob = await generateInspectionSlipDocx({
+        templateUrl,
+
+        owner_name,
+        business_name: freshReport?.business_name || business_name,
+        date_of_inspection: dateOfInspection,
+        time_of_inspection: timeOfInspection,
+        inspection_report_id: freshReport?.id,
+
+        bin: freshReport?.bin,
+        business_address: freshReport?.business_address,
+        number_of_employees: freshReport?.no_of_employees ?? businessDetails.numberOfEmployees ?? null,
+        landline_no: freshReport?.landline_no,
+        email_address: freshReport?.email_address,
+
+        inspector_names: inspectorNames,
+
+        business_permit_status: freshReport?.business_permit_status,
+        cctv_status: freshReport?.cctv_status,
+        signage_status: freshReport?.signage_status,
+        cctv_count: freshReport?.cctv_count,
+
+        inspector_signature_url,
+        owner_signature_url,
+      });
+
+      const objectPath = `inspection-reports/${freshReport.id}/INSPECTION-SLIP.docx`;
+
+      // Persist the generated slip: overwrite so we can regenerate any number of times.
+      const { error: uploadErr } = await supabase.storage
+        .from(INSPECTION_BUCKET)
+        .upload(objectPath, blob, {
+          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          upsert: true,
+        });
+
+      // If the file already exists (race), we can proceed to retrieve the URL.
+      if (uploadErr) {
+        const msg = String(uploadErr?.message || uploadErr || '').toLowerCase();
+        const looksLikeAlreadyExists =
+          msg.includes('already') || msg.includes('exists') || msg.includes('409') || msg.includes('conflict');
+        if (!looksLikeAlreadyExists) throw uploadErr;
+      }
+
+      // Prefer public URL for Office viewer; fall back to signed URL if the bucket is private.
+      let docxUrl = null;
+      const { data: publicData } = supabase.storage.from(INSPECTION_BUCKET).getPublicUrl(objectPath);
+      docxUrl = publicData?.publicUrl || null;
+
+      if (!docxUrl) {
+        const { data: signedObj, error: signedErr } = await supabase.storage
+          .from(INSPECTION_BUCKET)
+          .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+        if (signedErr) throw signedErr;
+        docxUrl = signedObj?.signedUrl || null;
+      }
+
+      if (!docxUrl) throw new Error('Failed to resolve generated inspection slip DOCX URL.');
+
+      const nowIso = new Date().toISOString();
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error('Not authenticated. Please login again.');
+
+      const { error: updateErr } = await supabase
+        .from('inspection_reports')
+        .update({
+          generated_docx_url: docxUrl,
+          generated_docx_created_at: nowIso,
+          generated_docx_created_by: userId,
+          updated_at: nowIso,
+        })
+        .eq('id', freshReport.id);
+
+      if (updateErr) {
+        // If another request won the race, we can still refresh and show success.
+        // eslint-disable-next-line no-console
+        console.warn('DOCX persist update failed:', updateErr);
+      }
+
+      const { data: after, error: afterErr } = await supabase
+        .from('inspection_reports')
+        .select('*')
+        .eq('id', freshReport.id)
+        .single();
+      if (afterErr) throw afterErr;
+
+      setInspectionReport(after);
+      setDocxPreviewError(false);
+      setToast('Inspection slip DOCX generated/regenerated.');
+    } catch (e) {
+      setError(e?.message || 'Failed to generate inspection slip DOCX.');
+    } finally {
+      setGeneratingDocx(false);
+    }
+  };
+
+  const inspectionStatusLower = String(inspectionReport?.status || '').toLowerCase();
+  const hasGeneratedInspectionSlipDocx = !!inspectionReport?.generated_docx_url;
+  const canGenerateInspectionSlipDocx =
+    hasInspectionData && inspectionStatusLower === 'completed';
+
+  const officeViewerUrl = useMemo(() => {
+    const baseUrl = inspectionReport?.generated_docx_url || '';
+    const cacheBuster = inspectionReport?.generated_docx_created_at || inspectionReport?.updated_at || '';
+    const versionedUrl = appendUrlCacheBuster(baseUrl, cacheBuster);
+    return buildOfficeViewerUrl(versionedUrl);
+  }, [inspectionReport?.generated_docx_url, inspectionReport?.generated_docx_created_at, inspectionReport?.updated_at]);
+
+  const versionedGeneratedDocxUrl = useMemo(() => {
+    const baseUrl = inspectionReport?.generated_docx_url || '';
+    const cacheBuster = inspectionReport?.generated_docx_created_at || inspectionReport?.updated_at || '';
+    return appendUrlCacheBuster(baseUrl, cacheBuster);
+  }, [inspectionReport?.generated_docx_url, inspectionReport?.generated_docx_created_at, inspectionReport?.updated_at]);
+
   const backHref =
     role === 'head_inspector'
       ? '/dashboard/head-inspector#inspection-history'
       : '/dashboard/director?tab=inspection-history';
+
+  const handleDownloadInspectionSlipDocx = async () => {
+    if (!inspectionReport?.generated_docx_url) return;
+    if (downloadingDocx) return;
+
+    setError('');
+    setToast('');
+    setDownloadingDocx(true);
+
+    try {
+      const nowIso = new Date().toISOString();
+
+      // Mark tracking as complete when the DOCX is downloaded.
+      // Best-effort: complaint status constraints may vary, so failures shouldn't block the download.
+      if (complaint?.id) {
+        const { error: complaintErr } = await supabase
+          .from('complaints')
+          .update({ status: 'completed', updated_at: nowIso })
+          .eq('id', complaint.id);
+        if (complaintErr) console.warn('Failed to mark complaint complete:', complaintErr);
+      }
+
+      if (missionOrder?.id) {
+        const { error: moErr } = await supabase
+          .from('mission_orders')
+          .update({ status: 'complete', updated_at: nowIso })
+          .eq('id', missionOrder.id);
+        if (moErr) console.warn('Failed to mark mission order complete:', moErr);
+      }
+
+      setToast('Inspection slip DOCX downloaded and tracking marked complete.');
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('Failed to update tracking completion on download:', e);
+      setToast('Inspection slip downloaded.');
+    } finally {
+      setDownloadingDocx(false);
+    }
+
+    // Cache-bust to ensure regenerate shows the newest content.
+    window.open(versionedGeneratedDocxUrl || inspectionReport?.generated_docx_url, '_blank', 'noreferrer');
+  };
 
   return (
     <div className="dash-container">
@@ -311,6 +632,11 @@ export default function InspectionSlipReview() {
               </div>
 
               {error ? <div className="dash-alert dash-alert-error" style={{ marginTop: 12 }}>{error}</div> : null}
+              {toast ? (
+                <div className="dash-alert" style={{ marginTop: 12, color: '#166534', fontWeight: 900 }}>
+                  {toast}
+                </div>
+              ) : null}
 
               {loading ? (
                 <div style={{ marginTop: 16, color: '#475569', fontWeight: 700 }}>Loading inspection slip…</div>
@@ -563,6 +889,91 @@ export default function InspectionSlipReview() {
                       </div>
                     )}
                   </div>
+
+                  {hasInspectionData ? (
+                    <div className="is-card" style={{ marginTop: 16 }}>
+                      <div className="is-section-head">
+                        <div>
+                          <p className="is-section-title">Inspection Slip DOCX</p>
+                          <p className="is-section-sub">Generate / regenerate after inspection completion.</p>
+                        </div>
+                      </div>
+
+                      {hasGeneratedInspectionSlipDocx ? (
+                        <div style={{ display: 'grid', gap: 12 }}>
+                          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              className="mo-btn mo-btn-primary"
+                              onClick={handleDownloadInspectionSlipDocx}
+                              disabled={downloadingDocx}
+                              style={{ textDecoration: 'none' }}
+                            >
+                              {downloadingDocx ? 'Preparing…' : 'Download DOCX'}
+                            </button>
+
+                            <span style={{ fontWeight: 900, color: '#166534' }}>Generated</span>
+
+                            {canGenerateInspectionSlipDocx ? (
+                              <button
+                                type="button"
+                                className="mo-btn mo-btn-primary"
+                                onClick={handleGenerateInspectionSlipDocx}
+                                disabled={generatingDocx}
+                              >
+                                {generatingDocx ? 'Generating…' : 'Regenerate DOCX'}
+                              </button>
+                            ) : null}
+                          </div>
+
+                          <div style={{ display: 'grid', gap: 10 }}>
+                            <iframe
+                              key={`inspection-slip-docx-${inspectionReport?.generated_docx_created_at || inspectionReport?.updated_at || officeViewerUrl}`}
+                              title="Inspection Slip DOCX Preview"
+                              src={officeViewerUrl}
+                              style={{
+                                width: '100%',
+                                height: 560,
+                                border: '1px solid #e2e8f0',
+                                borderRadius: 14,
+                                background: '#fff',
+                              }}
+                              onError={() => setDocxPreviewError(true)}
+                            />
+
+                            {docxPreviewError ? (
+                              <div className="dash-alert dash-alert-error">Preview failed to load.</div>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : canGenerateInspectionSlipDocx ? (
+                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            className="mo-btn mo-btn-primary"
+                            onClick={handleGenerateInspectionSlipDocx}
+                            disabled={generatingDocx}
+                          >
+                            {generatingDocx ? 'Generating…' : 'Generate DOCX'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            marginTop: 12,
+                            padding: 16,
+                            borderRadius: 12,
+                            background: '#f8fafc',
+                            border: '1px dashed #cbd5e1',
+                            fontWeight: 700,
+                            color: '#475569',
+                          }}
+                        >
+                          DOCX generation is available only after the inspection report is marked as <b>completed</b>.
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
 
                   {hasInspectionData && (
                     <>

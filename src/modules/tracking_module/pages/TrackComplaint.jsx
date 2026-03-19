@@ -175,9 +175,52 @@ export default function TrackComplaint() {
                 // - If declined: resolution is case closed at decision date.
                 // - Else if inspection completed: resolution by inspection completion.
                 // - Else terminal complaint states also considered resolved.
-                const isResolved = isDeclined || inspectionCompleted || ['resolved', 'closed', 'completed', 'done'].includes(s);
+                const complaintMarkedComplete = ['resolved', 'closed', 'completed', 'done'].includes(s);
+                const hasGeneratedInspectionSlipDocx = !!latestInspection?.generated_docx_url;
+                const isResolved = isDeclined || complaintMarkedComplete || (inspectionCompleted && hasGeneratedInspectionSlipDocx);
                 const resolutionDate = isDeclined ? (declinedDate || reviewDate) : (inspectionCompletedAt || approvedDate || declinedDate || null);
-                const resolutionLabel = isDeclined ? 'Case Closed' : (inspectionCompleted ? 'Inspection Completed' : (s === 'approved' ? 'Approved' : 'Pending'));
+                const resolutionLabel = isDeclined
+                  ? 'Case Closed'
+                  : complaintMarkedComplete || (inspectionCompleted && hasGeneratedInspectionSlipDocx)
+                    ? 'Business Inspected'
+                    : inspectionCompleted
+                      ? 'Inspection Completed'
+                      : (s === 'approved' ? 'Approved' : 'Pending');
+
+                const formatFindingStatus = (value) => {
+                  const raw = String(value ?? '').trim().toLowerCase();
+                  if (!raw) return '—';
+                  if (raw === 'compliant') return 'Compliant';
+                  if (raw === 'non_compliant') return 'Non-Compliant';
+                  if (raw === 'na' || raw === 'n/a') return 'N/A';
+                  return raw.replace(/_/g, ' ').replace(/\s+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+                };
+
+                const cctvCountNum = Number(latestInspection?.cctv_count);
+                const cctvCountDisplay =
+                  Number.isFinite(cctvCountNum) && cctvCountNum > 0
+                    ? `${cctvCountNum} CCTV${cctvCountNum === 1 ? '' : 's'}`
+                    : null;
+
+                const permitSummary = formatFindingStatus(latestInspection?.business_permit_status);
+                const cctvSummaryBase = formatFindingStatus(latestInspection?.cctv_status);
+                const cctvSummary =
+                  cctvSummaryBase === 'Compliant' && cctvCountDisplay ? `Compliant (${cctvCountDisplay})` : cctvSummaryBase;
+                const signageSummary = formatFindingStatus(latestInspection?.signage_status);
+
+                // We mark tracking complete when the inspector downloads the slip.
+                // That action updates mission_orders.status = 'complete' (best-effort).
+                const missionOrderIsComplete = (missionOrders || []).some((m) => {
+                  const ms = String(m?.status || '').toLowerCase();
+                  return ms === 'complete' || ms === 'completed' || ms === 'done';
+                });
+
+                const showFindingsSummary =
+                  inspectionCompleted &&
+                  (complaintMarkedComplete || missionOrderIsComplete) &&
+                  hasGeneratedInspectionSlipDocx;
+
+                const effectiveIsResolved = isDeclined || complaintMarkedComplete || missionOrderIsComplete;
 
                 // Utility to render date nicely
                 const fmt = (d) => (d ? d.toLocaleString() : '—');
@@ -249,11 +292,37 @@ export default function TrackComplaint() {
                       </div>
 
                       {/* Step 5 - Resolution */}
-                      <div className={`vtl-step ${isResolved ? 'active' : 'inactive'}`}>
-                        <div className="vtl-marker">{isResolved ? '✓' : 5}</div>
+                      <div className={`vtl-step ${effectiveIsResolved ? 'active' : 'inactive'}`}>
+                        <div className="vtl-marker">{effectiveIsResolved ? '✓' : 5}</div>
                         <div className="vtl-content">
                           <div className="vtl-title">Resolution</div>
-                          <div className="vtl-desc">{isDeclined ? 'Case closed — no inspection will take place.' : 'Summary of findings without disclosing internal assessments'}</div>
+                          <div className="vtl-desc">
+                            {isDeclined
+                              ? 'Case closed — no inspection will take place.'
+                              : showFindingsSummary
+                                ? 'Business has been inspected. Findings summary (no internal assessments).'
+                                : 'Summary of findings will appear after the inspection slip is downloaded.'}
+                          </div>
+                          {showFindingsSummary ? (
+                            <div style={{ marginTop: 12 }}>
+                              <div className="vtl-detail">
+                                <span className="vtl-detail-label">Inspected on:</span>{' '}
+                                <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span>
+                              </div>
+                              <div style={{ marginTop: 10, fontWeight: 900, color: '#0f172a' }}>
+                                <div className="vtl-desc" style={{ fontWeight: 800, margin: 0 }}>Findings summary</div>
+                                <div style={{ marginTop: 6 }}>
+                                  <span style={{ fontWeight: 900 }}>Business Permit:</span> <span style={{ fontWeight: 800 }}>{permitSummary}</span>
+                                </div>
+                                <div style={{ marginTop: 6 }}>
+                                  <span style={{ fontWeight: 900 }}>With CCTV:</span> <span style={{ fontWeight: 800 }}>{cctvSummary}</span>
+                                </div>
+                                <div style={{ marginTop: 6 }}>
+                                  <span style={{ fontWeight: 900 }}>2sqm Signage:</span> <span style={{ fontWeight: 800 }}>{signageSummary}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
                                                   </div>
                       </div>
                     </div>
