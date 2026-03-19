@@ -1435,15 +1435,21 @@ export default function InspectionSlipCreate() {
                 borderRadius: 999,
                 border: '1px solid rgba(255,255,255,0.35)',
                 background: 'rgba(15,23,42,0.55)',
-                color: '#fff',
-                fontWeight: 900,
-                fontSize: 18,
-                lineHeight: '38px',
-                textAlign: 'center',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              ×
+              <img
+                src="/X icon.png"
+                alt="Close"
+                style={{
+                  width: 14,
+                  height: 14,
+                  filter: 'brightness(0) invert(1)',
+                }}
+              />
             </button>
 
             <div style={{ padding: 12 }}>

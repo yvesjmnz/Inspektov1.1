@@ -158,7 +158,11 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
         <div className="modal-header">
           <h2 className="modal-title">Email Verification</h2>
           <button className="modal-close-btn" onClick={handleClose} aria-label="Close modal">
-            ✕
+            <img
+              src="/X icon.png"
+              alt="Close"
+              style={{ width: 14, height: 14, filter: 'brightness(0) invert(1)' }}
+            />
           </button>
         </div>
         <div className="modal-divider"></div>

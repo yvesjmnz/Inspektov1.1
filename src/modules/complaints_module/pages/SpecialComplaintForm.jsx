@@ -4,6 +4,7 @@ import { requestEmailVerification } from '../../../lib/api';
 import { supabase } from '../../../lib/supabase';
 import Header from '../../../components/Header.jsx';
 import Stepper from '../../../components/Stepper.jsx';
+import ErrorToast from '../../../components/ErrorToast.jsx';
 import '../../../components/Stepper.css';
 import './ComplaintForm.css';
 
@@ -33,6 +34,15 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [errorToastKey, setErrorToastKey] = useState(0);
+
+  const showError = (msg) => {
+    const m = String(msg || '').trim();
+    if (!m) return;
+    setError(m);
+    setErrorToastKey((k) => k + 1);
+  };
+
   const [searchQuery, setSearchQuery] = useState('');
   const [firstSearchDone, setFirstSearchDone] = useState(false);
   const [nameSearchQuery, setNameSearchQuery] = useState('');
@@ -230,7 +240,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
         setBusinesses(results);
         setShowBusinessList(true);
       } catch (err) {
-        setError(err.message);
+        showError(err?.message || String(err));
       }
     } else {
       setBusinesses([]);
@@ -248,7 +258,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
         setBusinesses(results);
         setShowBusinessList(true);
       } catch (err) {
-        setError(err.message);
+        showError(err?.message || String(err));
       }
     } else {
       setBusinesses([]);
@@ -316,7 +326,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     // Check if adding these files would exceed the limit
     const totalPhotos = evidenceImages.length + files.length;
     if (totalPhotos > MAX_PHOTOS) {
-      setError('You can only add up to 5 photos. Please remove an existing photo before adding another.');
+      showError('You can only add up to 5 photos. Please remove an existing photo before adding another.');
       return;
     }
 
@@ -324,7 +334,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     for (const file of files) {
       const validationError = validatePhotoFile(file);
       if (validationError) {
-        setError(validationError);
+        showError(validationError);
         return;
       }
     }
@@ -335,7 +345,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
       const uploaded = await Promise.all(files.map((file) => uploadImage(file)));
       setEvidenceImages((prev) => [...prev, ...uploaded]);
     } catch (err) {
-      setError(err.message);
+      showError(err?.message || String(err));
     } finally {
       setLoading(false);
     }
@@ -351,30 +361,30 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     // Step validations
     if (step === 1) {
       if (!formData.business_name || !formData.business_address) {
-        setError('Please provide a business name and address.');
+        showError('Please provide a business name and address.');
         return;
       }
 
       if (isOutsideManilaCity) {
-        setError(OUTSIDE_JURISDICTION_MESSAGE);
+        showError(OUTSIDE_JURISDICTION_MESSAGE);
         return;
       }
     }
 
     if (step === 2) {
       if (evidenceImages.length === 0) {
-        setError('Please add at least one photo.');
+        showError('Please add at least one photo.');
         return;
       }
     }
 
     if (step === 3) {
       if (descLen < 20) {
-        setError('Description is too short (minimum 20 characters).');
+        showError('Description is too short (minimum 20 characters).');
         return;
       }
       if (descLen > 1000) {
-        setError('Description is too long (maximum 1000 characters).');
+        showError('Description is too long (maximum 1000 characters).');
         return;
       }
     }
@@ -411,7 +421,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
 
     if (!confirmTruth) {
       setLoading(false);
-      setError('Please confirm the statement before submitting.');
+      showError('Please confirm the statement before submitting.');
       return;
     }
 
@@ -445,7 +455,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
 
       window.location.href = `/complaint-confirmation?id=${encodeURIComponent(created?.id ?? '')}`;
     } catch (err) {
-      setError(err.message);
+      showError(err?.message || String(err));
     } finally {
       setLoading(false);
     }
@@ -459,7 +469,11 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
           <div className="modal-header">
             <h2 className="modal-title">Email Verification</h2>
             <button className="modal-close-btn" onClick={handleCloseVerificationModal} aria-label="Close modal">
-              ✕
+              <img
+                src="/X icon.png"
+                alt="Close"
+                style={{ width: 14, height: 14, filter: 'brightness(0) invert(1)' }}
+              />
             </button>
           </div>
           <div className="modal-divider"></div>
@@ -687,11 +701,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                       readOnly={!!formData.business_pk}
                       required
                     />
-                    {isOutsideManilaCity ? (
-                      <div className="error-message" style={{ marginTop: 8 }}>
-                        {OUTSIDE_JURISDICTION_MESSAGE}
-                      </div>
-                    ) : null}
+                    {null}
                   </div>
 
                   <div className="form-group">
@@ -802,17 +812,14 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                             position: 'absolute',
                             top: -10,
                             right: -10,
-                            background: '#f3f4f6', // light gray
-                            color: '#ef4444', // red 'x'
-                            border: '1.5px solid #e5e7eb',
+                            background: '#0f172a',
+                            border: '1.5px solid rgba(255,255,255,0.25)',
                             boxShadow: '0 1px 2px rgba(15,23,42,0.15)',
                             width: 20,
                             height: 20,
                             borderRadius: '50%',
                             boxSizing: 'border-box',
                             padding: 0,
-                            fontWeight: 900,
-                            fontSize: 12,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -822,7 +829,15 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                             userSelect: 'none',
                           }}
                         >
-                          ×
+                          <img
+                            src="/X icon.png"
+                            alt="Remove"
+                            style={{
+                              width: 10,
+                              height: 10,
+                              filter: 'brightness(0) invert(1)',
+                            }}
+                          />
                         </button>
                       </div>
                     ))}
@@ -930,7 +945,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
             </>
           ) : null}
 
-          {error ? <div className="error-message">{error}</div> : null}
+          <ErrorToast message={error} triggerKey={errorToastKey} />
 
           <div className="form-nav">
             <button type="button" className="btn btn-secondary" onClick={goBack} disabled={loading || step === 1}>

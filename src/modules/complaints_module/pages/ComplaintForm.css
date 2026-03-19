@@ -286,6 +286,43 @@
   text-decoration: none;
 }
 
+/* Compact, consistent X icon buttons (used for close/remove) */
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+}
+
+.icon-btn:hover {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.icon-btn img {
+  width: 12px;
+  height: 12px;
+  filter: brightness(0) invert(1);
+  display: block;
+}
+
+/* Smaller variant for thumbnail remove buttons */
+.icon-btn--sm {
+  width: 18px;
+  height: 18px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+}
+
+.icon-btn--sm img {
+  width: 9px;
+  height: 9px;
+}
+
 .btn-primary {
   background: #2563eb;
   color: #fff;

@@ -6,6 +6,8 @@ import { supabase } from '../../../lib/supabase';
 import { getNearbyBusinesses, formatDistance } from '../../../lib/complaints/nearbyBusinesses';
 import Header from '../../../components/Header.jsx';
 import Stepper from '../../../components/Stepper.jsx';
+import XIconButton from '../../../components/XIconButton.jsx';
+import ErrorToast from '../../../components/ErrorToast.jsx';
 import '../../../components/Stepper.css';
 import './ComplaintForm.css';
 
@@ -50,6 +52,15 @@ export default function ComplaintForm({ verifiedEmail }) {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [errorToastKey, setErrorToastKey] = useState(0);
+
+  const showError = (msg) => {
+    const m = String(msg || '').trim();
+    if (!m) return;
+    setError(m);
+    setErrorToastKey((k) => k + 1);
+  };
+
   const [searchQuery, setSearchQuery] = useState('');
   const [firstSearchDone, setFirstSearchDone] = useState(false);
   const [nameSearchQuery, setNameSearchQuery] = useState('');
@@ -74,6 +85,13 @@ export default function ComplaintForm({ verifiedEmail }) {
   const withinRange = proximityTag === 'Location Verified';
   const outOfRange = proximityTag === 'Failed Location Verification';
   const [locationCheckAttempted, setLocationCheckAttempted] = useState(false);
+
+  // Step 3 rule:
+  // - If user is within 200m, they must capture at least one photo using the in-app camera first.
+  // - After at least one camera capture, they may upload additional photos from device.
+  const hasCameraEvidence = (cameraPhotoUrls || []).length > 0;
+  // Upload UI should always be available; integrity is enforced on Next.
+  const canUploadAdditionalPhotos = true;
 
   const primaryImageInputRef = useRef(null);
   const additionalImageInputRef = useRef(null);
@@ -208,7 +226,7 @@ export default function ComplaintForm({ verifiedEmail }) {
       setShowBusinessList(true);
     } catch (err) {
       if (businessSearchQueryRef.current !== q) return;
-      setError(err.message);
+      showError(err?.message || String(err));
     }
   };
 
@@ -327,7 +345,7 @@ export default function ComplaintForm({ verifiedEmail }) {
       setShowBusinessList(true);
     } catch (err) {
       if (nameSearchQueryRef.current !== q) return;
-      setError(err.message);
+      showError(err?.message || String(err));
     }
   };
 
@@ -340,7 +358,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     // Check if adding these files would exceed the limit
     const totalPhotos = evidenceImages.length + files.length;
     if (totalPhotos > MAX_PHOTOS) {
-      setError('You can only add up to 5 photos. Please remove an existing photo before adding another.');
+      showError('You can only add up to 5 photos. Please remove an existing photo before adding another.');
       return;
     }
 
@@ -348,7 +366,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     for (const file of files) {
       const validationError = validatePhotoFile(file);
       if (validationError) {
-        setError(validationError);
+        showError(validationError);
         return;
       }
     }
@@ -359,14 +377,24 @@ export default function ComplaintForm({ verifiedEmail }) {
       const uploaded = await Promise.all(files.map((file) => uploadImage(file)));
       setEvidenceImages((prev) => [...prev, ...uploaded]);
     } catch (err) {
-      setError(err.message);
+      showError(err?.message || String(err));
     } finally {
       setLoading(false);
     }
   };
 
   const removeEvidenceImage = (index) => {
-    setEvidenceImages((prev) => prev.filter((_, i) => i !== index));
+    setEvidenceImages((prev) => {
+      const victim = prev[index];
+
+      // Keep camera evidence tracking in sync so users can't delete the camera photo
+      // and still unlock uploads while within 200m.
+      if (victim) {
+        setCameraPhotoUrls((cams) => (cams || []).filter((u) => u !== victim));
+      }
+
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   const stopCamera = () => {
@@ -656,12 +684,12 @@ export default function ComplaintForm({ verifiedEmail }) {
     const lng = coords?.lng ?? formData.reporter_lng;
 
     if (lat == null || lng == null) {
-      setError('Location not available.');
+      showError('Location not available.');
       return;
     }
 
     if (!formData.business_name) {
-      setError('Select a business first.');
+      showError('Select a business first.');
       return;
     }
 
@@ -705,7 +733,7 @@ export default function ComplaintForm({ verifiedEmail }) {
         
         // Provide user feedback about verification failure
         if (invokeError) {
-          setError(
+          showError(
             'Location verification encountered an error. You can still submit your complaint, ' +
             'but location verification will not be available.'
           );
@@ -734,7 +762,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
       // Warn if far, but don't block
       if (tag === 'Failed Location Verification') {
-        setError(
+        showError(
           `You appear to be ${Math.round(data.distance_meters)}m away from the business. ` +
           `You can still submit, but being far away may affect how your complaint is reviewed.`
         );
@@ -753,7 +781,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
   const requestDeviceLocation = () => {
     if (!('geolocation' in navigator)) {
-      setError('Geolocation is not supported by this browser/device.');
+      showError('Geolocation is not supported by this browser/device.');
       return Promise.resolve(null);
     }
 
@@ -783,7 +811,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                 ? 'Location is unavailable. Please try again.'
                 : 'Location request timed out. Please try again.';
 
-          setError(message);
+          showError(message);
           setLoading(false);
           resolve(null);
         },
@@ -808,7 +836,7 @@ export default function ComplaintForm({ verifiedEmail }) {
       // Get user's current location
       const coords = await requestDeviceLocation();
       if (coords?.lat == null || coords?.lng == null) {
-        setError('Unable to get your location. Please enable location services.');
+        showError('Unable to get your location. Please enable location services.');
         setLoading(false);
         return;
       }
@@ -817,7 +845,7 @@ export default function ComplaintForm({ verifiedEmail }) {
       const nearby = await getNearbyBusinesses(coords.lat, coords.lng, 200);
 
       if (nearby.length === 0) {
-        setError('No businesses found within 200m of your location. Try searching manually.');
+        showError('No businesses found within 200m of your location. Try searching manually.');
         setLoading(false);
         return;
       }
@@ -828,7 +856,7 @@ export default function ComplaintForm({ verifiedEmail }) {
       setShowBusinessList(true);
       setError(null);
     } catch (err) {
-      setError(err?.message || 'Failed to find nearby businesses.');
+      showError(err?.message || 'Failed to find nearby businesses.');
     } finally {
       setLoading(false);
     }
@@ -894,26 +922,32 @@ export default function ComplaintForm({ verifiedEmail }) {
     // Step validations
     if (step === 1) {
       if (!formData.business_name || !formData.business_address) {
-        setError('Please provide a business name and address.');
+        showError('Please provide a business name and address.');
         return;
       }
 
       if (isOutsideManilaCity) {
-        setError(OUTSIDE_JURISDICTION_MESSAGE);
+        showError(OUTSIDE_JURISDICTION_MESSAGE);
         return;
       }
     }
 
     if (step === 2) {
       if (formData.reporter_lat == null || formData.reporter_lng == null) {
-        setError('Please confirm your device location before continuing.');
+        showError('Please confirm your device location before continuing.');
         return;
       }
     }
 
     if (step === 3) {
       if (evidenceImages.length === 0) {
-        setError('Please add at least one photo.');
+        showError('Please add at least one photo.');
+        return;
+      }
+
+      // Integrity rule: when within 200m, at least one remaining photo must be captured in-app.
+      if (withinRange && (cameraPhotoUrls || []).length === 0) {
+        showError('Within 200m: please capture at least one photo using the in-app camera.');
         return;
       }
     }
@@ -923,7 +957,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
       // Require: at least 1 selected category
       if ((selectedCategories || []).length === 0) {
-        setError('Please select at least one Nature of Violation.');
+        showError('Please select at least one Nature of Violation.');
         return;
       }
 
@@ -931,18 +965,18 @@ export default function ComplaintForm({ verifiedEmail }) {
       const missingSubFor = (selectedCategories || []).find((catKey) => (selectedSubcats?.[catKey]?.length || 0) === 0);
       if (missingSubFor) {
         const catLabel = GUIDED_CATEGORIES.find((c) => c.key === missingSubFor)?.label || 'the selected category';
-        setError(`Please select at least one Specific Violation under: ${catLabel}.`);
+        showError(`Please select at least one Specific Violation under: ${catLabel}.`);
         return;
       }
 
       // Require min 20 characters
       if (descText.length < 20) {
-        setError('Description is too short (minimum 20 characters).');
+        showError('Description is too short (minimum 20 characters).');
         return;
       }
 
       if (descText.length > 1000) {
-        setError('Description is too long (maximum 1000 characters).');
+        showError('Description is too long (maximum 1000 characters).');
         return;
       }
     }
@@ -979,7 +1013,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
     if (!confirmTruth) {
       setLoading(false);
-      setError('Please confirm the statement before submitting.');
+      showError('Please confirm the statement before submitting.');
       return;
     }
 
@@ -1024,7 +1058,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
       window.location.href = `/complaint-confirmation?id=${encodeURIComponent(created?.id ?? '')}`;
     } catch (err) {
-      setError(err.message);
+      showError(err?.message || String(err));
     } finally {
       setLoading(false);
     }
@@ -1281,11 +1315,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                       aria-readonly={formData.business_pk ? 'true' : 'false'}
                       required
                     />
-                    {isOutsideManilaCity ? (
-                      <div className="error-message" style={{ marginTop: 8 }}>
-                        {OUTSIDE_JURISDICTION_MESSAGE}
-                      </div>
-                    ) : null}
+                    {null}
                   </div>
 
                   <div className="form-group">
@@ -1483,40 +1513,24 @@ export default function ComplaintForm({ verifiedEmail }) {
                             </div>
                             <div />
                           </div>
-                          <button
-                            type="button"
+                          <XIconButton
+                            label="Close Camera"
                             onClick={closeCamera}
                             disabled={loading || cameraBusy}
-                            aria-label="Close Camera"
-                            title="Close Camera"
-                            className="btn"
                             style={{
                               position: 'absolute',
                               top: 10,
                               right: 10,
-                              width: 40,
-                              height: 40,
-                              borderRadius: '999px',
-                              padding: 0,
-                              background: '#ffffff',
-                              color: '#dc2626',
-                              border: '1.5px solid #e5e7eb',
-                              boxShadow: '0 4px 10px rgba(0,0,0,0.2)',
-                              fontWeight: 900,
-                              lineHeight: '40px',
-                              textAlign: 'center'
                             }}
-                          >
-                            ×
-                          </button>
+                          />
                         </div>
                       </div>
                     ) : null}
                   </>
                 ) : null}
 
-                {/* File upload (show drag/drop when user is out of range) */}
-                {outOfRange ? (
+                {/* File upload (always available; integrity is enforced on Next when within 200m) */}
+                {canUploadAdditionalPhotos ? (
                   <>
                     <div
                       className={`dropzone ${loading ? '' : ''}`}
@@ -1565,6 +1579,12 @@ export default function ComplaintForm({ verifiedEmail }) {
                     </div>
 
                     <div style={{ marginTop: 8 }}><span className="small-pill">{evidenceImages.length} / 5 added</span></div>
+
+                    {withinRange && !hasCameraEvidence ? (
+                      <div className="inline-note" style={{ marginTop: 6 }}>
+                        Note: since you are within 200m, you still need at least one in-app camera photo to continue.
+                      </div>
+                    ) : null}
                   </>
                 ) : null}
 
@@ -1598,36 +1618,18 @@ export default function ComplaintForm({ verifiedEmail }) {
                           alt="Evidence"
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                         />
-                        <button
-                          type="button"
+                        <XIconButton
+                          size="sm"
+                          label="Remove image"
                           onClick={() => removeEvidenceImage(index)}
-                          aria-label="Remove image"
                           style={{
                             position: 'absolute',
-                            top: -10,
-                            right: -10,
-                            background: '#f3f4f6',
-                            color: '#ef4444',
-                            border: '1.5px solid #e5e7eb',
-                            boxShadow: '0 1px 2px rgba(15,23,42,0.15)',
-                            width: 20,
-                            height: 20,
-                            borderRadius: '50%',
-                            boxSizing: 'border-box',
-                            padding: 0,
-                            fontWeight: 900,
-                            fontSize: 12,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            cursor: 'pointer',
-                            lineHeight: 1,
+                            top: -8,
+                            right: -8,
                             zIndex: 1,
                             userSelect: 'none',
                           }}
-                        >
-                          ×
-                        </button>
+                        />
                       </div>
                     ))}
                   </div>
@@ -1854,7 +1856,7 @@ export default function ComplaintForm({ verifiedEmail }) {
             </>
           ) : null}
 
-          {error ? <div className="error-message">{error}</div> : null}
+          <ErrorToast message={error} triggerKey={errorToastKey} />
 
           <div className="form-nav">
             {step === 1 ? null : (
