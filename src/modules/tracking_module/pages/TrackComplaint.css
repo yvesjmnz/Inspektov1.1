@@ -66,6 +66,12 @@
   padding: 0 12px;
   outline: none;
   font-size: 14px;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.track-input::placeholder {
+  color: #64748b;
 }
 
 .track-input:focus {
@@ -73,21 +79,7 @@
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
-.track-btn {
-  height: 44px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 10px;
-  background: #2563eb;
-  color: #fff;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.track-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
+/* Track page now reuses the shared button system (.btn/.btn-primary) from ComplaintForm.css */
 
 .track-alert {
   margin-top: 14px;
@@ -747,28 +739,7 @@
   justify-content: center;
 }
 
-.track-btn-back {
-  padding: 12px 32px;
-  background: #2563eb;
-  color: #ffffff;
-  border: none;
-  border-radius: 10px;
-  font-weight: 700;
-  font-size: 15px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
-}
-
-.track-btn-back:hover {
-  background: #1d4ed8;
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
-}
-
-.track-btn-back:active {
-  transform: translateY(0);
-}
+/* Back to Tracking now uses shared .btn .btn-primary styles */
 
 .track-help {
   position: absolute;         
@@ -867,7 +838,7 @@
     flex-direction: column;
   }
 
-  .track-btn {
+  .btn {
     width: 100%;
   }
 
@@ -942,11 +913,7 @@
     padding-top: 20px;
   }
 
-  .track-btn-back {
-    padding: 11px 24px;
-    font-size: 14px;
-  }
-
+  
   .track-result-header .track-title {
     font-size: 22px;
   }
@@ -993,11 +960,7 @@
     font-size: 11px;
   }
 
-  .track-btn-back {
-    padding: 10px 20px;
-    font-size: 13px;
   }
-}
 
 /* Complaint Progress Card (vertical timeline) */
 .progress-card {

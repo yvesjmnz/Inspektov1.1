@@ -5,9 +5,11 @@ import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/compla
 import { supabase } from '../../../lib/supabase';
 import { getNearbyBusinesses, formatDistance } from '../../../lib/complaints/nearbyBusinesses';
 import Header from '../../../components/Header.jsx';
+import Footer from '../../../components/Footer.jsx';
 import Stepper from '../../../components/Stepper.jsx';
 import XIconButton from '../../../components/XIconButton.jsx';
 import ErrorToast from '../../../components/ErrorToast.jsx';
+import NoteToast from '../../../components/NoteToast.jsx';
 import '../../../components/Stepper.css';
 import './ComplaintForm.css';
 
@@ -53,12 +55,21 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [errorToastKey, setErrorToastKey] = useState(0);
+  const [note, setNote] = useState(null);
+  const [noteToastKey, setNoteToastKey] = useState(0);
 
   const showError = (msg) => {
     const m = String(msg || '').trim();
     if (!m) return;
     setError(m);
     setErrorToastKey((k) => k + 1);
+  };
+
+  const showNote = (msg) => {
+    const m = String(msg || '').trim();
+    if (!m) return;
+    setNote(m);
+    setNoteToastKey((k) => k + 1);
   };
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,7 +91,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   }, [formData.business_address]);
 
   const OUTSIDE_JURISDICTION_MESSAGE =
-    'Location Outside Jurisdiction: This business address falls outside the City of Manila. Digital inspections are currently restricted to Manila City limits.';
+    'This business address is outside the supported inspection area.';
 
   const withinRange = proximityTag === 'Location Verified';
   const outOfRange = proximityTag === 'Failed Location Verification';
@@ -358,7 +369,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     // Check if adding these files would exceed the limit
     const totalPhotos = evidenceImages.length + files.length;
     if (totalPhotos > MAX_PHOTOS) {
-      showError('You can only add up to 5 photos. Please remove an existing photo before adding another.');
+      showError('Maximum of 5 photos allowed');
       return;
     }
 
@@ -762,10 +773,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
       // Warn if far, but don't block
       if (tag === 'Failed Location Verification') {
-        showError(
-          `You appear to be ${Math.round(data.distance_meters)}m away from the business. ` +
-          `You can still submit, but being far away may affect how your complaint is reviewed.`
-        );
+        showNote(`You appear to be ${Math.round(data.distance_meters)}m away from the business.`);
       }
     } catch (err) {
       // Fail-open: allow continuation on error
@@ -845,7 +853,7 @@ export default function ComplaintForm({ verifiedEmail }) {
       const nearby = await getNearbyBusinesses(coords.lat, coords.lng, 200);
 
       if (nearby.length === 0) {
-        showError('No businesses found within 200m of your location. Try searching manually.');
+        showError('No businesses found within 200m of your location.');
         setLoading(false);
         return;
       }
@@ -947,7 +955,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
       // Integrity rule: when within 200m, at least one remaining photo must be captured in-app.
       if (withinRange && (cameraPhotoUrls || []).length === 0) {
-        showError('Within 200m: please capture at least one photo using the in-app camera.');
+        showError('Capture at least one in-app photo');
         return;
       }
     }
@@ -957,7 +965,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
       // Require: at least 1 selected category
       if ((selectedCategories || []).length === 0) {
-        showError('Please select at least one Nature of Violation.');
+        showError('Please specify at least one violation.');
         return;
       }
 
@@ -965,7 +973,7 @@ export default function ComplaintForm({ verifiedEmail }) {
       const missingSubFor = (selectedCategories || []).find((catKey) => (selectedSubcats?.[catKey]?.length || 0) === 0);
       if (missingSubFor) {
         const catLabel = GUIDED_CATEGORIES.find((c) => c.key === missingSubFor)?.label || 'the selected category';
-        showError(`Please select at least one Specific Violation under: ${catLabel}.`);
+        showError(`Please select at least one specific violation under: ${catLabel}.`);
         return;
       }
 
@@ -1342,11 +1350,23 @@ export default function ComplaintForm({ verifiedEmail }) {
               <div className="form-group">
                 <label>Device Location</label>
                 <div className="file-upload">
-                  <button type="button" className={`btn btn-secondary ${loading ? 'btn-loading' : ''}`} onClick={detectLocation} disabled={loading}>
+                  <button
+                    type="button"
+                    className={`btn btn-secondary ${loading ? 'btn-loading' : ''}`}
+                    onClick={detectLocation}
+                    disabled={loading}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      lineHeight: 1,
+                    }}
+                  >
                     {loading ? (
                       <>
-                        <span className="spinner" />
-                        Checking…
+                        <span className="spinner" style={{ margin: 0, flex: '0 0 auto' }} />
+                        <span style={{ display: 'inline-block', transform: 'translateY(0.5px)' }}>Checking…</span>
                       </>
                     ) : (
                       'Check My Location'
@@ -1429,7 +1449,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
                 {withinRange ? (
                   <div className="inline-note">
-                    You are within 200m. For integrity, photo evidence must be captured using the in-app camera.
+                    You are within 200m, so at least one photo must be taken using the in-app camera.
                   </div>
                 ) : outOfRange ? (
                   <div className="inline-note">
@@ -1573,18 +1593,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                         className="file-input"
                       />
                     </div>
-
-                    <div className="inline-note" style={{ marginTop: 10 }}>
-                      Upload one or more photos from your device. You can add up to 5 photos.
-                    </div>
-
                     <div style={{ marginTop: 8 }}><span className="small-pill">{evidenceImages.length} / 5 added</span></div>
-
-                    {withinRange && !hasCameraEvidence ? (
-                      <div className="inline-note" style={{ marginTop: 6 }}>
-                        Note: since you are within 200m, you still need at least one in-app camera photo to continue.
-                      </div>
-                    ) : null}
                   </>
                 ) : null}
 
@@ -1857,6 +1866,7 @@ export default function ComplaintForm({ verifiedEmail }) {
           ) : null}
 
           <ErrorToast message={error} triggerKey={errorToastKey} />
+          <NoteToast message={note} triggerKey={noteToastKey} />
 
           <div className="form-nav">
             {step === 1 ? null : (
@@ -1878,6 +1888,7 @@ export default function ComplaintForm({ verifiedEmail }) {
         </form>
       </div>
     </div>
+      <Footer />
     </>
   );
 }

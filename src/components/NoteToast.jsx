@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 /**
- * ErrorToast
- * Bottom-right error flash message.
+ * NoteToast
+ * Bottom-right informational flash message.
  * - Animates in
  * - Auto-dismisses after `durationMs`
  * - Re-triggers (resets timer/animation) when `message` changes OR when `triggerKey` changes
  */
-export default function ErrorToast({
+export default function NoteToast({
   message,
   durationMs = 3000,
   triggerKey,
@@ -23,7 +23,6 @@ export default function ErrorToast({
   }, [message]);
 
   useEffect(() => {
-    // Clear any existing timer
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -34,7 +33,6 @@ export default function ErrorToast({
       return;
     }
 
-    // Re-trigger animation + visibility
     setAnimKey((k) => k + 1);
     setVisible(true);
 
@@ -56,8 +54,8 @@ export default function ErrorToast({
   const node = (
     <div
       key={animKey}
-      role="alert"
-      aria-live="assertive"
+      role="status"
+      aria-live="polite"
       style={{
         position: 'fixed',
         right: 18,
@@ -73,20 +71,18 @@ export default function ErrorToast({
         display: 'grid',
         gridTemplateColumns: '6px auto 1fr',
         alignItems: 'stretch',
-        animation: 'errorToastIn 220ms ease-out, errorToastOut 220ms ease-in forwards',
+        animation: 'noteToastIn 220ms ease-out, noteToastOut 220ms ease-in forwards',
         animationDelay: `0ms, ${Math.max(0, durationMs - 220)}ms`,
         willChange: 'transform, opacity',
-
-        // Ensure the red accent is flush to the very left edge (no subpixel gaps)
         padding: 0,
         margin: 0,
         boxSizing: 'border-box',
       }}
     >
-      {/* Red accent bar with a subtle white edge like the reference */}
+      {/* Accent bar */}
       <div
         style={{
-          background: 'linear-gradient(90deg, #ef4444 0%, #ef4444 70%, rgba(255,255,255,0.95) 100%)',
+          background: 'linear-gradient(90deg, #f59e0b 0%, #f59e0b 70%, rgba(255,255,255,0.95) 100%)',
           width: '100%',
           height: '100%',
           margin: 0,
@@ -98,7 +94,7 @@ export default function ErrorToast({
         }}
       />
 
-      {/* Circle X icon (left side) */}
+      {/* Circle ! icon (left side) */}
       <div
         aria-hidden="true"
         style={{
@@ -113,7 +109,7 @@ export default function ErrorToast({
             width: 34,
             height: 34,
             borderRadius: 999,
-            border: '2px solid rgba(239,68,68,0.85)',
+            border: '2px solid rgba(245,158,11,0.85)',
             display: 'grid',
             placeItems: 'center',
             background: '#ffffff',
@@ -121,20 +117,20 @@ export default function ErrorToast({
         >
           <div
             style={{
-              position: 'relative',
               width: 16,
               height: 16,
+              position: 'relative',
             }}
           >
             <span
               style={{
                 position: 'absolute',
                 left: '50%',
-                top: '50%',
-                width: 18,
-                height: 2,
-                background: 'rgba(239,68,68,0.9)',
-                transform: 'translate(-50%, -50%) rotate(45deg)',
+                top: 2,
+                width: 3,
+                height: 10,
+                background: 'rgba(245,158,11,0.95)',
+                transform: 'translateX(-50%)',
                 borderRadius: 2,
               }}
             />
@@ -142,12 +138,12 @@ export default function ErrorToast({
               style={{
                 position: 'absolute',
                 left: '50%',
-                top: '50%',
-                width: 18,
-                height: 2,
-                background: 'rgba(239,68,68,0.9)',
-                transform: 'translate(-50%, -50%) rotate(-45deg)',
-                borderRadius: 2,
+                bottom: 1,
+                width: 3,
+                height: 3,
+                background: 'rgba(245,158,11,0.95)',
+                transform: 'translateX(-50%)',
+                borderRadius: 999,
               }}
             />
           </div>
@@ -155,17 +151,17 @@ export default function ErrorToast({
       </div>
 
       <div style={{ padding: '12px 14px 12px 0' }}>
-        <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 13, marginBottom: 2 }}>Error</div>
+        <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 13, marginBottom: 2 }}>Note</div>
         <div style={{ color: '#475569', fontWeight: 400, fontSize: 12, lineHeight: 1.25 }}>{normalized}</div>
       </div>
 
       <style>{`
-        @keyframes errorToastIn {
+        @keyframes noteToastIn {
           from { transform: translateY(10px); opacity: 0; }
           to { transform: translateY(0); opacity: 1; }
         }
 
-        @keyframes errorToastOut {
+        @keyframes noteToastOut {
           from { transform: translateY(0); opacity: 1; }
           to { transform: translateY(10px); opacity: 0; }
         }
@@ -173,6 +169,5 @@ export default function ErrorToast({
     </div>
   );
 
-  // Render into <body> so it is always viewport-fixed (not affected by transformed ancestors)
   return createPortal(node, document.body);
 }
