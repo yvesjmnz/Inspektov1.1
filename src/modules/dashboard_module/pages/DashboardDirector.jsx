@@ -76,7 +76,7 @@ function formatStatus(status) {
 
 function statusBadgeClass(status) {
   const s = String(status || '').toLowerCase();
-  if (['approved'].includes(s)) return 'status-badge status-success';
+  if (['approved', 'completed'].includes(s)) return 'status-badge status-success';
   if (['declined', 'rejected', 'invalid'].includes(s)) return 'status-badge status-danger';
   if (['submitted', 'pending', 'new'].includes(s)) return 'status-badge status-warning';
   if (['on hold', 'on_hold', 'hold'].includes(s)) return 'status-badge status-info';
@@ -708,10 +708,98 @@ export default function DashboardDirector() {
           query = query.or(`business_name.ilike.%${searchVal}%,id::text.ilike.%${searchVal}%,mission_order_id::text.ilike.%${searchVal}%`);
         }
 
-        const { data, error } = await query;
-        if (error) throw error;
+        const { data: inspRows, error: inspErr } = await query;
+        if (inspErr) throw inspErr;
 
-        setMissionOrders(data || []);
+        // Merge mission order inspection dates so Director view can display the scheduled inspection date
+        const missionOrderIds = Array.from(new Set((inspRows || []).map((r) => r.mission_order_id).filter(Boolean)));
+        let moMap = new Map();
+        let complaintMap = new Map();
+
+        if (missionOrderIds.length) {
+          const { data: moRows, error: moErr } = await supabase
+            .from('mission_orders')
+            .select('id, date_of_inspection, complaint_id')
+            .in('id', missionOrderIds);
+
+          if (moErr) {
+            console.warn('Failed to load mission orders for inspection dates', moErr);
+          } else {
+            moMap = new Map((moRows || []).map((m) => [m.id, m]));
+
+            const complaintIds = Array.from(new Set((moRows || []).map((m) => m.complaint_id).filter(Boolean)));
+            if (complaintIds.length) {
+              const { data: complaintRows, error: complaintErr } = await supabase
+                .from('complaints')
+                .select('id, business_name, business_address')
+                .in('id', complaintIds);
+
+              if (complaintErr) {
+                console.warn('Failed to load complaints for inspection rows', complaintErr);
+              } else {
+                complaintMap = new Map((complaintRows || []).map((c) => [c.id, c]));
+              }
+            }
+          }
+        }
+
+        // Also load assignment -> profile so we can show inspector display names for Director view
+        const inspectorNamesByMoId = new Map();
+        if (missionOrderIds.length) {
+          try {
+            const { data: assignmentRows, error: assignmentErr } = await supabase
+              .from('mission_order_assignments')
+              .select('mission_order_id, inspector_id')
+              .in('mission_order_id', missionOrderIds);
+
+            if (assignmentErr) {
+              console.warn('Failed to load mission_order_assignments for inspection rows', assignmentErr);
+            } else if ((assignmentRows || []).length) {
+              const inspectorIds = Array.from(new Set((assignmentRows || []).map((a) => a.inspector_id).filter(Boolean)));
+              let profileById = new Map();
+              if (inspectorIds.length) {
+                try {
+                  const { data: profileRows, error: profileErr } = await supabase
+                    .from('profiles')
+                    .select('id, full_name, first_name, middle_name, last_name')
+                    .in('id', inspectorIds);
+                  if (profileErr) {
+                    console.warn('Failed to load profiles for inspectors', profileErr);
+                  } else {
+                    profileById = new Map((profileRows || []).map((p) => [p.id, p]));
+                  }
+                } catch (pe) {
+                  console.warn('Failed to fetch inspector profiles', pe);
+                }
+              }
+
+              (assignmentRows || []).forEach((a) => {
+                if (!a?.mission_order_id || !a?.inspector_id) return;
+                const p = profileById.get(a.inspector_id) || {};
+                const displayName = p?.full_name || [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') || String(a.inspector_id).slice(0, 8);
+                const arr = inspectorNamesByMoId.get(a.mission_order_id) || [];
+                arr.push(displayName);
+                inspectorNamesByMoId.set(a.mission_order_id, arr);
+              });
+            }
+          } catch (e) {
+            console.warn('Failed to load inspector assignments/profiles', e);
+          }
+        }
+
+        const merged = (inspRows || []).map((r) => {
+          const mo = moMap.get(r.mission_order_id) || {};
+          const complaint = mo?.complaint_id ? complaintMap.get(mo.complaint_id) : null;
+          return {
+            ...r,
+            date_of_inspection: mo.date_of_inspection || null,
+            business_name: (complaint && complaint.business_name) || r.business_name || '—',
+            business_address: (complaint && complaint.business_address) || '',
+            inspector_names: inspectorNamesByMoId.get(r.mission_order_id) || [],
+          };
+        });
+
+        setMissionOrders(merged);
         setLoading(false);
         return;
       }
@@ -890,6 +978,35 @@ export default function DashboardDirector() {
       groups[key].items.sort((a, b) => {
         const timeA = a.mission_order_created_at ? new Date(a.mission_order_created_at).getTime() : a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
         const timeB = b.mission_order_created_at ? new Date(b.mission_order_created_at).getTime() : b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
+        return timeB - timeA;
+      });
+    }
+
+    const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
+    return { groups, sortedKeys };
+  }, [filteredMissionOrders, tab]);
+
+  // Group inspections by completed date for Inspection History
+  const inspectionsByDay = useMemo(() => {
+    if (tab !== 'inspection-history') return { groups: {}, sortedKeys: [] };
+    const groups = {};
+
+    for (const inspection of filteredMissionOrders) {
+      const d = inspection.completed_at ? new Date(inspection.completed_at) : null;
+      const key = d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : 'unknown';
+
+      if (!groups[key]) {
+        const label = d ? d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }) : 'Unknown Date';
+        groups[key] = { label, items: [] };
+      }
+      groups[key].items.push(inspection);
+    }
+
+    // Sort items within each day by completed_at (newest first)
+    for (const key in groups) {
+      groups[key].items.sort((a, b) => {
+        const timeA = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+        const timeB = b.completed_at ? new Date(b.completed_at).getTime() : 0;
         return timeB - timeA;
       });
     }
@@ -2015,8 +2132,7 @@ export default function DashboardDirector() {
                           <th style={{ width: 180 }}>Status</th>
                           <th style={{ width: 220 }}>Submitted</th>
                           <th style={{ width: 260 }}>Actions</th>
-                          <th style={{ width: 180 }}>Inspection Slip</th>
-                        </tr>
+                          </tr>
                       </thead>
                       <tbody>
                         {filteredMissionOrders.map((mo) => (
@@ -2090,84 +2206,109 @@ export default function DashboardDirector() {
                   {loading ? 'Loading…' : 'No completed inspections found.'}
                 </div>
               ) : (
-                <div
-                  style={{
-                    background: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 14,
-                    boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
-                    overflow: 'hidden',
-                    transition: 'box-shadow 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
-                  }}
-                >
-                  {/* Header */}
-                  <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
-                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Completed Inspections</h3>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
-                      <span>{filteredMissionOrders.length} {filteredMissionOrders.length === 1 ? 'Record' : 'Records'}</span>
-                    </div>
-                  </div>
+                inspectionsByDay.sortedKeys.map((dayKey) => {
+                  const dayGroup = inspectionsByDay.groups[dayKey];
+                  const label = dayGroup?.label || dayKey;
+                  const itemCount = dayGroup?.items?.length || 0;
 
-                  {/* Table */}
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                          <th style={{ width: 120 }}>Inspection ID</th>
-                          <th>Business Name</th>
-                          <th style={{ width: 180 }}>Status</th>
-                          <th style={{ width: 220 }}>Completed</th>
-                          <th style={{ width: 220 }}>Mission Order</th>
-                          <th style={{ width: 150 }}>Inspection Slip</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredMissionOrders.map((inspection) => (
-                          <tr
-                            key={inspection.id}
-                            style={{
-                              cursor: 'default',
-                              borderBottom: '1px solid #e2e8f0',
-                              transition: 'background-color 0.2s ease',
-                              position: 'relative',
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = '#f8fafc';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = '#ffffff';
-                            }}
-                          >
-                            <td style={{ padding: '12px' }} title={inspection.id}>{String(inspection.id).slice(0, 8)}…</td>
-                            <td style={{ padding: '12px' }}>
-                              <div className="dash-cell-title">{inspection.business_name || '—'}</div>
-                            </td>
-                            <td style={{ padding: '12px' }}>
-                              <span className={statusBadgeClass(inspection.status)}>{formatStatus(inspection.status)}</span>
-                            </td>
-                            <td style={{ padding: '12px' }}>{formatDateNoSeconds(inspection.completed_at)}</td>
-                            <td style={{ padding: '12px' }} title={inspection.mission_order_id}>{String(inspection.mission_order_id).slice(0, 8)}…</td>
-                            <td style={{ padding: '12px' }}>
-                              <a
-                                className="dash-btn"
-                                href={`/inspection-slip/review?id=${encodeURIComponent(inspection.id)}&role=director`}
+                  if (itemCount === 0) return null;
+
+                  return (
+                    <div
+                      key={`insp-hist-day-${dayKey}`}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 14,
+                        boxShadow: '0 4px 12px rgba(2,6,23,0.08)',
+                        overflow: 'hidden',
+                        transition: 'box-shadow 0.2s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
+                      }}
+                    >
+                      {/* Day Header */}
+                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                          {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
+                        </h3>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#22c55e', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
+                          <span>{itemCount} Completed Inspection{itemCount === 1 ? '' : 's'}</span>
+                        </div>
+                      </div>
+
+                      {/* Table for this day */}
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                              <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspection Status</th>
+                              <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                              <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspection Date</th>
+                              <th style={{ width: 210, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Completed Date</th>
+                              <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inspectors</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dayGroup.items.map((inspection) => (
+                              <tr
+                                key={inspection.id}
+                                style={{
+                                  cursor: 'pointer',
+                                  borderBottom: '1px solid #e2e8f0',
+                                  transition: 'background-color 0.2s ease',
+                                  position: 'relative',
+                                }}
+                                onClick={() => {
+                                  if (inspection.id) {
+                                    window.location.assign(`/inspection-slip/review?id=${inspection.id}&role=director`);
+                                  }
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = '#f8fafc';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = '#ffffff';
+                                }}
                               >
-                                View
-                              </a>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                                <td style={{ padding: '12px' }}>
+                                  <span className={statusBadgeClass(inspection.status)}>{formatStatus(inspection.status)}</span>
+                                </td>
+                                <td style={{ padding: '12px' }}>
+                                  <div className="dash-cell-title">{inspection.business_name || '—'}</div>
+                                  <div className="dash-cell-sub">{inspection.business_address || ''}</div>
+                                </td>
+                                <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>{inspection.date_of_inspection ? new Date(inspection.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : (inspection.completed_at ? new Date(inspection.completed_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—')}</td>
+                                <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>{inspection.completed_at ? new Date(inspection.completed_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : (inspection.completed_at ? new Date(inspection.completed_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—')}</td>
+                                <td style={{ padding: '12px' }}>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 30, alignItems: 'center', fontSize: 12 }}>
+                                    {(inspection.inspector_names || []).length === 0 ? (
+                                      <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+                                    ) : (
+                                      (inspection.inspector_names || []).map((name, idx) => (
+                                        <span
+                                          key={`${inspection.mission_order_id || inspection.inspection_report_id}-${idx}`}
+                                          style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}
+                                        >
+                                          {name}
+                                        </span>
+                                      ))
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
           ) : tab === 'mission-orders-history' ? (
