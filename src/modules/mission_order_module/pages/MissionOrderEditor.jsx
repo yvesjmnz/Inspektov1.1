@@ -325,7 +325,7 @@ export default function MissionOrderEditor() {
     try {
       const { data: mo, error: moError } = await supabase
         .from('mission_orders')
-        .select('id, complaint_id, status, director_comment, director_signature_url, date_of_inspection, date_of_issuance, template_name, generated_docx_url, created_at, updated_at')
+        .select('id, complaint_id, status, director_comment, director_signature_url, date_of_inspection, date_of_issuance, template_name, generated_docx_url, secretary_signed_attachment_url, created_at, updated_at')
         .eq('id', missionOrderId)
         .single();
       if (moError) throw moError;
@@ -1524,6 +1524,15 @@ export default function MissionOrderEditor() {
     }
   };
 
+  const handleDownloadSignedMo = () => {
+    const signedUrl = missionOrder?.secretary_signed_attachment_url;
+    if (!signedUrl) {
+      setError('No signed mission order attachment found.');
+      return;
+    }
+    window.open(signedUrl, '_blank');
+  };
+
   // Auto-regenerate docx when the inspection date changes (same behavior as inspectors/ordinances).
   useEffect(() => {
     if (loading) return;
@@ -1755,7 +1764,7 @@ export default function MissionOrderEditor() {
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                    gridTemplateColumns: isComplete ? 'repeat(5, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))',
                     gap: 18,
                     rowGap: 0,
                     marginBottom: -4,
@@ -1805,13 +1814,25 @@ export default function MissionOrderEditor() {
                   </span>
                   <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Issuance Date</span>
                 </div>
+                {isComplete ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <span aria-hidden="true" style={{ color: '#0b2249' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 16V4" stroke="#0b2249" strokeWidth="2" strokeLinecap="round" />
+                        <path d="M7 11L12 16L17 11" stroke="#0b2249" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M4 19H20" stroke="#0b2249" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    </span>
+                    <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>Signed MO</span>
+                  </div>
+                ) : null}
                 </div>
 
                 {/* Row 2: values */}
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                    gridTemplateColumns: isComplete ? 'repeat(5, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))',
                     gap: 18,
                     rowGap: 0,
                     marginTop: -6,
@@ -1827,6 +1848,35 @@ export default function MissionOrderEditor() {
                   <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{assignedInspectorNames || '—'}</div>
                   <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{dateOfInspection ? formatDateHuman(dateOfInspection) : '—'}</div>
                   <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'N/A'}</div>
+                  {isComplete ? (
+                    <div style={{ minWidth: 0 }}>
+                      {missionOrder?.secretary_signed_attachment_url ? (
+                        <button
+                          type="button"
+                          onClick={handleDownloadSignedMo}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 8,
+                            padding: '8px 12px',
+                            borderRadius: 10,
+                            border: '1px solid rgba(255,255,255,0.28)',
+                            background: 'rgba(255,255,255,0.12)',
+                            color: '#fff',
+                            fontWeight: 900,
+                            fontSize: 13,
+                            cursor: 'pointer',
+                            lineHeight: 1,
+                          }}
+                        >
+                          Download
+                        </button>
+                      ) : (
+                        <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>N/A</span>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* Row 3: ordinances */}

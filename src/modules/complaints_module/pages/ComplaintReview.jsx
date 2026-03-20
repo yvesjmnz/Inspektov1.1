@@ -1099,14 +1099,6 @@ export default function ComplaintReview() {
                                 </div>
                               )}
 
-                              <div style={{ marginTop: 10, display: 'grid', gap: 4 }}>
-                                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                                  <span style={{ color: '#dc2626', fontWeight: 800 }}>•</span> Required if Declining
-                                </div>
-                                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                                  <span style={{ color: '#22c55e', fontWeight: 800 }}>•</span> Optional if Approving
-                                </div>
-                              </div>
                             </>
                           ) : (
                             <div style={{

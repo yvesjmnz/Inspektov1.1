@@ -210,6 +210,24 @@ export default function DashboardHeadInspector() {
     };
   }, [tab]);
 
+  const rejectedMissionOrders = useMemo(
+    () =>
+      complaints.filter((c) => {
+        const s = String(c.mission_order_status || '').toLowerCase();
+        return s === 'rejected';
+      }),
+    [complaints]
+  );
+
+  const preApprovedMissionOrders = useMemo(
+    () =>
+      complaints.filter((c) => {
+        const s = String(c.mission_order_status || '').toLowerCase();
+        return s === 'for inspection' || s === 'for_inspection';
+      }),
+    [complaints]
+  );
+
   const [creatingForId, setCreatingForId] = useState(null);
   const [toast, setToast] = useState('');
   const [expandedComplaintId, setExpandedComplaintId] = useState(null);
@@ -1326,19 +1344,22 @@ export default function DashboardHeadInspector() {
                   )}
                 </div>
               ) : tab === 'results' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                   {/* Rejected Section */}
-                  <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
+                  <div style={{ order: 2, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
                     <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
                       <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Rejected</h3>
                       <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#ef4444' }}>
-                        {complaints.filter((c) => {
-                          const s = String(c.mission_order_status || '').toLowerCase();
-                          return s === 'rejected';
-                        }).length} items
+                        {rejectedMissionOrders.length} items
                       </div>
                     </div>
-                    <div style={{ overflowX: 'auto', maxHeight: '600px', overflowY: 'auto' }}>
+                    <div
+                      style={{
+                        overflowX: 'auto',
+                        overflowY: rejectedMissionOrders.length > 5 ? 'auto' : 'visible',
+                        maxHeight: rejectedMissionOrders.length > 5 ? '600px' : 'none',
+                      }}
+                    >
                       <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0 }}>
@@ -1350,20 +1371,14 @@ export default function DashboardHeadInspector() {
                           </tr>
                         </thead>
                         <tbody>
-                          {complaints.filter((c) => {
-                            const s = String(c.mission_order_status || '').toLowerCase();
-                            return s === 'rejected';
-                          }).length === 0 ? (
+                          {rejectedMissionOrders.length === 0 ? (
                             <tr>
                               <td colSpan="5" style={{ textAlign: 'center', padding: 32, color: '#475569' }}>
                                 No rejected items
                               </td>
                             </tr>
                           ) : (
-                            complaints.filter((c) => {
-                              const s = String(c.mission_order_status || '').toLowerCase();
-                              return s === 'rejected';
-                            }).map((c) => (
+                            rejectedMissionOrders.map((c) => (
                               <React.Fragment key={`rejected-${c.complaint_id}`}>
                                 <tr
                                   style={{
@@ -1508,17 +1523,20 @@ export default function DashboardHeadInspector() {
                   </div>
 
                   {/* Pre-Approved Section */}
-                  <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
+                  <div style={{ order: 1, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
                     <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
                       <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Pre-Approved</h3>
                       <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#10b981' }}>
-                        {complaints.filter((c) => {
-                          const s = String(c.mission_order_status || '').toLowerCase();
-                          return s === 'for inspection' || s === 'for_inspection';
-                        }).length} items
+                        {preApprovedMissionOrders.length} items
                       </div>
                     </div>
-                    <div style={{ overflowX: 'auto', maxHeight: '600px', overflowY: 'auto' }}>
+                    <div
+                      style={{
+                        overflowX: 'auto',
+                        overflowY: preApprovedMissionOrders.length > 5 ? 'auto' : 'visible',
+                        maxHeight: preApprovedMissionOrders.length > 5 ? '600px' : 'none',
+                      }}
+                    >
                       <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0 }}>
@@ -1530,20 +1548,14 @@ export default function DashboardHeadInspector() {
                           </tr>
                         </thead>
                         <tbody>
-                          {complaints.filter((c) => {
-                            const s = String(c.mission_order_status || '').toLowerCase();
-                            return s === 'for inspection' || s === 'for_inspection';
-                          }).length === 0 ? (
+                          {preApprovedMissionOrders.length === 0 ? (
                             <tr>
                               <td colSpan="5" style={{ textAlign: 'center', padding: 32, color: '#475569' }}>
                                 No pre-approved items
                               </td>
                             </tr>
                           ) : (
-                            complaints.filter((c) => {
-                              const s = String(c.mission_order_status || '').toLowerCase();
-                              return s === 'for inspection' || s === 'for_inspection';
-                            }).map((c) => (
+                            preApprovedMissionOrders.map((c) => (
                               <React.Fragment key={`preapproved-${c.complaint_id}`}>
                                 <tr
                                   style={{

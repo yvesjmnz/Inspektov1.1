@@ -16,6 +16,36 @@ function fmtFull(iso) {
   return `${datePart} ${timePart}`;
 }
 
+function renderInspectorPills(inspectorNames, keyPrefix) {
+  const names = Array.isArray(inspectorNames) ? inspectorNames.filter(Boolean) : [];
+  const visibleNames = names.slice(0, 2);
+  const hiddenNames = names.slice(2);
+
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 30, alignItems: 'center', fontSize: 12 }}>
+      {names.length === 0 ? (
+        <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+      ) : (
+        <>
+          {visibleNames.map((name, idx) => (
+            <span key={`${keyPrefix}-${idx}`} style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}>
+              {name}
+            </span>
+          ))}
+          {hiddenNames.length > 0 ? (
+            <span
+              title={hiddenNames.join(', ')}
+              style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 800, border: '1px solid #cbd5e1', background: '#e2e8f0', color: '#334155', fontSize: 11 }}
+            >
+              +{hiddenNames.length}
+            </span>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function MissionOrderHistory({ missionOrdersByDay, expandedComplaintId, setExpandedComplaintId, onRowClick, formatStatus, statusBadgeClass }) {
   if (!missionOrdersByDay || !missionOrdersByDay.sortedKeys || missionOrdersByDay.sortedKeys.length === 0) {
     return (
@@ -75,60 +105,41 @@ export default function MissionOrderHistory({ missionOrdersByDay, expandedCompla
                         </td>
                         <td>
                           <div className="dash-cell-title">{mo.business_name || mo.title || 'Mission Order'}</div>
-                          <div className="dash-cell-sub">{mo.business_address || (mo.complaint_id ? ('Complaint: ' + (String(mo.complaint_id).slice(0, 8) + '…')) : '')}</div>
+                          <div className="dash-cell-sub">{mo.business_address || (mo.complaint_id ? (`Complaint: ${String(mo.complaint_id).slice(0, 8)}…`) : '')}</div>
                         </td>
                         <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
                           {mo.date_of_inspection ? new Date(mo.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
                         </td>
-                        <td>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 30, alignItems: 'center', fontSize: 12 }}>
-                            {(mo.inspector_names || []).length === 0 ? (
-                              <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
-                            ) : (
-                              (mo.inspector_names || []).map((name, idx) => (
-                                <span key={`${mo.complaint_id}-${idx}`} style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}>{name}</span>
-                              ))
-                            )}
-                          </div>
-                        </td>
+                        <td>{renderInspectorPills(mo.inspector_names, mo.complaint_id || mo.mission_order_id || 'mo')}</td>
                       </tr>
 
                       {expandedComplaintId === mo.complaint_id && (
                         <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', animation: 'slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
                           <td colSpan="5" style={{ padding: '16px 24px' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                              {/* Build timeline events in chronological order */}
-                              {
-                                (() => {
-                                  const events = [];
-                                  // Complaint submitted — include reporter email concisely when available
-                                  if (mo.created_at) events.push({ ts: mo.created_at, title: 'Complaint Submitted', email: mo.reporter_email || null });
-                                  // Complaint approved
-                                  if (mo.approved_at) events.push({ ts: mo.approved_at, title: 'Complaint Approved' });
-                                  // Mission order created
-                                  if (mo.mission_order_created_at) events.push({ ts: mo.mission_order_created_at, title: 'Mission Order Created' });
-                                  // Director preapproval
-                                  if (mo.director_preapproved_at) events.push({ ts: mo.director_preapproved_at, title: 'Mission Order Pre-Approved by Director' });
-                                  // Secretary signed
-                                  if (mo.secretary_signed_at) events.push({ ts: mo.secretary_signed_at, title: 'Mission Order Signed by Secretary' });
+                              {(() => {
+                                const events = [];
+                                if (mo.created_at) events.push({ ts: mo.created_at, title: 'Complaint Submitted', email: mo.reporter_email || null });
+                                if (mo.approved_at) events.push({ ts: mo.approved_at, title: 'Complaint Approved' });
+                                if (mo.mission_order_created_at) events.push({ ts: mo.mission_order_created_at, title: 'Mission Order Created' });
+                                if (mo.director_preapproved_at) events.push({ ts: mo.director_preapproved_at, title: 'Mission Order Pre-Approved by Director' });
+                                if (mo.secretary_signed_at) events.push({ ts: mo.secretary_signed_at, title: 'Mission Order Signed by Secretary' });
 
-                                  // Sort ascending (oldest first)
-                                  events.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+                                events.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 
-                                  return events.length === 0 ? (
-                                    <div style={{ padding: 12, color: '#64748b' }}>No timeline available.</div>
-                                  ) : (
-                                    events.map((ev, i) => (
-                                      <div key={`ev-${i}`} style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                        <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>{fmtFull(ev.ts)}</div>
-                                        <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-                                          {ev.title}{ev.email ? (' by ') : null}{ev.email ? <span style={{ fontWeight: 700 }}>{ev.email}</span> : null}
-                                        </div>
+                                return events.length === 0 ? (
+                                  <div style={{ padding: 12, color: '#64748b' }}>No timeline available.</div>
+                                ) : (
+                                  events.map((ev, i) => (
+                                    <div key={`ev-${i}`} style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', fontFamily: 'system-ui, -apple-system, sans-serif' }}>{fmtFull(ev.ts)}</div>
+                                      <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                                        {ev.title}{ev.email ? ' by ' : null}{ev.email ? <span style={{ fontWeight: 700 }}>{ev.email}</span> : null}
                                       </div>
-                                    ))
-                                  );
-                                })()
-                              }
+                                    </div>
+                                  ))
+                                );
+                              })()}
                             </div>
                           </td>
                         </tr>

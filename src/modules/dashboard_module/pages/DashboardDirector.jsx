@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
@@ -122,6 +122,36 @@ function statusBadgeClassHI(status) {
 
   if (!s) return 'status-badge status-info';
   return 'status-badge';
+}
+
+function renderInspectorPills(inspectorNames, keyPrefix) {
+  const names = Array.isArray(inspectorNames) ? inspectorNames.filter(Boolean) : [];
+  const visibleNames = names.slice(0, 2);
+  const hiddenNames = names.slice(2);
+
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 30, alignItems: 'center', fontSize: 12 }}>
+      {names.length === 0 ? (
+        <span style={{ color: '#64748b', fontWeight: 700 }}>—</span>
+      ) : (
+        <>
+          {visibleNames.map((name, idx) => (
+            <span key={`${keyPrefix}-${idx}`} style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}>
+              {name}
+            </span>
+          ))}
+          {hiddenNames.length > 0 ? (
+            <span
+              title={hiddenNames.join(', ')}
+              style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 800, border: '1px solid #cbd5e1', background: '#e2e8f0', color: '#334155', fontSize: 11 }}
+            >
+              +{hiddenNames.length}
+            </span>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
 }
 
 function getUrgencyText(authenticityLevel) {
@@ -767,15 +797,115 @@ export default function DashboardDirector() {
       return;
     }
 
+    if (tab === 'mission-orders') {
+      const complaintQuery = supabase
+        .from('complaints')
+        .select('id, business_name, business_address, reporter_email, approved_at, created_at')
+        .in('status', ['approved', 'Approved']);
+
+      if (appliedRange?.start && appliedRange?.end) {
+        const start = new Date(appliedRange.start.setHours(0, 0, 0, 0));
+        const end = new Date(appliedRange.end.setHours(23, 59, 59, 999));
+        complaintQuery.gte('approved_at', start.toISOString()).lte('approved_at', end.toISOString());
+      }
+
+      const { data: complaints = [], error: complaintErr } = await complaintQuery;
+      if (complaintErr) throw complaintErr;
+
+      const complaintIds = [...new Set(complaints.map((c) => c.id).filter(Boolean))];
+
+      const { data: mos = [], error: moErr } = complaintIds.length
+        ? await supabase
+            .from('mission_orders')
+            .select('id, complaint_id, title, status, submitted_at, created_at, updated_at, date_of_inspection')
+            .in('complaint_id', complaintIds)
+            .order('created_at', { ascending: false })
+        : { data: [], error: null };
+
+      if (moErr) throw moErr;
+
+      const latestMO = new Map();
+      mos.forEach((mo) => {
+        if (!mo?.complaint_id) return;
+        if (!latestMO.has(mo.complaint_id)) {
+          latestMO.set(mo.complaint_id, mo);
+        }
+      });
+
+      const moIds = [...latestMO.values()].map((m) => m.id).filter(Boolean);
+
+      const { data: assignments = [], error: assignmentErr } = moIds.length
+        ? await supabase
+            .from('mission_order_assignments')
+            .select('mission_order_id, inspector_id')
+            .in('mission_order_id', moIds)
+        : { data: [], error: null };
+
+      if (assignmentErr) throw assignmentErr;
+
+      const inspectorIds = [...new Set(assignments.map((a) => a?.inspector_id).filter(Boolean))];
+
+      const { data: profiles = [], error: profileErr } = inspectorIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name, first_name, middle_name, last_name')
+            .in('id', inspectorIds)
+        : { data: [], error: null };
+
+      if (profileErr) throw profileErr;
+
+      const profileMap = new Map(profiles.map((p) => [p.id, p]));
+
+      const inspectorMap = new Map();
+      assignments.forEach((a) => {
+        const p = profileMap.get(a.inspector_id) || {};
+        const name =
+          p.full_name ||
+          [p.first_name, p.middle_name, p.last_name].filter(Boolean).join(' ') ||
+          String(a.inspector_id).slice(0, 8);
+
+        if (!inspectorMap.has(a.mission_order_id)) {
+          inspectorMap.set(a.mission_order_id, []);
+        }
+        inspectorMap.get(a.mission_order_id).push(name);
+      });
+
+      const merged = complaints
+        .map((c) => {
+          const mo = latestMO.get(c.id);
+          if (!mo) return null;
+          return {
+            id: mo.id,
+            title: mo.title || null,
+            status: mo.status || null,
+            complaint_id: c.id,
+            business_name: c.business_name,
+            business_address: c.business_address,
+            reporter_email: c.reporter_email,
+            approved_at: c.approved_at,
+            created_at: c.created_at,
+            submitted_at: mo.submitted_at || null,
+            mission_order_id: mo.id,
+            mission_order_status: mo.status || null,
+            mission_order_created_at: mo.created_at || null,
+            mission_order_updated_at: mo.updated_at || null,
+            date_of_inspection: mo.date_of_inspection || null,
+            inspector_names: inspectorMap.get(mo.id) || [],
+          };
+        })
+        .filter(Boolean)
+        .filter((mo) => normalizeStatus(mo.mission_order_status || mo.status) === 'issued');
+
+      if (!isActiveRequest(request)) return;
+      setMissionOrders(merged);
+      return;
+    }
+
     let query = supabase
       .from('mission_orders')
       .select('id, title, status, submitted_at, complaint_id')
       .order('submitted_at', { ascending: false })
       .limit(200);
-
-    if (tab === 'mission-orders') {
-      query = query.eq('status', 'issued');
-    }
 
     // =========================
     // MISSION ORDERS HISTORY
@@ -800,7 +930,7 @@ export default function DashboardDirector() {
       const { data: mos = [], error: moErr } = complaintIds.length
         ? await supabase
             .from('mission_orders')
-            .select('*')
+            .select('id, complaint_id, title, status, created_at, updated_at, date_of_inspection, director_preapproved_at, secretary_signed_at')
             .in('complaint_id', complaintIds)
             .order('created_at', { ascending: false })
         : { data: [] };
@@ -864,10 +994,20 @@ export default function DashboardDirector() {
       const merged = complaints.map(c => {
         const mo = latestMO.get(c.id);
         return {
-          ...c,
+          complaint_id: c.id,
+          business_name: c.business_name,
+          business_address: c.business_address,
+          reporter_email: c.reporter_email,
+          approved_at: c.approved_at,
+          created_at: c.created_at,
           mission_order_id: mo?.id || null,
           mission_order_status: mo?.status || null,
           inspection_status: mo ? inspectionMap.get(mo.id) || null : null,
+          mission_order_created_at: mo?.created_at || null,
+          mission_order_updated_at: mo?.updated_at || null,
+          director_preapproved_at: mo?.director_preapproved_at || null,
+          secretary_signed_at: mo?.secretary_signed_at || null,
+          date_of_inspection: mo?.date_of_inspection || null,
           inspector_names: mo ? inspectorMap.get(mo.id) || [] : [],
           title: mo?.title || null,
         };
@@ -2128,7 +2268,7 @@ export default function DashboardDirector() {
                 >
                   {/* Header */}
                   <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
-                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Review Pending Mission Orders</h3>
+                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Review Mission Orders</h3>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
                       <span>{filteredMissionOrders.length} {filteredMissionOrders.length === 1 ? 'Record' : 'Records'}</span>
@@ -2140,57 +2280,86 @@ export default function DashboardDirector() {
                     <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                          <th style={{ width: 120 }}>MO ID</th>
-                          <th>Title</th>
-                          <th style={{ width: 180 }}>Status</th>
-                          <th style={{ width: 220 }}>Submitted</th>
-                          <th style={{ width: 220 }}>Actions</th>
+                          <th style={{ width: 40, padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: 12, color: '#64748b' }}></th>
+                          <th style={{ width: 150, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>MO Status</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Mission Order</th>
+                          <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase' }}>Inspection Date</th>
+                          <th style={{ width: 140, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase' }}>Inspectors</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredMissionOrders.map((mo) => (
-                          <tr
-                            key={mo.id}
-                            style={{
-                              cursor: 'pointer',
-                              borderBottom: '1px solid #e2e8f0',
-                              transition: 'background-color 0.2s ease',
-                              position: 'relative',
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = '#f8fafc';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = '#ffffff';
-                            }}
-                          >
-                            <td style={{ padding: '12px' }} title={mo.id}>{String(mo.id).slice(0, 8)}…</td>
-                            <td style={{ padding: '12px' }}>
-                              <div className="dash-cell-title">{mo.title || 'Mission Order'}</div>
-                              <div className="dash-cell-sub">Complaint: {mo.complaint_id ? String(mo.complaint_id).slice(0, 8) + '…' : '—'}</div>
-                            </td>
-                            <td style={{ padding: '12px' }}>
-                              <span className={statusBadgeClass(mo.status)}>{formatStatus(mo.status)}</span>
-                            </td>
-                            <td style={{ padding: '12px' }}>{formatDateNoSeconds(mo.submitted_at)}</td>
-                            <td style={{ padding: '12px' }}>
-                              <div className="dash-row-actions">
-                                <a
-                                  className="dash-btn"
-                                  href={`/mission-order?id=${mo.id}`}
-                                  onClick={() => {
-                                    try {
-                                      sessionStorage.setItem('missionOrderSource', 'review');
-                                    } catch {
-                                      // ignore
-                                    }
+                          <Fragment key={mo.id}>
+                            <tr
+                              onClick={() => {
+                                try {
+                                  sessionStorage.setItem('missionOrderSource', 'review');
+                                } catch {
+                                  // ignore
+                                }
+                                window.location.assign(`/mission-order?id=${encodeURIComponent(mo.mission_order_id || mo.id)}`);
+                              }}
+                              style={{
+                                cursor: 'pointer',
+                                borderBottom: '1px solid #e2e8f0',
+                                transition: 'background-color 0.2s ease',
+                                position: 'relative',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = '#f8fafc';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = '#ffffff';
+                              }}
+                            >
+                              <td style={{ padding: '12px', textAlign: 'center' }}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedComplaintId(expandedComplaintId === mo.complaint_id ? null : mo.complaint_id);
                                   }}
+                                  style={{ background: 'none', border: 'none', outline: 'none', cursor: 'pointer', padding: 0, color: '#64748b', transition: 'transform 0.3s', transform: expandedComplaintId === mo.complaint_id ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24 }}
                                 >
-                                  Open MO
-                                </a>
-                              </div>
-                            </td>
-                          </tr>
+                                  <svg width="20" height="20" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M80 160L256 320L432 160" stroke="currentColor" strokeWidth="40" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                </button>
+                              </td>
+                              <td>
+                                <span className={statusBadgeClassHI(mo.mission_order_status || mo.status)}>{formatStatusHI(mo.mission_order_status || mo.status)}</span>
+                              </td>
+                              <td>
+                                <div className="dash-cell-title">{mo.business_name || mo.title || 'Mission Order'}</div>
+                                <div className="dash-cell-sub">{mo.business_address || (mo.complaint_id ? ('Complaint: ' + (String(mo.complaint_id).slice(0, 8) + '�')) : '')}</div>
+                              </td>
+                              <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
+                                {mo.date_of_inspection ? new Date(mo.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '�'}
+                              </td>
+                              <td>{renderInspectorPills(mo.inspector_names, mo.complaint_id || mo.mission_order_id || 'review-mo')}</td>
+                            </tr>
+
+                            {expandedComplaintId === mo.complaint_id && (
+                              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', animation: 'slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
+                                <td colSpan="5" style={{ padding: '16px 24px' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                    {[
+                                      mo.created_at ? { ts: mo.created_at, title: 'Complaint Submitted', email: mo.reporter_email || null } : null,
+                                      mo.approved_at ? { ts: mo.approved_at, title: 'Complaint Approved' } : null,
+                                      mo.mission_order_created_at ? { ts: mo.mission_order_created_at, title: 'Mission Order Created' } : null,
+                                    ].filter(Boolean).map((ev, idx) => (
+                                      <div key={`review-timeline-${mo.complaint_id}-${idx}`} style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                        <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b' }}>
+                                          {new Date(ev.ts).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })} {new Date(ev.ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                        </div>
+                                        <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
+                                          {ev.title}{ev.email ? ' by ' : ''}{ev.email ? <span style={{ fontWeight: 700 }}>{ev.email}</span> : null}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
                         ))}
                       </tbody>
                     </table>
