@@ -1,18 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import DashboardSidebar from '../../../components/DashboardSidebar';
 import ErrorToast from '../../../components/ErrorToast.jsx';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
 import {
-  getAuthenticityAssessment,
-  getLocationVerificationStatus,
-  getEvidenceQuality,
-  getSuggestedAction,
-  formatConfidence,
-  getActionBadgeStyle,
   DECLINE_TEMPLATES,
-  formatComplaintDate,
-  daysAgo,
 } from '../../../lib/complaints/decisionSupport';
 import '../../dashboard_module/pages/Dashboard.css';
 
@@ -168,7 +160,8 @@ export default function ComplaintReview() {
   const [copiedId, setCopiedId] = useState(false);
 
   const [showGeneralCommentsEditor, setShowGeneralCommentsEditor] = useState(false);
-  const [showRightCommentsEditor, setShowRightCommentsEditor] = useState(false);
+  const [showRightCommentsEditor, setShowRightCommentsEditor] = useState(true);
+  const commentInputRef = useRef(null);
 
   // Determine which tab the user came from (queue or history)
   const [source, setSource] = useState('queue');
@@ -197,6 +190,19 @@ export default function ComplaintReview() {
     const t = setTimeout(() => setToast(''), 3500);
     return () => clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    if (!showRightCommentsEditor || source === 'history') return;
+    const t = setTimeout(() => {
+      commentInputRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [showRightCommentsEditor, source]);
+
+  useEffect(() => {
+    if (!declineCommentError || source === 'history') return;
+    setShowRightCommentsEditor(true);
+  }, [declineCommentError, source]);
 
   // Handle keyboard navigation in full-picture mode
   useEffect(() => {
@@ -251,7 +257,7 @@ export default function ComplaintReview() {
     // Reset per-complaint UI state when navigating between complaints
     setDeclineComment('');
     setDeclineCommentError('');
-    setShowRightCommentsEditor(false);
+    setShowRightCommentsEditor(true);
 
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -387,6 +393,29 @@ export default function ComplaintReview() {
     setTimeout(() => {
       window.location.href = '/dashboard/director?tab=queue';
     }, 100);
+  };
+
+  const openCommentEditor = () => {
+    setShowRightCommentsEditor(true);
+  };
+
+  const handleCommentTemplateClick = (text) => {
+    openCommentEditor();
+    setDeclineComment((prev) => {
+      const current = String(prev || '').trim();
+      const next = String(text || '').trim();
+      if (!current) return next;
+      if (current.includes(next)) return prev;
+      return `${current}\n\n${next}`;
+    });
+    setDeclineCommentError('');
+  };
+
+  const handleCommentChange = (value) => {
+    setDeclineComment(value);
+    if (declineCommentError && String(value || '').trim()) {
+      setDeclineCommentError('');
+    }
   };
 
   const handleLogout = async () => {
@@ -874,162 +903,7 @@ export default function ComplaintReview() {
 
                   {/* RIGHT COLUMN */}
                   <div style={{ display: 'grid', gap: 16, alignSelf: 'start', position: 'sticky', top: 14 }}>
-                    {/* Case Evaluation (Decision Support) */}
-                    {(() => {
-                      const authenticity = getAuthenticityAssessment(complaint.authenticity_level);
-                      const location = getLocationVerificationStatus(complaint.tags);
-                      const evidence = getEvidenceQuality(complaint.image_urls);
-                      const suggestion = getSuggestedAction(complaint);
-
-                      const statusText = (x) => {
-                        const s = String(x || '').toLowerCase();
-                        if (s.includes('very high') || s.includes('high') || s.includes('verified')) return 'VERIFIED';
-                        if (s.includes('minimal') || s.includes('review') || s.includes('low')) return 'REVIEW';
-                        return 'REVIEW';
-                      };
-
-                      const statusColor = (t) => (t === 'VERIFIED' ? '#16a34a' : '#f59e0b');
-
-                      const Row = ({ icon, title, left, right }) => (
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: '22px 1fr auto',
-                          gap: 10,
-                          alignItems: 'center',
-                          padding: '12px 0',
-                          borderTop: '1px solid #e2e8f0',
-                        }}>
-                          <div style={{ width: 22, height: 22, display: 'grid', placeItems: 'center' }}>{icon}</div>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontWeight: 900, color: '#0f172a' }}>{title}</div>
-                            <div style={{ marginTop: 2, color: '#64748b', fontWeight: 700, fontSize: 13 }}>{left}</div>
-                          </div>
-                          <div style={{ fontWeight: 1000, letterSpacing: 0.6, color: statusColor(right), fontSize: 13 }}>{right}</div>
-                        </div>
-                      );
-
-                      const verifiedIcon = (
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                          <path d="M9 12l2 2 4-4" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                          <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Z" stroke="#16a34a" strokeWidth="2" />
-                        </svg>
-                      );
-
-                      const warnIcon = (
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                          <path d="M12 9v4" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" />
-                          <path d="M12 17h.01" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round" />
-                          <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" stroke="#f59e0b" strokeWidth="2" strokeLinejoin="round" />
-                        </svg>
-                      );
-
-                      const shieldIcon = (
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                          <path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="#1e40af" strokeWidth="2" strokeLinejoin="round" />
-                        </svg>
-                      );
-
-                      const recommendationText = String(suggestion?.action || '').toLowerCase().includes('approve')
-                        ? 'Approve for Inspection'
-                        : String(suggestion?.action || '').toLowerCase().includes('decline')
-                          ? 'Decline'
-                          : String(suggestion?.action || 'Review');
-
-                      const authStatus = statusText(authenticity?.label);
-                      const locStatus = statusText(location?.label);
-                      const evStatus = statusText(evidence?.label);
-
-                      return (
-                        <div style={{
-                          background: '#ffffff',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: 12,
-                          overflow: 'hidden',
-                        }}>
-                          <div style={{
-                            padding: '14px 16px',
-                            borderBottom: '1px solid #e2e8f0',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                          }}>
-                            {shieldIcon}
-                            <div style={{ fontSize: 13, fontWeight: 1000, color: '#0f172a', textTransform: 'uppercase', letterSpacing: 1.2 }}>
-                              Case Evaluation
-                            </div>
-                          </div>
-
-                          <div style={{ padding: 16, display: 'grid', gap: 12 }}>
-                            <div style={{
-                              background: '#f8fafc',
-                              border: '1px solid #e2e8f0',
-                              borderRadius: 12,
-                              padding: 14,
-                              display: 'grid',
-                              gridTemplateColumns: '56px 1fr',
-                              gap: 12,
-                              alignItems: 'center',
-                            }}>
-                              <div style={{
-                                width: 56,
-                                height: 56,
-                                borderRadius: 12,
-                                background: '#e0e7ff',
-                                display: 'grid',
-                                placeItems: 'center',
-                              }}>
-                                <div style={{
-                                  width: 34,
-                                  height: 34,
-                                  borderRadius: 999,
-                                  background: '#dbeafe',
-                                  display: 'grid',
-                                  placeItems: 'center',
-                                  border: '2px solid #2563eb',
-                                }}>
-                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                    <path d="M20 6 9 17l-5-5" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                                  </svg>
-                                </div>
-                              </div>
-                              <div>
-                                <div style={{ fontSize: 12, fontWeight: 1000, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1.2 }}>
-                                  Recommendation
-                                </div>
-                                <div style={{ marginTop: 4, fontSize: 18, fontWeight: 1000, color: '#0f172a' }}>
-                                  {recommendationText}
-                                </div>
-                              </div>
-                            </div>
-
-                            <Row
-                              icon={authStatus === 'VERIFIED' ? verifiedIcon : warnIcon}
-                              title="Reporter Credibility"
-                              left={`Score: ${complaint.authenticity_level || 0}/100`}
-                              right={authStatus}
-                            />
-
-                            {location ? (
-                              <Row
-                                icon={locStatus === 'VERIFIED' ? verifiedIcon : warnIcon}
-                                title="Location Verification"
-                                left={location.description}
-                                right={locStatus}
-                              />
-                            ) : null}
-
-                            <Row
-                              icon={evStatus === 'VERIFIED' ? verifiedIcon : warnIcon}
-                              title="Evidence Sufficiency"
-                              left={evidence.description}
-                              right={evStatus}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Comments (below Case Evaluation) */}
+                    {/* Comments */}
                     <div style={{
                       background: 'transparent',
                       border: 'none',
@@ -1063,7 +937,9 @@ export default function ComplaintReview() {
                             border: 'none',
                           }}
                         >
-                          {showRightCommentsEditor ? 'Hide Comment Field' : 'Add Comment'}
+                          {showRightCommentsEditor
+                            ? 'Hide Comment Field'
+                            : (declineComment.trim() ? 'Edit Comment' : 'Add Comment')}
                         </button>
                       ) : (
                         <div style={{
@@ -1108,7 +984,45 @@ export default function ComplaintReview() {
                         <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
                           {source !== 'history' ? (
                             <>
-                              <div style={{ marginTop: 0 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                                    Decision Comment
+                                  </div>
+                                  <div style={{ marginTop: 4, fontSize: 12, color: '#64748b', fontWeight: 700 }}>
+                                    Required for decline, optional for approval.
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <div style={{ fontSize: 12, fontWeight: 800, color: declineComment.trim() ? '#0f172a' : '#64748b' }}>
+                                    {declineComment.trim().length} characters
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDeclineComment('');
+                                      setDeclineCommentError('');
+                                      openCommentEditor();
+                                    }}
+                                    disabled={loading || savingDecision || !declineComment}
+                                    style={{
+                                      padding: '8px 12px',
+                                      background: '#ffffff',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: 10,
+                                      color: '#334155',
+                                      fontSize: 12,
+                                      fontWeight: 800,
+                                      cursor: loading || savingDecision || !declineComment ? 'not-allowed' : 'pointer',
+                                      opacity: loading || savingDecision || !declineComment ? 0.55 : 1,
+                                    }}
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div style={{ marginTop: 14 }}>
                                 <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
                                   Quick Decline Reasons
                                 </div>
@@ -1117,7 +1031,7 @@ export default function ComplaintReview() {
                                     <button
                                       key={template.id}
                                       type="button"
-                                      onClick={() => setDeclineComment(template.text)}
+                                      onClick={() => handleCommentTemplateClick(template.text)}
                                       style={{
                                         padding: '8px 12px',
                                         background: '#ffffff',
@@ -1148,8 +1062,9 @@ export default function ComplaintReview() {
 
                               <textarea
                                 id="declineComment"
+                                ref={commentInputRef}
                                 value={declineComment}
-                                onChange={(e) => setDeclineComment(e.target.value)}
+                                onChange={(e) => handleCommentChange(e.target.value)}
                                 placeholder="Provide the reason for declining, or optional instructions if approving…"
                                 disabled={loading || savingDecision}
                                 style={{
@@ -1168,6 +1083,36 @@ export default function ComplaintReview() {
                                   marginTop: 12,
                                 }}
                               />
+
+                              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
+                                  Tip: clicking a quick reason adds it to the current comment instead of replacing what you already wrote.
+                                </div>
+                                {declineComment.trim() ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      commentInputRef.current?.focus();
+                                      commentInputRef.current?.setSelectionRange(
+                                        declineComment.length,
+                                        declineComment.length,
+                                      );
+                                    }}
+                                    style={{
+                                      padding: '6px 10px',
+                                      background: '#e2e8f0',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: 10,
+                                      color: '#0f172a',
+                                      fontSize: 12,
+                                      fontWeight: 800,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    Continue Editing
+                                  </button>
+                                ) : null}
+                              </div>
 
                               {declineCommentError && (
                                 <div style={{
