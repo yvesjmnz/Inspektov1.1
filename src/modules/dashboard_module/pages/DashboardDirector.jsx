@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
@@ -390,6 +390,22 @@ export default function DashboardDirector() {
   const currentYear = new Date().getFullYear();
   const [currentUserId, setCurrentUserId] = useState(null);
   const [expandedComplaintId, setExpandedComplaintId] = useState(null);
+  const requestSeqRef = useRef(0);
+  const latestRequestRef = useRef({ id: 0, kind: '', tab: '' });
+
+  const beginRequest = (kind, tabName) => {
+    const id = ++requestSeqRef.current;
+    latestRequestRef.current = { id, kind, tab: tabName };
+    setError('');
+    setLoading(true);
+    return { id, kind, tab: tabName };
+  };
+
+  const isActiveRequest = (request) => (
+    latestRequestRef.current.id === request.id
+    && latestRequestRef.current.kind === request.kind
+    && latestRequestRef.current.tab === request.tab
+  );
 
   // Get current user on mount
   useEffect(() => {
@@ -423,8 +439,7 @@ export default function DashboardDirector() {
   };
 
   const loadComplaints = async () => {
-    setError('');
-    setLoading(true);
+    const request = beginRequest('complaints', tab);
 
     try {
       let query = supabase
@@ -484,18 +499,21 @@ export default function DashboardDirector() {
       const { data, error } = await query;
       if (error) throw error;
 
+      if (!isActiveRequest(request)) return;
       setComplaints(data || []);
     } catch (e) {
+      if (!isActiveRequest(request)) return;
       setError(e?.message || 'Failed to load complaints.');
       setComplaints([]);
     } finally {
-      setLoading(false);
+      if (isActiveRequest(request)) {
+        setLoading(false);
+      }
     }
   };
 
   const loadMissionOrders = async () => {
-  setError('');
-  setLoading(true);
+  const request = beginRequest('mission-orders', tab);
 
   const normalizeStatus = (v) => String(v || '').toLowerCase().trim();
   const inspectionPriority = (v) => {
@@ -507,6 +525,248 @@ export default function DashboardDirector() {
   };
 
   try {
+    // =========================
+    // INSPECTION (ongoing)
+    // =========================
+    if (tab === 'inspection') {
+      // Director should show ongoing inspections for Director-approved complaints.
+      // This mirrors DashboardHeadInspector's logic, but writes to missionOrders state
+      // because the Director UI uses filteredMissionOrders for rendering.
+      const complaintQuery = supabase
+        .from('complaints')
+        .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
+        .in('status', ['approved', 'Approved']);
+
+      const appliedComplaintQuery = (() => {
+        if (!appliedRange?.start || !appliedRange?.end) return complaintQuery;
+        const start = new Date(appliedRange.start.setHours(0, 0, 0, 0));
+        const end = new Date(appliedRange.end.setHours(23, 59, 59, 999));
+        return complaintQuery.gte('approved_at', start.toISOString()).lte('approved_at', end.toISOString());
+      })();
+
+      const { data: complaintRows, error: complaintErr } = await appliedComplaintQuery;
+      if (complaintErr) throw complaintErr;
+
+      const complaintIds = Array.from(new Set((complaintRows || []).map((c) => c.id).filter(Boolean)));
+
+      const { data: mos = [], error: moErr } = complaintIds.length
+        ? await supabase
+            .from('mission_orders')
+            .select('id, complaint_id, title, status, submitted_at, created_at, updated_at, date_of_inspection')
+            .in('complaint_id', complaintIds)
+            .order('created_at', { ascending: false })
+            .limit(500)
+        : { data: [], error: null };
+
+      if (moErr) throw moErr;
+
+      // Keep latest MO per complaint.
+      const latestMoByComplaintId = new Map();
+      (mos || []).forEach((mo) => {
+        if (!mo?.complaint_id) return;
+        if (!latestMoByComplaintId.has(mo.complaint_id)) latestMoByComplaintId.set(mo.complaint_id, mo);
+      });
+
+      const missionOrderIds = Array.from(
+        new Set(Array.from(latestMoByComplaintId.values()).map((m) => m.id).filter(Boolean))
+      );
+
+      // Load latest inspection report status per mission order (for Inspection tab UI).
+      const { data: reportRows = [], error: reportErr } = missionOrderIds.length
+        ? await supabase
+            .from('inspection_reports')
+            .select('mission_order_id, status, updated_at, created_at, completed_at')
+            .in('mission_order_id', missionOrderIds)
+            .order('updated_at', { ascending: false })
+            .limit(2000)
+        : { data: [], error: null };
+
+      if (reportErr) throw reportErr;
+
+      const inspectionStatusByMissionOrderId = new Map();
+      for (const r of reportRows || []) {
+        const moId = r?.mission_order_id;
+        if (!moId) continue;
+        const cur = inspectionStatusByMissionOrderId.get(moId);
+        if (!cur) {
+          inspectionStatusByMissionOrderId.set(moId, r?.status || null);
+          continue;
+        }
+        if (inspectionPriority(r?.status) > inspectionPriority(cur)) {
+          inspectionStatusByMissionOrderId.set(moId, r?.status || null);
+        }
+      }
+
+      // Inspector assignments + names.
+      const { data: assignmentRows = [], error: assignmentErr } = missionOrderIds.length
+        ? await supabase
+            .from('mission_order_assignments')
+            .select('mission_order_id, inspector_id')
+            .in('mission_order_id', missionOrderIds)
+        : { data: [], error: null };
+      if (assignmentErr) throw assignmentErr;
+
+      const inspectorIds = Array.from(new Set((assignmentRows || []).map((a) => a?.inspector_id).filter(Boolean)));
+
+      const { data: profileRows = [], error: profileErr } = inspectorIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name, first_name, middle_name, last_name')
+            .in('id', inspectorIds)
+        : { data: [], error: null };
+      if (profileErr) throw profileErr;
+
+      const profileById = new Map((profileRows || []).map((p) => [p.id, p]));
+
+      const inspectorNamesByMissionOrderId = new Map();
+      (assignmentRows || []).forEach((a) => {
+        if (!a?.mission_order_id || !a?.inspector_id) return;
+        const p = profileById.get(a.inspector_id);
+        const displayName =
+          p?.full_name ||
+          [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') ||
+          String(a.inspector_id).slice(0, 8);
+        const arr = inspectorNamesByMissionOrderId.get(a.mission_order_id) || [];
+        arr.push(displayName);
+        inspectorNamesByMissionOrderId.set(a.mission_order_id, arr);
+      });
+
+      const merged = (complaintRows || []).map((c) => {
+        const mo = latestMoByComplaintId.get(c.id) || null;
+        if (!mo) return null;
+        return {
+          // Fields needed by Director filtering/search helpers
+          id: mo.id,
+          title: mo.title,
+          complaint_id: c.id,
+
+          // Fields needed by Director inspection tab renderer
+          mission_order_id: mo.id,
+          status: mo.status,
+          business_name: c.business_name,
+          business_address: c.business_address,
+          inspection_status: inspectionStatusByMissionOrderId.get(mo.id) || null,
+          date_of_inspection: mo.date_of_inspection || null,
+          inspector_names: inspectorNamesByMissionOrderId.get(mo.id) || [],
+          // Kept for completeness
+          mission_order_status: mo.status,
+          submitted_at: mo.submitted_at || null,
+          created_at: mo.created_at || null,
+        };
+      });
+
+      if (!isActiveRequest(request)) return;
+      setMissionOrders((merged || []).filter(Boolean));
+      return;
+    }
+
+    // =========================
+    // INSPECTION HISTORY (completed)
+    // =========================
+    if (tab === 'inspection-history') {
+      let reportQuery = supabase
+        .from('inspection_reports')
+        .select('id, mission_order_id, status, completed_at')
+        .eq('status', 'completed')
+        .order('completed_at', { ascending: false })
+        .limit(1000);
+
+      if (appliedRange?.start && appliedRange?.end) {
+        const start = new Date(appliedRange.start.setHours(0, 0, 0, 0));
+        const endExclusive = new Date(appliedRange.end.setHours(23, 59, 59, 999));
+        // Use inclusive end here because timestamps are exact; the UI is date-based.
+        reportQuery = reportQuery.gte('completed_at', start.toISOString()).lte('completed_at', endExclusive.toISOString());
+      }
+
+      const { data: reportRows, error: reportErr } = await reportQuery;
+      if (reportErr) throw reportErr;
+
+      const missionOrderIds = Array.from(new Set((reportRows || []).map((r) => r?.mission_order_id).filter(Boolean)));
+
+      const { data: moRows = [], error: moErr } = missionOrderIds.length
+        ? await supabase
+            .from('mission_orders')
+            .select('id, complaint_id, title, date_of_inspection')
+            .in('id', missionOrderIds)
+        : { data: [], error: null };
+      if (moErr) throw moErr;
+
+      const moById = new Map((moRows || []).map((m) => [m.id, m]));
+
+      const complaintIds = Array.from(new Set((moRows || []).map((m) => m?.complaint_id).filter(Boolean)));
+      const { data: complaintRows = [], error: cErr } = complaintIds.length
+        ? await supabase
+            .from('complaints')
+            .select('id, business_name, business_address')
+            .in('id', complaintIds)
+        : { data: [], error: null };
+      if (cErr) throw cErr;
+
+      const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
+
+      const { data: assignmentRows = [], error: assignmentErr } = missionOrderIds.length
+        ? await supabase
+            .from('mission_order_assignments')
+            .select('mission_order_id, inspector_id')
+            .in('mission_order_id', missionOrderIds)
+        : { data: [], error: null };
+      if (assignmentErr) throw assignmentErr;
+
+      const inspectorIds = Array.from(new Set((assignmentRows || []).map((a) => a?.inspector_id).filter(Boolean)));
+
+      const { data: profileRows = [], error: profileErr } = inspectorIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name, first_name, middle_name, last_name')
+            .in('id', inspectorIds)
+        : { data: [], error: null };
+      if (profileErr) throw profileErr;
+
+      const profileById = new Map((profileRows || []).map((p) => [p.id, p]));
+
+      const inspectorNamesByMissionOrderId = new Map();
+      (assignmentRows || []).forEach((a) => {
+        if (!a?.mission_order_id || !a?.inspector_id) return;
+        const p = profileById.get(a.inspector_id);
+        const displayName =
+          p?.full_name ||
+          [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') ||
+          String(a.inspector_id).slice(0, 8);
+        const arr = inspectorNamesByMissionOrderId.get(a.mission_order_id) || [];
+        arr.push(displayName);
+        inspectorNamesByMissionOrderId.set(a.mission_order_id, arr);
+      });
+
+      const merged = (reportRows || []).map((r) => {
+        const mo = moById.get(r.mission_order_id) || {};
+        const c = complaintById.get(mo.complaint_id) || {};
+        return {
+          // Director renderer expects:
+          // - inspection.id used for key + URL param
+          // - inspection.status for badge
+          // - inspection.completed_at and date_of_inspection
+          // - inspection.inspector_names array
+          id: r.id,
+          status: r.status,
+          mission_order_id: r.mission_order_id,
+          inspection_report_id: r.id,
+          business_name: c.business_name,
+          business_address: c.business_address,
+          date_of_inspection: mo?.date_of_inspection || null,
+          completed_at: r.completed_at,
+          inspector_names: inspectorNamesByMissionOrderId.get(r.mission_order_id) || [],
+
+          // Used by Director search/filter helpers
+          complaint_id: mo?.complaint_id || null,
+          title: mo?.title || null,
+        };
+      });
+
+      if (!isActiveRequest(request)) return;
+      setMissionOrders(merged);
+      return;
+    }
+
     let query = supabase
       .from('mission_orders')
       .select('id, title, status, submitted_at, complaint_id')
@@ -621,6 +881,7 @@ export default function DashboardDirector() {
           return hay.includes(search.toLowerCase());
         });
 
+      if (!isActiveRequest(request)) return;
       setMissionOrders(filtered);
       return;
     }
@@ -636,13 +897,17 @@ export default function DashboardDirector() {
     const { data, error } = await query;
     if (error) throw error;
 
+    if (!isActiveRequest(request)) return;
     setMissionOrders(data || []);
 
   } catch (e) {
+    if (!isActiveRequest(request)) return;
     setError(e?.message || 'Failed to load mission orders.');
     setMissionOrders([]);
   } finally {
-    setLoading(false);
+    if (isActiveRequest(request)) {
+      setLoading(false);
+    }
   }
 };
 
@@ -741,6 +1006,8 @@ export default function DashboardDirector() {
   }, [complaints, search, filters]);
 
   const filteredMissionOrders = useMemo(() => {
+    if (tab !== 'mission-orders-history') return missionOrders;
+
     const q = search.trim().toLowerCase();
     if (!q) return missionOrders;
 
@@ -750,7 +1017,13 @@ export default function DashboardDirector() {
       const complaintStr = String(mo?.complaint_id ?? '').toLowerCase();
       return idStr.includes(q) || titleStr.includes(q) || complaintStr.includes(q);
     });
-  }, [missionOrders, search]);
+  }, [missionOrders, search, tab]);
+
+  useEffect(() => {
+    if (tab !== 'history') {
+      setSearchFocused(false);
+    }
+  }, [tab]);
 
   // Group complaints by day for Review Complaints
   const complaintsByDay = useMemo(() => {
