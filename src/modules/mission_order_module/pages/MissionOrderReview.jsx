@@ -333,6 +333,45 @@ export default function MissionOrderReview() {
           .single();
         if (cErr) throw cErr;
 
+        // Always render the City Ordinances Violated section in the generated document.
+        // Source of truth: mission_order_ordinances for this mission order.
+        const { data: assignedOrdRows, error: assignedOrdError } = await supabase
+          .from('mission_order_ordinances')
+          .select('ordinance_id, created_at')
+          .eq('mission_order_id', missionOrderId)
+          .order('created_at', { ascending: true });
+        if (assignedOrdError) throw assignedOrdError;
+
+        const assignedOrdIds = Array.from(new Set((assignedOrdRows || []).map((r) => r.ordinance_id).filter(Boolean)));
+
+        const { data: ordRows, error: ordErr } = assignedOrdIds.length
+          ? await supabase
+              .from('ordinances')
+              .select('id, code_number, title, description')
+              .in('id', assignedOrdIds)
+          : { data: [], error: null };
+        if (ordErr) throw ordErr;
+
+        const ordById = new Map((ordRows || []).map((o) => [o.id, o]));
+
+        const ordinancesText = assignedOrdIds
+          .map((id) => {
+            const o = ordById.get(id);
+            if (!o) return null;
+            const code = o.code_number ? String(o.code_number).trim() : '';
+            const title = o.title ? String(o.title).trim() : '';
+            const desc = o.description ? String(o.description).trim() : '';
+
+            const head = code ? `Ordinance No. ${code}` : 'Ordinance';
+            const mid = title ? ` (${title})` : '';
+            const tail = desc ? ` - ${desc}` : '';
+            return `${head}${mid}${tail}`;
+          })
+          .filter(Boolean)
+          .join('\n');
+
+        const complaintDetailsForDocx = `CITY ORDINANCES VIOLATED:\n${ordinancesText || '—'}`;
+
         // If signature url points to private storage, attempt to sign. Best-effort.
         let directorSignatureUrl = fresh?.director_signature_url || null;
         try {
@@ -369,7 +408,7 @@ export default function MissionOrderReview() {
           date_of_issuance: fresh.date_of_issuance,
           business_name: c?.business_name,
           business_address: c?.business_address,
-          complaint_details: c?.complaint_description,
+          complaint_details: complaintDetailsForDocx,
           director_signature_url: directorSignatureUrl,
         });
 

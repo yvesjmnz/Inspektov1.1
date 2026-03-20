@@ -452,9 +452,17 @@
   font-weight: 900;
   line-height: 1;
   z-index: 10000; /* above overlay */
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .overlay-close:hover { color: #dc2626; }
+
+.overlay-close:focus,
+.overlay-close:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 
 /* Animations for expanded rows */
 @keyframes slideDown {

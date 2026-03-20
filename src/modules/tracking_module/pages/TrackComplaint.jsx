@@ -185,12 +185,36 @@ export default function TrackComplaint() {
                 // Document Processing (MO) timestamps
                 const hasMo = missionOrders.length > 0;
                 const moCreatedAt = hasMo && missionOrders[0]?.created_at ? new Date(missionOrders[0].created_at) : null;
+                // UX requirement: Document Processing resolution time starts when the complaint was received,
+                // not when the draft mission order was created.
+                const moStartAt = receivedDate;
                 const moPreapprovedAt = (() => {
                   const times = (missionOrders || [])
                     .map((m) => m?.director_preapproved_at)
                     .filter(Boolean)
                     .map((t) => new Date(t));
                   return times.length ? times.sort((a, b) => a - b)[0] : null;
+                })();
+
+                const moComplete = Boolean(moPreapprovedAt);
+                const moInProgress = !isDeclined && (hasMo || (isDecided && s === 'approved')) && !moComplete;
+                const moStatusLabel = isDeclined ? 'Not applicable' : (moComplete ? 'Complete' : (moInProgress ? 'In-Progress' : '—'));
+
+                const moResolutionTime = (() => {
+                  if (!moComplete || !moStartAt || !moPreapprovedAt) return '—';
+                  const ms = moPreapprovedAt.getTime() - moStartAt.getTime();
+                  if (!Number.isFinite(ms) || ms < 0) return '—';
+
+                  const totalMinutes = Math.floor(ms / 60000);
+                  const days = Math.floor(totalMinutes / (60 * 24));
+                  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+                  const minutes = totalMinutes % 60;
+
+                  const parts = [];
+                  if (days) parts.push(`${days}d`);
+                  if (hours) parts.push(`${hours}h`);
+                  parts.push(`${minutes}m`);
+                  return parts.join(' ');
                 })();
 
                 // Resolution step rules:
@@ -271,82 +295,119 @@ export default function TrackComplaint() {
                           <div className="vtl-title">Under Review</div>
                           <div className="vtl-desc">Director is reviewing your complaint</div>
                           {isDecided ? (
-                            <div className="vtl-detail"><span className="vtl-detail-label">Director Decision:</span> <span className={`vtl-detail-value ${s === 'approved' ? 'status-approved' : (s === 'declined' || s === 'rejected') ? 'status-declined' : ''}`}>{decisionLabel}</span></div>
+                            <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${s === 'approved' ? 'status-approved' : (s === 'declined' || s === 'rejected') ? 'status-declined' : ''}`}>{decisionLabel}</span></div>
                           ) : null}
                           <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(isDecided ? decisionDate : reviewDate)}</span></div>
                         </div>
                       </div>
 
-                      {/* Step 3 - Document Processing */}
-                      <div className={`vtl-step ${isDeclined ? 'inactive' : (moPreapprovedAt ? 'completed' : ((hasMo || (isDecided && s === 'approved')) ? 'active' : 'inactive'))}`}>
-                        <div className="vtl-marker">{isDeclined ? 3 : (moPreapprovedAt ? '✓' : 3)}</div>
-                        <div className="vtl-content">
-                          <div className="vtl-title">Document Processing</div>
-                          <div className="vtl-desc">Preparing documents needed for inspection</div>
-                          {isDeclined ? (
-                            <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">Not applicable</span></div>
-                          ) : (
-                            <>
-                              <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{moPreapprovedAt ? 'Pre-Approved' : (hasMo ? 'In Progress' : (isDecided && s === 'approved' ? 'Pending' : '—'))}</span></div>
-                              <div className="vtl-detail"><span className="vtl-detail-label">Created:</span> <span className="vtl-detail-value">{fmt(moCreatedAt)}</span></div>
-                              <div className="vtl-detail"><span className="vtl-detail-label">Pre-Approved:</span> <span className="vtl-detail-value">{fmt(moPreapprovedAt)}</span></div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Step 4 - Inspection (MO Workflow + Inspection Workflow) */}
-                      <div className={`vtl-step ${isDeclined ? 'inactive' : (inspectionCompleted ? 'completed' : (inspectionInProgress ? 'active' : 'inactive'))}`}>
-                        <div className="vtl-marker">{isDeclined ? 4 : (inspectionCompleted ? '✓' : 4)}</div>
-                        <div className="vtl-content">
-                          <div className="vtl-title">Inspection</div>
-                          <div className="vtl-desc">MO Workflow + Inspection Workflow</div>
-                          {isDeclined ? (
-                            <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">Not applicable</span></div>
-                          ) : (
-                            <>
-                              <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{inspectionCompleted ? 'Completed' : (inspectionInProgress ? 'In Progress' : '—')}</span></div>
-                              <div className="vtl-detail"><span className="vtl-detail-label">Started:</span> <span className="vtl-detail-value">{fmt(inspectionStartedAt)}</span></div>
-                              <div className="vtl-detail"><span className="vtl-detail-label">Completed:</span> <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span></div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Step 5 - Resolution */}
-                      <div className={`vtl-step ${effectiveIsResolved ? 'active' : 'inactive'}`}>
-                        <div className="vtl-marker">{effectiveIsResolved ? '✓' : 5}</div>
-                        <div className="vtl-content">
-                          <div className="vtl-title">Resolution</div>
-                          <div className="vtl-desc">
-                            {isDeclined
-                              ? 'Case closed — no inspection will take place.'
-                              : showFindingsSummary
-                                ? 'Business has been inspected. Findings summary (no internal assessments).'
-                                : 'Summary of findings will appear after the inspection slip is downloaded.'}
-                          </div>
-                          {showFindingsSummary ? (
-                            <div style={{ marginTop: 12 }}>
-                              <div className="vtl-detail">
-                                <span className="vtl-detail-label">Inspected on:</span>{' '}
-                                <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span>
-                              </div>
-                              <div style={{ marginTop: 10, fontWeight: 900, color: '#0f172a' }}>
-                                <div className="vtl-desc" style={{ fontWeight: 800, margin: 0 }}>Findings summary</div>
-                                <div style={{ marginTop: 6 }}>
-                                  <span style={{ fontWeight: 900 }}>Business Permit:</span> <span style={{ fontWeight: 800 }}>{permitSummary}</span>
-                                </div>
-                                <div style={{ marginTop: 6 }}>
-                                  <span style={{ fontWeight: 900 }}>With CCTV:</span> <span style={{ fontWeight: 800 }}>{cctvSummary}</span>
-                                </div>
-                                <div style={{ marginTop: 6 }}>
-                                  <span style={{ fontWeight: 900 }}>2sqm Signage:</span> <span style={{ fontWeight: 800 }}>{signageSummary}</span>
-                                </div>
-                              </div>
+                      {isDeclined ? (
+                        <div
+                          style={{
+                            marginTop: 14,
+                            background: '#ffffff',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 12,
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <div
+                            style={{
+                              padding: '12px 14px',
+                              borderBottom: '1px solid #e2e8f0',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: 10,
+                            }}
+                          >
+                            <div style={{ fontSize: 13, fontWeight: 1000, color: '#dc2626', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                              Declined Comments
                             </div>
-                          ) : null}
-                                                  </div>
-                      </div>
+                          </div>
+
+                          <div style={{ padding: 14, background: '#f8fafc' }}>
+                            <div
+                              style={{
+                                background: '#ffffff',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: 12,
+                                padding: 12,
+                                color: '#0f172a',
+                                fontSize: 14,
+                                lineHeight: 1.6,
+                                whiteSpace: 'pre-wrap',
+                                minHeight: 90,
+                              }}
+                            >
+                              {complaint?.decline_comment || complaint?.declined_comment || '—'}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Step 3 - Document Processing */}
+                          <div className={`vtl-step ${moComplete ? 'completed' : (moInProgress ? 'active' : 'inactive')}`}>
+                            <div className="vtl-marker">{moComplete ? '✓' : 3}</div>
+                            <div className="vtl-content">
+                              <div className="vtl-title">Document Processing</div>
+                              <div className="vtl-desc">Preparing documents needed for inspection</div>
+                              <>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${moComplete ? 'status-complete' : (moInProgress ? 'status-inprogress' : '')}`}>{moStatusLabel}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Resolution Time:</span> <span className="vtl-detail-value">{moResolutionTime}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{moComplete ? fmt(moPreapprovedAt) : '—'}</span></div>
+                              </>
+                            </div>
+                          </div>
+
+                          {/* Step 4 - Inspection (MO Workflow + Inspection Workflow) */}
+                          <div className={`vtl-step ${inspectionCompleted ? 'completed' : ((inspectionInProgress || moComplete) ? 'active' : 'inactive')}`}>
+                            <div className="vtl-marker">{inspectionCompleted ? '✓' : 4}</div>
+                            <div className="vtl-content">
+                              <div className="vtl-title">Inspection</div>
+                              <div className="vtl-desc">An inspection will be conducted to verify this complaint</div>
+                              <>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{inspectionCompleted ? 'Complete' : ((inspectionInProgress || moComplete) ? 'In-Progress' : '—')}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Started:</span> <span className="vtl-detail-value">{fmt(inspectionStartedAt)}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Completed:</span> <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span></div>
+                              </>
+                            </div>
+                          </div>
+
+                          {/* Step 5 - Resolution */}
+                          <div className={`vtl-step ${effectiveIsResolved ? 'active' : 'inactive'}`}>
+                            <div className="vtl-marker">{effectiveIsResolved ? '✓' : 5}</div>
+                            <div className="vtl-content">
+                              <div className="vtl-title">Resolution</div>
+                              <div className="vtl-desc">
+                                {showFindingsSummary
+                                  ? 'Business has been inspected. Findings summary (no internal assessments).'
+                                  : 'Summary of findings will appear after the inspection slip is downloaded.'}
+                              </div>
+                              {showFindingsSummary ? (
+                                <div style={{ marginTop: 12 }}>
+                                  <div className="vtl-detail">
+                                    <span className="vtl-detail-label">Inspected on:</span>{' '}
+                                    <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span>
+                                  </div>
+                                  <div style={{ marginTop: 10, fontWeight: 900, color: '#0f172a' }}>
+                                    <div className="vtl-desc" style={{ fontWeight: 800, margin: 0 }}>Findings summary</div>
+                                    <div style={{ marginTop: 6 }}>
+                                      <span style={{ fontWeight: 900 }}>Business Permit:</span> <span style={{ fontWeight: 800 }}>{permitSummary}</span>
+                                    </div>
+                                    <div style={{ marginTop: 6 }}>
+                                      <span style={{ fontWeight: 900 }}>With CCTV:</span> <span style={{ fontWeight: 800 }}>{cctvSummary}</span>
+                                    </div>
+                                    <div style={{ marginTop: 6 }}>
+                                      <span style={{ fontWeight: 900 }}>2sqm Signage:</span> <span style={{ fontWeight: 800 }}>{signageSummary}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 );

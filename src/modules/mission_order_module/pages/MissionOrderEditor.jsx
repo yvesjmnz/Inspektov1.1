@@ -272,7 +272,7 @@ export default function MissionOrderEditor() {
       if (mo?.complaint_id) {
         const { data: c, error: cError } = await supabase
           .from('complaints')
-          .select('id, business_pk, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls')
+          .select('id, business_pk, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls, decline_comment')
           .eq('id', mo.complaint_id)
           .single();
         if (cError) throw cError;
@@ -1261,6 +1261,7 @@ export default function MissionOrderEditor() {
                   boxShadow: '0 8px 16px rgba(2,6,23,0.25)',
                 }}
               >
+                {null}
                 {/* make all ribbon icons white */}
                 <style>{`
 #mo-status-ribbon span[aria-hidden="true"] { color: #fff !important; opacity: 0.95; }
@@ -1379,6 +1380,42 @@ export default function MissionOrderEditor() {
                     <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>—</span>
                   )}
                 </div>
+
+                {(() => {
+                  const comment = String(complaint?.decline_comment || missionOrder?.director_comment || '').trim();
+                  if (!comment) return null;
+
+                  return (
+                    <>
+                      <div style={{ height: 1, background: 'rgba(255,255,255,0.16)', width: '100%' }} />
+                      <div
+                        style={{
+                          border: '1px solid rgba(255,255,255,0.18)',
+                          background: 'rgba(255,255,255,0.10)',
+                          borderRadius: 12,
+                          padding: '10px 12px',
+                          display: 'grid',
+                          gap: 6,
+                        }}
+                      >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95, display: 'inline-flex' }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" fill="currentColor" opacity="0.9"/>
+                            <path d="M7 8h10M7 12h7" stroke="#0b2249" strokeWidth="2" strokeLinecap="round"/>
+                          </svg>
+                        </span>
+                        <div style={{ fontWeight: 1000, fontSize: 12, letterSpacing: 0.4, textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>
+                          Director's Comments
+                        </div>
+                      </div>
+                      <div style={{ fontWeight: 900, fontSize: 14, lineHeight: 1.35, color: '#fff', whiteSpace: 'pre-wrap' }}>
+                        {comment}
+                      </div>
+                    </div>
+                  </>
+                  );
+                })()}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, alignItems: 'start' }}>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import DashboardSidebar from '../../../components/DashboardSidebar';
+import ErrorToast from '../../../components/ErrorToast.jsx';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
 import {
   getAuthenticityAssessment,
@@ -152,7 +153,8 @@ export default function ComplaintReview() {
 
   const [loading, setLoading] = useState(false);
   const [savingDecision, setSavingDecision] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
+  const [errorToastKey, setErrorToastKey] = useState(0);
   const [toast, setToast] = useState('');
 
   const [complaint, setComplaint] = useState(null);
@@ -181,6 +183,13 @@ export default function ComplaintReview() {
     if (complaint?.id) {
       navigator.clipboard.writeText(complaint.id);
     }
+  };
+
+  const showError = (msg) => {
+    const m = String(msg || '').trim();
+    if (!m) return;
+    setError(m);
+    setErrorToastKey((k) => k + 1);
   };
 
   useEffect(() => {
@@ -215,7 +224,7 @@ export default function ComplaintReview() {
       return;
     }
 
-    setError('');
+    setError(null);
     setLoading(true);
 
     try {
@@ -231,7 +240,7 @@ export default function ComplaintReview() {
       setDeclineComment(data?.decline_comment || '');
       setEvidenceIndex(0);
     } catch (e) {
-      setError(e?.message || 'Failed to load complaint.');
+      showError(e?.message || 'Failed to load complaint.');
       setComplaint(null);
     } finally {
       setLoading(false);
@@ -239,6 +248,11 @@ export default function ComplaintReview() {
   };
 
   useEffect(() => {
+    // Reset per-complaint UI state when navigating between complaints
+    setDeclineComment('');
+    setDeclineCommentError('');
+    setShowRightCommentsEditor(false);
+
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [complaintId]);
@@ -272,7 +286,7 @@ export default function ComplaintReview() {
   const updateComplaintStatus = async (newStatus) => {
     if (!complaintId) return;
 
-    setError('');
+    setError(null);
     setDeclineCommentError('');
     setSavingDecision(true);
 
@@ -339,7 +353,7 @@ export default function ComplaintReview() {
       setToast(status === 'approved' ? 'Complaint approved.' : 'Complaint declined.');
       await load();
     } catch (e) {
-      setError(e?.message || 'Failed to save decision.');
+      showError(e?.message || 'Failed to save decision.');
     } finally {
       setSavingDecision(false);
     }
@@ -364,7 +378,7 @@ export default function ComplaintReview() {
     }
 
     if (!declineComment.trim()) {
-      setError('Please provide a comment before declining.');
+      showError('Please provide a comment before declining.');
       return;
     }
 
@@ -376,7 +390,7 @@ export default function ComplaintReview() {
   };
 
   const handleLogout = async () => {
-    setError('');
+    setError(null);
     try {
       const { error: signOutError } = await supabase.auth.signOut({ scope: 'global' });
       if (signOutError) throw signOutError;
@@ -486,7 +500,7 @@ export default function ComplaintReview() {
 
               
               {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
-              {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
+              <ErrorToast message={error} triggerKey={errorToastKey} />
               {declineCommentError ? <div className="dash-alert dash-alert-error">{declineCommentError}</div> : null}
 
               {loading ? (
@@ -664,7 +678,7 @@ export default function ComplaintReview() {
                       </div>
                     </div>
 
-                    {/* Complaint Description + Violations (simplified dropdown tags) */}
+                    {/* Complaint Description + Alleged Violations */}
                     <div style={{
                       background: '#ffffff',
                       border: '1px solid #e2e8f0',
@@ -677,6 +691,12 @@ export default function ComplaintReview() {
 
                       <div style={{ marginTop: 12, color: '#0f172a', whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 15 }}>
                         {complaint.complaint_description || '—'}
+                      </div>
+
+                      <div aria-hidden="true" style={{ height: 1, background: '#e2e8f0', marginTop: 14, marginBottom: 12 }} />
+
+                      <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                        Alleged Violations
                       </div>
 
                       {/* Violations: compact dropdown tags (full category names) */}
@@ -787,112 +807,61 @@ export default function ComplaintReview() {
                       </div>
                       <div style={{ marginTop: 12 }}>
                         {Array.isArray(complaint.image_urls) && complaint.image_urls.length > 0 ? (
-                          <div style={{ display: 'grid', gap: 8 }}>
-                            <div style={{ position: 'relative', width: 320, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 240 }}>
-                              <img
-                                src={complaint.image_urls[evidenceIndex]}
-                                alt="Evidence hero"
-                                onClick={() => setPreviewImage(complaint.image_urls[evidenceIndex])}
-                                style={{ maxWidth: '100%', maxHeight: 210, objectFit: 'contain', cursor: 'pointer' }}
-                                loading="lazy"
-                              />
-                              {complaint.image_urls.length > 1 ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    aria-label="Previous image"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const n = complaint.image_urls.length;
-                                      setEvidenceIndex((i) => (i - 1 + n) % n);
-                                    }}
-                                    style={{
-                                      position: 'absolute',
-                                      top: '50%',
-                                      left: 6,
-                                      transform: 'translateY(-50%)',
-                                      background: 'rgba(15,23,42,0.85)',
-                                      color: '#fff',
-                                      border: 'none',
-                                      borderRadius: 999,
-                                      width: 28,
-                                      height: 28,
-                                      aspectRatio: '1 / 1',
-                                      display: 'grid',
-                                      placeItems: 'center',
-                                      cursor: 'pointer',
-                                      boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-                                      padding: 0,
-                                      lineHeight: 0,
-                                      boxSizing: 'border-box',
-                                    }}
-                                  >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ display: 'block' }}>
-                                      <path d="M14 6L8 12L14 18" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                                    </svg>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    aria-label="Next image"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const n = complaint.image_urls.length;
-                                      setEvidenceIndex((i) => (i + 1) % n);
-                                    }}
-                                    style={{
-                                      position: 'absolute',
-                                      top: '50%',
-                                      right: 6,
-                                      transform: 'translateY(-50%)',
-                                      background: 'rgba(15,23,42,0.85)',
-                                      color: '#fff',
-                                      border: 'none',
-                                      borderRadius: 999,
-                                      width: 28,
-                                      height: 28,
-                                      aspectRatio: '1 / 1',
-                                      display: 'grid',
-                                      placeItems: 'center',
-                                      cursor: 'pointer',
-                                      boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-                                      padding: 0,
-                                      lineHeight: 0,
-                                      boxSizing: 'border-box',
-                                    }}
-                                  >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ display: 'block' }}>
-                                      <path d="M10 6L16 12L10 18" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                                    </svg>
-                                  </button>
-                                </>
-                              ) : null}
-                              <div style={{ position: 'absolute', right: 6, bottom: 6, background: 'rgba(15,23,42,0.7)', color: '#fff', fontWeight: 700, padding: '2px 5px', borderRadius: 999, fontSize: 10 }}>
-                                {evidenceIndex + 1} / {complaint.image_urls.length}
-                              </div>
-                            </div>
-
-                            {complaint.image_urls.length > 1 ? (
-                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                {complaint.image_urls.map((url, idx) => (
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                              gap: 12,
+                              alignItems: 'start',
+                            }}
+                          >
+                            {complaint.image_urls.map((url, idx) => (
+                              <button
+                                key={url}
+                                type="button"
+                                onClick={() => {
+                                  setEvidenceIndex(idx);
+                                  setPreviewImage(url);
+                                }}
+                                style={{
+                                  border: '1px solid #e2e8f0',
+                                  background: '#f8fafc',
+                                  borderRadius: 12,
+                                  padding: 10,
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  boxShadow: '0 1px 0 rgba(2,6,23,0.03)',
+                                  outline: 'none',
+                                  WebkitTapHighlightColor: 'transparent',
+                                }}
+                                title="Click to preview"
+                              >
+                                <div
+                                  style={{
+                                    width: '100%',
+                                    height: 160,
+                                    borderRadius: 10,
+                                    overflow: 'hidden',
+                                    background: '#ffffff',
+                                    border: '1px solid #e2e8f0',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                >
                                   <img
-                                    key={url}
                                     src={url}
                                     alt={`Evidence ${idx + 1}`}
-                                    onClick={() => setEvidenceIndex(idx)}
-                                    style={{
-                                      width: 70,
-                                      height: 50,
-                                      objectFit: 'cover',
-                                      borderRadius: 6,
-                                      border: idx === evidenceIndex ? '2px solid #2563eb' : '1px solid #e2e8f0',
-                                      boxShadow: idx === evidenceIndex ? '0 0 0 2px rgba(37,99,235,0.15)' : 'none',
-                                      cursor: 'pointer',
-                                    }}
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                                     loading="lazy"
                                   />
-                                ))}
-                              </div>
-                            ) : null}
+                                </div>
+                                <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 900, color: '#0f172a' }}>Evidence {idx + 1}</div>
+                                  <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b' }}>Preview</div>
+                                </div>
+                              </button>
+                            ))}
                           </div>
                         ) : (
                           <div style={{ color: '#64748b', fontWeight: 700, fontSize: 13 }}>No images</div>
@@ -900,39 +869,13 @@ export default function ComplaintReview() {
                       </div>
                     </div>
 
-                    {/* General Comments moved to right column under Case Evaluation */}
-                    {source === 'history' ? (
-                      <div style={{
-                        background: '#f8fafc',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 16,
-                        boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
-                        padding: 16,
-                      }}>
-                        <div style={{ fontWeight: 900, color: '#0f172a', fontSize: 16, marginBottom: 12 }}>
-                          General Comments
-                        </div>
-                        <div style={{
-                          background: '#ffffff',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: 12,
-                          padding: 12,
-                          color: '#0f172a',
-                          fontSize: 14,
-                          lineHeight: 1.6,
-                          whiteSpace: 'pre-wrap',
-                          minHeight: 110,
-                        }}>
-                          {declineComment || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No comments</span>}
-                        </div>
-                      </div>
-                    ) : null}
+                    {null}
                   </div>
 
                   {/* RIGHT COLUMN */}
                   <div style={{ display: 'grid', gap: 16, alignSelf: 'start', position: 'sticky', top: 14 }}>
                     {/* Case Evaluation (Decision Support) */}
-                    {source !== 'history' ? (() => {
+                    {(() => {
                       const authenticity = getAuthenticityAssessment(complaint.authenticity_level);
                       const location = getLocationVerificationStatus(complaint.tags);
                       const evidence = getEvidenceQuality(complaint.image_urls);
@@ -1084,24 +1027,24 @@ export default function ComplaintReview() {
                           </div>
                         </div>
                       );
-                    })() : null}
+                    })()}
 
-                    {/* Add Comments (below Case Evaluation) */}
-                    {source !== 'history' ? (
-                      <div style={{
-                        background: 'transparent',
-                        border: 'none',
-                        borderRadius: 0,
-                        boxShadow: 'none',
-                        padding: 0,
-                      }}>
-                        <style>{`
-                          textarea:focus {
-                            border-color: #2563eb !important;
-                            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
-                          }
-                        `}</style>
+                    {/* Comments (below Case Evaluation) */}
+                    <div style={{
+                      background: 'transparent',
+                      border: 'none',
+                      borderRadius: 0,
+                      boxShadow: 'none',
+                      padding: 0,
+                    }}>
+                      <style>{`
+                        textarea:focus {
+                          border-color: #2563eb !important;
+                          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+                        }
+                      `}</style>
 
+                      {source !== 'history' ? (
                         <button
                           type="button"
                           className="dash-btn"
@@ -1122,105 +1065,152 @@ export default function ComplaintReview() {
                         >
                           {showRightCommentsEditor ? 'Hide Comment Field' : 'Add Comment'}
                         </button>
+                      ) : (
+                        <div style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          overflow: 'hidden',
+                        }}>
+                          <div style={{
+                            padding: '14px 16px',
+                            borderBottom: '1px solid #e2e8f0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                          }}>
+                            {(() => {
+                              const s = String(complaint?.status || '').toLowerCase();
+                              const isApproved = s === 'approved';
+                              const isDeclined = s === 'declined';
+                              const label = isApproved ? 'Approved Comments' : isDeclined ? 'Declined Comments' : 'General Comments';
+                              const color = isApproved ? '#16a34a' : isDeclined ? '#dc2626' : '#0f172a';
 
-                        <div
-                          style={{
-                            overflow: 'hidden',
-                            maxHeight: showRightCommentsEditor ? 520 : 0,
-                            opacity: showRightCommentsEditor ? 1 : 0,
-                            transform: showRightCommentsEditor ? 'translateY(0px)' : 'translateY(-6px)',
-                            transition: 'max-height 260ms ease, opacity 200ms ease, transform 200ms ease',
-                          }}
-                        >
-                          <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
-                            <div style={{ marginTop: 0 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                                Quick Decline Reasons
-                              </div>
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
-                                {DECLINE_TEMPLATES.map((template) => (
-                                  <button
-                                    key={template.id}
-                                    type="button"
-                                    onClick={() => setDeclineComment(template.text)}
-                                    style={{
-                                      padding: '8px 12px',
-                                      background: '#ffffff',
-                                      border: '1px solid #cbd5e1',
-                                      borderRadius: 8,
-                                      color: '#0f172a',
-                                      fontSize: 12,
-                                      fontWeight: 600,
-                                      cursor: 'pointer',
-                                      transition: 'all 0.2s ease',
-                                      textAlign: 'left',
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.currentTarget.style.background = '#f1f5f9';
-                                      e.currentTarget.style.borderColor = '#94a3b8';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.currentTarget.style.background = '#ffffff';
-                                      e.currentTarget.style.borderColor = '#cbd5e1';
-                                    }}
-                                    title={template.text}
-                                  >
-                                    {template.label}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-
-                            <textarea
-                              id="declineComment"
-                              value={declineComment}
-                              onChange={(e) => setDeclineComment(e.target.value)}
-                              placeholder="Provide the reason for declining, or optional instructions if approving…"
-                              disabled={loading || savingDecision}
-                              style={{
-                                width: '100%',
-                                minHeight: 110,
-                                borderRadius: 12,
-                                border: declineCommentError ? '1px solid #ef4444' : '1px solid #cbd5e1',
-                                background: '#fff',
-                                color: '#0f172a',
-                                padding: 12,
-                                outline: 'none',
-                                fontSize: 14,
-                                fontFamily: 'inherit',
-                                transition: 'all 0.2s ease',
-                                resize: 'vertical',
-                                marginTop: 12,
-                              }}
-                            />
-
-                            {declineCommentError && (
-                              <div style={{
-                                marginTop: 8,
-                                padding: 8,
-                                background: '#fee2e2',
-                                border: '1px solid #fecaca',
-                                borderRadius: 8,
-                                color: '#991b1b',
-                                fontSize: 12,
-                                fontWeight: 700,
-                              }}>
-                                {declineCommentError}
-                              </div>
-                            )}
-
-                            <div style={{ marginTop: 10, display: 'grid', gap: 4 }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                                <span style={{ color: '#dc2626', fontWeight: 800 }}>•</span> Required if Declining
-                              </div>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                                <span style={{ color: '#22c55e', fontWeight: 800 }}>•</span> Optional if Approving
-                              </div>
-                            </div>
+                              return (
+                                <div style={{ fontSize: 13, fontWeight: 1000, color, textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                                  {label}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
+                      )}
+
+                      <div
+                        style={{
+                          overflow: 'hidden',
+                          maxHeight: source === 'history' ? 520 : (showRightCommentsEditor ? 520 : 0),
+                          opacity: source === 'history' ? 1 : (showRightCommentsEditor ? 1 : 0),
+                          transform: source === 'history' ? 'translateY(0px)' : (showRightCommentsEditor ? 'translateY(0px)' : 'translateY(-6px)'),
+                          transition: 'max-height 260ms ease, opacity 200ms ease, transform 200ms ease',
+                        }}
+                      >
+                        <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
+                          {source !== 'history' ? (
+                            <>
+                              <div style={{ marginTop: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                                  Quick Decline Reasons
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                                  {DECLINE_TEMPLATES.map((template) => (
+                                    <button
+                                      key={template.id}
+                                      type="button"
+                                      onClick={() => setDeclineComment(template.text)}
+                                      style={{
+                                        padding: '8px 12px',
+                                        background: '#ffffff',
+                                        border: '1px solid #cbd5e1',
+                                        borderRadius: 8,
+                                        color: '#0f172a',
+                                        fontSize: 12,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        textAlign: 'left',
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = '#f1f5f9';
+                                        e.currentTarget.style.borderColor = '#94a3b8';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = '#ffffff';
+                                        e.currentTarget.style.borderColor = '#cbd5e1';
+                                      }}
+                                      title={template.text}
+                                    >
+                                      {template.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <textarea
+                                id="declineComment"
+                                value={declineComment}
+                                onChange={(e) => setDeclineComment(e.target.value)}
+                                placeholder="Provide the reason for declining, or optional instructions if approving…"
+                                disabled={loading || savingDecision}
+                                style={{
+                                  width: '100%',
+                                  minHeight: 110,
+                                  borderRadius: 12,
+                                  border: declineCommentError ? '1px solid #ef4444' : '1px solid #cbd5e1',
+                                  background: '#fff',
+                                  color: '#0f172a',
+                                  padding: 12,
+                                  outline: 'none',
+                                  fontSize: 14,
+                                  fontFamily: 'inherit',
+                                  transition: 'all 0.2s ease',
+                                  resize: 'vertical',
+                                  marginTop: 12,
+                                }}
+                              />
+
+                              {declineCommentError && (
+                                <div style={{
+                                  marginTop: 8,
+                                  padding: 8,
+                                  background: '#fee2e2',
+                                  border: '1px solid #fecaca',
+                                  borderRadius: 8,
+                                  color: '#991b1b',
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                }}>
+                                  {declineCommentError}
+                                </div>
+                              )}
+
+                              <div style={{ marginTop: 10, display: 'grid', gap: 4 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
+                                  <span style={{ color: '#dc2626', fontWeight: 800 }}>•</span> Required if Declining
+                                </div>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
+                                  <span style={{ color: '#22c55e', fontWeight: 800 }}>•</span> Optional if Approving
+                                </div>
+                              </div>
+                            </>
+                          ) : (
+                            <div style={{
+                              background: '#ffffff',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: 12,
+                              padding: 12,
+                              color: '#0f172a',
+                              fontSize: 14,
+                              lineHeight: 1.6,
+                              whiteSpace: 'pre-wrap',
+                              minHeight: 110,
+                            }}>
+                              {declineComment || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No comments</span>}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    ) : null}
+                    </div>
 
                     {/* Complaint History (layout placeholder) */}
                     {(() => {
@@ -1262,7 +1252,7 @@ export default function ComplaintReview() {
         >
           <div className="overlay-content" onClick={(e) => e.stopPropagation()}>
             <button className="overlay-close" onClick={() => setPreviewImage(null)} aria-label="Close">
-              &times;
+              <img src="/X icon.png" alt="Close" style={{ width: 16, height: 16, display: 'block', filter: 'brightness(0) invert(1)' }} />
             </button>
             
             {/* Left Arrow Button */}
