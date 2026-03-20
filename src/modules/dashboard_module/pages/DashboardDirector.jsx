@@ -582,11 +582,11 @@ export default function DashboardDirector() {
           //   console.warn('Failed to load mission order revisions', revisionErr);
           // }
 
-          const revisionCountByMoId = new Map();
-          (revisionRows || []).forEach((r) => {
-            if (!r?.mission_order_id) return;
-            revisionCountByMoId.set(r.mission_order_id, (revisionCountByMoId.get(r.mission_order_id) || 0) + 1);
-          });
+          // const revisionCountByMoId = new Map();
+          // (revisionRows || []).forEach((r) => {
+          //   if (!r?.mission_order_id) return;
+          //   revisionCountByMoId.set(r.mission_order_id, (revisionCountByMoId.get(r.mission_order_id) || 0) + 1);
+          // });
 
           const normalizeInspectionStatus = (v) => String(v || '').toLowerCase().trim();
           const inspectionPriority = (v) => {
