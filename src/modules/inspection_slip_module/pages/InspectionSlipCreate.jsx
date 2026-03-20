@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import 'leaflet/dist/leaflet.css';
 import { MapContainer, Marker, TileLayer } from 'react-leaflet';
 import L from 'leaflet';
 import Header from '../../../components/Header';
@@ -40,6 +41,7 @@ export default function InspectionSlipCreate() {
   const [businessSearch, setBusinessSearch] = useState('');
   const [businessResult, setBusinessResult] = useState(null);
   const [checkingBusiness, setCheckingBusiness] = useState(false);
+  const [businessMapCoords, setBusinessMapCoords] = useState(null);
 
   const [ownerDetails, setOwnerDetails] = useState({
     fullName: '',
@@ -121,6 +123,7 @@ export default function InspectionSlipCreate() {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const cameraStartSeqRef = useRef(0);
+  const mapRef = useRef(null);
 
   const stopCamera = () => {
     try {
@@ -346,9 +349,16 @@ export default function InspectionSlipCreate() {
 
     const nextWidth = Math.max(1, Math.round(rect.width * dpr));
     const nextHeight = Math.max(1, Math.round(rect.height * dpr));
+    const currentCssWidth = Math.max(1, Math.round(canvas.width / dpr));
+    const currentCssHeight = Math.max(1, Math.round(canvas.height / dpr));
 
     // Only resize when needed (resizing clears the canvas).
-    if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
+    if (
+      canvas.width !== nextWidth ||
+      canvas.height !== nextHeight ||
+      currentCssWidth !== Math.max(1, Math.round(rect.width)) ||
+      currentCssHeight !== Math.max(1, Math.round(rect.height))
+    ) {
       canvas.width = nextWidth;
       canvas.height = nextHeight;
     }
@@ -367,6 +377,21 @@ export default function InspectionSlipCreate() {
     const t = setTimeout(() => setToast(''), 3500);
     return () => clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    void requestInspectorLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'inspection_details' || !mapRef.current) return undefined;
+
+    const timer = setTimeout(() => {
+      mapRef.current?.invalidateSize();
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [activeTab, businessMapCoords]);
 
   useEffect(() => {
     if (!missionOrderId) return;
@@ -898,6 +923,10 @@ export default function InspectionSlipCreate() {
   const handleUseBusiness = async (b) => {
     if (!b) return;
 
+    const lat = parseFloat(b?.business_lat);
+    const lng = parseFloat(b?.business_lng);
+    setBusinessMapCoords(Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null);
+
     // Always fill business name
     setOwnerDetails((prev) => ({
       ...prev,
@@ -1049,11 +1078,57 @@ export default function InspectionSlipCreate() {
     };
   };
 
+  const previewAddress = useMemo(() => {
+    const candidates = [businessDetails.address, complaint?.business_address];
+    return candidates.map((value) => String(value || '').trim()).find(Boolean) || '';
+  }, [businessDetails.address, complaint?.business_address]);
+
   const mapUrl = useMemo(() => {
-    const address = complaint?.business_address || '';
+    const address = previewAddress;
     if (!address) return null;
-    return `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`;
-  }, [complaint?.business_address]);
+    return `https://maps.google.com/maps?q=${encodeURIComponent(address)}&output=embed`;
+  }, [previewAddress]);
+
+  useEffect(() => {
+    if (!previewAddress || businessMapCoords) return undefined;
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const geocodeBusinessAddress = async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(previewAddress)}`;
+        const res = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            Accept: 'application/json',
+          },
+        });
+
+        if (!res.ok) return;
+
+        const rows = await res.json();
+        const first = Array.isArray(rows) ? rows[0] : null;
+        const lat = parseFloat(first?.lat);
+        const lng = parseFloat(first?.lon);
+
+        if (!cancelled && Number.isFinite(lat) && Number.isFinite(lng)) {
+          setBusinessMapCoords({ lat, lng });
+        }
+      } catch (err) {
+        if (err?.name !== 'AbortError') {
+          console.warn('Business geocoding failed:', err);
+        }
+      }
+    };
+
+    void geocodeBusinessAddress();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [previewAddress, businessMapCoords]);
 
   const INSPECTION_BUCKET = 'inspection';
 
@@ -1069,8 +1144,8 @@ export default function InspectionSlipCreate() {
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
+          const lat = parseFloat(pos.coords.latitude);
+          const lng = parseFloat(pos.coords.longitude);
           const accuracy = pos.coords.accuracy;
           const capturedAt = new Date().toISOString();
 
@@ -1100,6 +1175,20 @@ export default function InspectionSlipCreate() {
       L.icon({
         iconUrl:
           'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41],
+      }),
+    []
+  );
+
+  const businessLeafletIcon = useMemo(
+    () =>
+      L.icon({
+        iconUrl:
+          'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
         shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
         iconSize: [25, 41],
         iconAnchor: [12, 41],
@@ -1341,9 +1430,31 @@ export default function InspectionSlipCreate() {
     if (!inspectorSignature) missing.push('Inspector Signature');
     if (!ownerSignature) missing.push('Business Owner Signature');
 
+    const detailsTabMissing =
+      !String(ownerDetails.businessName || '').trim() ||
+      !String(businessDetails.address || '').trim();
+
+    const inspectionTabMissing =
+      inspectorLocation.lat == null ||
+      inspectorLocation.lng == null ||
+      !Array.isArray(evidencePhotos) ||
+      evidencePhotos.length === 0 ||
+      checklist.business_permit === 'na' ||
+      checklist.with_cctv === 'na' ||
+      checklist.signage_2sqm === 'na' ||
+      !inspectorSignature ||
+      !ownerSignature ||
+      (checklist.with_cctv === 'compliant' && (!Number.isFinite(Number(String(cctvCount || '').trim())) || Number(String(cctvCount || '').trim()) <= 0)) ||
+      (checklist.signage_2sqm === 'compliant' &&
+        (!Number.isFinite(Number(String(signage_sqm || '').trim())) || Number(String(signage_sqm || '').trim()) <= 0));
+
     if (missing.length) {
       setError(`Cannot submit. Please complete the required fields: ${missing.join(', ')}`);
-      setActiveTab('inspection');
+      if (detailsTabMissing) {
+        setActiveTab('inspection_details');
+      } else if (inspectionTabMissing) {
+        setActiveTab('inspection');
+      }
       return;
     }
 
@@ -1740,11 +1851,13 @@ export default function InspectionSlipCreate() {
                     <div className="is-section-head">
                       <div>
                         <p className="is-section-title">Map Preview</p>
-                        <p className="is-section-sub">Uses the complaint business address.</p>
+                        <p className="is-section-sub">
+                          Uses matched business coordinates when available, otherwise the current business address.
+                        </p>
                       </div>
                     </div>
 
-                    {!mapUrl ? (
+                    {!businessMapCoords && !mapUrl ? (
                       <div className="mo-meta">No address available for map preview.</div>
                     ) : (
                       <div
@@ -1755,15 +1868,37 @@ export default function InspectionSlipCreate() {
                           background: '#fff',
                         }}
                       >
-                        <iframe
-                          title="Business Location"
-                          src={mapUrl}
-                          width="100%"
-                          height="320"
-                          style={{ border: 0 }}
-                          loading="lazy"
-                          referrerPolicy="no-referrer-when-downgrade"
-                        />
+                        {businessMapCoords ? (
+                          <div style={{ position: 'relative', zIndex: 1 }}>
+                            <MapContainer
+                              ref={mapRef}
+                              center={[businessMapCoords.lat, businessMapCoords.lng]}
+                              zoom={18}
+                              style={{ height: '320px', width: '100%' }}
+                              scrollWheelZoom={false}
+                            >
+                              <TileLayer
+                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                              />
+                              <Marker
+                                position={[businessMapCoords.lat, businessMapCoords.lng]}
+                                title={ownerDetails.businessName || 'Business Location'}
+                                icon={businessLeafletIcon}
+                              />
+                            </MapContainer>
+                          </div>
+                        ) : (
+                          <iframe
+                            title="Business Location"
+                            src={mapUrl}
+                            width="100%"
+                            height="320"
+                            style={{ border: 0 }}
+                            loading="lazy"
+                            referrerPolicy="no-referrer-when-downgrade"
+                          />
+                        )}
                       </div>
                     )}
                   </div>
@@ -1832,22 +1967,24 @@ export default function InspectionSlipCreate() {
                               marginTop: 10,
                             }}
                           >
-                            <MapContainer
-                              center={[inspectorLocation.lat, inspectorLocation.lng]}
-                              zoom={18}
-                              style={{ height: '100%', width: '100%' }}
-                              scrollWheelZoom={false}
-                            >
-                              <TileLayer
-                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                              />
-                              <Marker
-                                position={[inspectorLocation.lat, inspectorLocation.lng]}
-                                title="Inspector Location"
-                                icon={inspectorLeafletIcon}
-                              />
-                            </MapContainer>
+                            <div style={{ position: 'relative', zIndex: 1, height: '100%', width: '100%' }}>
+                              <MapContainer
+                                center={[inspectorLocation.lat, inspectorLocation.lng]}
+                                zoom={18}
+                                style={{ height: '100%', width: '100%' }}
+                                scrollWheelZoom={false}
+                              >
+                                <TileLayer
+                                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                />
+                                <Marker
+                                  position={[inspectorLocation.lat, inspectorLocation.lng]}
+                                  title="Inspector Location"
+                                  icon={inspectorLeafletIcon}
+                                />
+                              </MapContainer>
+                            </div>
                           </div>
                         ) : null}
                       </div>
@@ -2056,9 +2193,10 @@ export default function InspectionSlipCreate() {
                         <input
                           className="is-input"
                           value={businessDetails.address}
-                          onChange={(e) =>
-                            setBusinessDetails((prev) => ({ ...prev, address: e.target.value }))
-                          }
+                          onChange={(e) => {
+                            setBusinessMapCoords(null);
+                            setBusinessDetails((prev) => ({ ...prev, address: e.target.value }));
+                          }}
                           placeholder="Address (autofilled when selecting a business, editable)"
                         />
                       </div>
