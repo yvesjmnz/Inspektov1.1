@@ -1084,36 +1084,6 @@ export default function ComplaintReview() {
                                 }}
                               />
 
-                              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                                  Tip: clicking a quick reason adds it to the current comment instead of replacing what you already wrote.
-                                </div>
-                                {declineComment.trim() ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      commentInputRef.current?.focus();
-                                      commentInputRef.current?.setSelectionRange(
-                                        declineComment.length,
-                                        declineComment.length,
-                                      );
-                                    }}
-                                    style={{
-                                      padding: '6px 10px',
-                                      background: '#e2e8f0',
-                                      border: '1px solid #cbd5e1',
-                                      borderRadius: 10,
-                                      color: '#0f172a',
-                                      fontSize: 12,
-                                      fontWeight: 800,
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    Continue Editing
-                                  </button>
-                                ) : null}
-                              </div>
-
                               {declineCommentError && (
                                 <div style={{
                                   marginTop: 8,

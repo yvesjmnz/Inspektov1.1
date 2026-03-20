@@ -59,7 +59,7 @@ function formatDateHuman(yyyyMmDd) {
 function statusLabel(status) {
   const s = String(status || '').toLowerCase();
   if (s === 'draft') return 'Draft';
-  if (s === 'issued') return 'Submitted to Director';
+  if (s === 'issued') return 'Issued';
   if (s === 'for inspection' || s === 'for_inspection') return 'Pre-Approved';
   if (s === 'awaiting_signature') return 'Awaiting Signature';
   if (s === 'complete' || s === 'completed') return 'Complete';
@@ -73,7 +73,7 @@ function statusBadgeClass(status) {
   if (s === 'for inspection' || s === 'for_inspection') return 'status-badge status-success';
   if (s === 'complete' || s === 'completed') return 'status-badge status-success';
   if (s === 'awaiting_signature') return 'status-badge status-purple';
-  if (s === 'issued') return 'status-badge status-info';
+  if (s === 'issued') return 'status-badge status-warning';
   if (s === 'rejected') return 'status-badge status-danger';
   if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
   if (s === 'draft') return 'status-badge status-info';
@@ -249,12 +249,24 @@ export default function MissionOrderEditor() {
   const isDirectorReviewable = viewerRole === 'director' && isSubmitted;
   const canHeadInspectorSubmit = viewerRole === 'head_inspector' && !isApproved && !isSubmitted && !isAwaitingSignature && !isComplete;
   const [directorComment, setDirectorComment] = useState('');
+  const [showDirectorCommentsEditor, setShowDirectorCommentsEditor] = useState(false);
+  const directorCommentInputRef = useRef(null);
   const [savingDecision, setSavingDecision] = useState(false);
+  const [uploadingSignedAttachment, setUploadingSignedAttachment] = useState(false);
+  const secretaryUploadInputRef = useRef(null);
 
-  // Editing is allowed while the mission order is being prepared or revised.
-  // Rejected mission orders are editable so the Head Inspector can revise and resubmit.
-  // After director pre-approval, awaiting signature, or completion, the MO must be read-only.
-  const isReadOnly = isApproved || isAwaitingSignature || isComplete;
+  // Director view is always read-only for mission order details.
+  // Head Inspector can still edit while preparing or revising rejected mission orders.
+  // After director pre-approval, awaiting signature, or completion, the MO must also be read-only.
+  const isReadOnly = viewerRole === 'director' || isApproved || isAwaitingSignature || isComplete;
+
+  useEffect(() => {
+    if (!showDirectorCommentsEditor || !isDirectorReviewable) return;
+    const t = setTimeout(() => {
+      directorCommentInputRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [showDirectorCommentsEditor, isDirectorReviewable]);
 
   const handleLogout = async () => {
     setError('');
@@ -320,7 +332,8 @@ export default function MissionOrderEditor() {
 
       setMissionOrder(mo);
       setDateOfInspection(formatDateInputValue(mo?.date_of_inspection));
-      setDirectorComment(mo?.director_comment || '');
+      setDirectorComment('');
+      setShowDirectorCommentsEditor(false);
 
       let complaintForAutoPopulate = null;
 
@@ -584,9 +597,8 @@ export default function MissionOrderEditor() {
   const hasGeneratedDocx = !!missionOrder?.generated_docx_url;
   const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection && hasGeneratedDocx;
   const isDraft = statusLower === 'draft';
-  // Allow generating an UNSIGNED doc even after submit (issued), so the director can see the latest draft output.
-  // Rejected is treated like a revision state: editable + can regenerate UNSIGNED doc for resubmission.
-  // Director approval will overwrite it with the SIGNED template automatically.
+  // Head Inspector can generate an unsigned doc while drafting, after submit, or during revision.
+  // Director approval will overwrite it with the signed template automatically.
   const canGenerateDocx = !loading && !!missionOrderId && !isReadOnly && (isDraft || isSubmitted || isRejected);
 
   const saveMissionOrder = async () => {
@@ -636,6 +648,7 @@ export default function MissionOrderEditor() {
       if (!userId) throw new Error('Not authenticated. Please login again.');
 
       if (nextStatus === 'rejected' && !String(directorComment || '').trim()) {
+        setShowDirectorCommentsEditor(true);
         throw new Error('Rejection requires a director comment.');
       }
 
@@ -774,11 +787,40 @@ export default function MissionOrderEditor() {
       setMissionOrder((prev) => ({ ...(prev || {}), ...patch }));
       setToast(nextStatus === 'for inspection' ? 'Approved' : 'Rejected');
       await load();
+      return true;
     } catch (e) {
       setError(e?.message || 'Failed to update mission order.');
+      return false;
     } finally {
       setSavingDecision(false);
     }
+  };
+
+  const closeDirectorReviewWindow = () => {
+    setTimeout(() => {
+      try {
+        window.close();
+      } catch {
+        // ignore
+      }
+
+      try {
+        if (!window.closed) {
+          const moSource = sessionStorage.getItem('missionOrderSource');
+          if (moSource === 'review') {
+            window.location.assign('/dashboard/director?tab=mission-orders');
+            return;
+          }
+          if (moSource === 'history') {
+            window.location.assign('/dashboard/director?tab=mission-orders-history');
+            return;
+          }
+          window.location.assign('/dashboard/director?tab=mission-orders-history');
+        }
+      } catch {
+        window.location.assign('/dashboard/director?tab=mission-orders-history');
+      }
+    }, 150);
   };
 
   const handleApprove = async () => {
@@ -786,7 +828,8 @@ export default function MissionOrderEditor() {
       setToast('Not reviewable');
       return;
     }
-    await updateMissionOrderDecision('for inspection');
+    const ok = await updateMissionOrderDecision('for inspection');
+    if (ok) closeDirectorReviewWindow();
   };
 
   const handleReject = async () => {
@@ -794,7 +837,33 @@ export default function MissionOrderEditor() {
       setToast('Not reviewable');
       return;
     }
-    await updateMissionOrderDecision('rejected');
+    const ok = await updateMissionOrderDecision('rejected');
+    if (ok) closeDirectorReviewWindow();
+  };
+
+  const openDirectorCommentEditor = () => {
+    setDirectorComment('');
+    if (String(error || '').includes('Rejection requires a director comment.')) {
+      setError('');
+    }
+    setShowDirectorCommentsEditor(true);
+  };
+
+  const closeHeadInspectorWindow = () => {
+    setTimeout(() => {
+      try {
+        window.close();
+      } catch {
+        // ignore
+      }
+      try {
+        if (!window.closed) {
+          window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
+        }
+      } catch {
+        // ignore
+      }
+    }, 250);
   };
 
   const handleSubmitToDirector = async () => {
@@ -846,23 +915,7 @@ export default function MissionOrderEditor() {
 
       setToast('Submitted');
 
-      // Close this window/tab to signal the Head Inspector is finished creating.
-      // If the browser blocks it (not opened by script), fall back to navigating back to dashboard.
-      setTimeout(() => {
-        try {
-          window.close();
-        } catch {
-          // ignore
-        }
-        // If still open, navigate away.
-        try {
-          if (!window.closed) {
-            window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
-          }
-        } catch {
-          // ignore
-        }
-      }, 250);
+      closeHeadInspectorWindow();
     } catch (e) {
       setError(e?.message || 'Failed to submit to Director.');
     } finally {
@@ -1345,8 +1398,129 @@ export default function MissionOrderEditor() {
       if (missionOrder?.generated_docx_url) {
         window.open(missionOrder.generated_docx_url, '_blank');
       }
+
+      closeHeadInspectorWindow();
     } catch (e) {
       setError(e?.message || 'Failed to update status.');
+    }
+  };
+
+  const handleUploadSecretarySigned = async (file) => {
+    setError('');
+    setToast('');
+
+    if (!missionOrderId) {
+      setError('No Mission Order found for this record.');
+      return;
+    }
+
+    if (!file) {
+      setError('Please upload a PDF or PNG before archiving.');
+      return;
+    }
+
+    const isAllowed =
+      file.type === 'application/pdf' ||
+      file.type === 'image/png' ||
+      /\.(pdf|png)$/i.test(file.name || '');
+
+    if (!isAllowed) {
+      setError('Invalid file type. Please upload a PDF or PNG.');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File is too large. Maximum allowed size is 10MB.');
+      return;
+    }
+
+    try {
+      setUploadingSignedAttachment(true);
+
+      const fileBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result;
+          if (typeof result === 'string') {
+            resolve(result.split(',')[1]);
+          } else {
+            reject(new Error('Failed to read file'));
+          }
+        };
+        reader.onerror = () => reject(new Error('File read error'));
+        reader.readAsDataURL(file);
+      });
+
+      const { data: verificationResult, error: verificationError } = await supabase.functions.invoke(
+        'verify-secretary-document',
+        {
+          body: {
+            missionOrderId,
+            fileBase64,
+            fileName: file.name,
+          },
+        }
+      );
+
+      if (verificationError) throw verificationError;
+
+      if (!verificationResult?.success && verificationResult?.error) {
+        setError(`Document verification failed: ${verificationResult.error}`);
+        return;
+      }
+
+      if (!verificationResult?.success) {
+        setError(
+          `Document verification failed (${verificationResult?.matchScore ?? 0}%). Please upload a valid mission order document.`
+        );
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const safeName = String(file.name || 'attachment')
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .slice(0, 120);
+      const storagePath = `mission-orders/${missionOrderId}/secretary-signed/${Date.now()}_${safeName}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from('mission-orders')
+        .upload(storagePath, file, { upsert: true, contentType: file.type || undefined });
+      if (uploadErr) throw uploadErr;
+
+      const { data: publicUrlData } = supabase.storage.from('mission-orders').getPublicUrl(storagePath);
+      const attachmentUrl = publicUrlData?.publicUrl || null;
+
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData?.user?.id || null;
+
+      const patch = {
+        status: 'complete',
+        updated_at: nowIso,
+        secretary_signed_at: nowIso,
+        secretary_signed_attachment_url: attachmentUrl,
+        secretary_signed_attachment_uploaded_at: nowIso,
+        secretary_signed_attachment_uploaded_by: userId,
+        secretary_signed_attachment_verification_score: verificationResult.matchScore,
+        secretary_signed_attachment_verification_details: JSON.stringify(verificationResult.details),
+      };
+
+      const { error: updateError } = await supabase
+        .from('mission_orders')
+        .update(patch)
+        .eq('id', missionOrderId);
+      if (updateError) throw updateError;
+
+      setMissionOrder((prev) => ({
+        ...(prev || {}),
+        ...patch,
+      }));
+
+      setToast(`Mission order archived (verification score: ${verificationResult.matchScore}%).`);
+      closeHeadInspectorWindow();
+    } catch (e) {
+      setError(e?.message || 'Failed to archive mission order.');
+    } finally {
+      setUploadingSignedAttachment(false);
     }
   };
 
@@ -1496,6 +1670,57 @@ export default function MissionOrderEditor() {
                       </button>
                     </>
                   ) : null)}
+
+                  {viewerRole === 'head_inspector' && missionOrder?.generated_docx_url && (isApproved || isAwaitingSignature) ? (
+                    <button
+                      type="button"
+                      className="dash-btn"
+                      onClick={handleDownloadDocx}
+                      style={{ textDecoration: 'none' }}
+                    >
+                      Download
+                    </button>
+                  ) : null}
+
+                  {viewerRole === 'head_inspector' && isAwaitingSignature ? (
+                    <>
+                      <input
+                        ref={secretaryUploadInputRef}
+                        type="file"
+                        accept="application/pdf,image/png,.pdf,.png"
+                        style={{ display: 'none' }}
+                        disabled={loading || uploadingSignedAttachment}
+                        onChange={(e) => {
+                          const file = e.target.files && e.target.files[0];
+                          e.target.value = '';
+                          if (!file) return;
+                          void handleUploadSecretarySigned(file);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={() => secretaryUploadInputRef.current?.click()}
+                        disabled={loading || uploadingSignedAttachment}
+                        style={{
+                          background: '#10b981',
+                          color: '#fff',
+                          border: '1px solid #10b981',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          opacity: loading || uploadingSignedAttachment ? 0.75 : 1,
+                        }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                          <path d="M12 3V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          <path d="M7 8L12 3L17 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M4 14V20H20V14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        {uploadingSignedAttachment ? 'Uploading...' : 'Upload'}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               </div>
 
@@ -1640,57 +1865,85 @@ export default function MissionOrderEditor() {
                 </div>
 
                 {(() => {
-                  const comment = String(complaint?.decline_comment || missionOrder?.director_comment || '').trim();
-                  if (!comment) return null;
+                  const complaintComment = String(complaint?.decline_comment || '').trim();
+                  const missionOrderComment = String(missionOrder?.director_comment || '').trim();
+                  const missionOrderCommentTitle = isRejected
+                    ? 'Mission Order Rejection Comments'
+                    : (isApproved || isAwaitingSignature || isComplete)
+                      ? 'Mission Order Approved Comments'
+                      : 'Mission Order Comments';
+                  if (!complaintComment && !missionOrderComment) return null;
 
                   return (
                     <>
-                      <div style={{ height: 1, background: 'rgba(255,255,255,0.16)', width: '100%' }} />
-                      <div
-                        style={{
-                          border: '1px solid rgba(255,255,255,0.18)',
-                          background: 'rgba(255,255,255,0.10)',
-                          borderRadius: 12,
-                          padding: '10px 12px',
-                          display: 'grid',
-                          gap: 6,
-                        }}
-                      >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95, display: 'inline-flex' }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" fill="currentColor" opacity="0.9"/>
-                            <path d="M7 8h10M7 12h7" stroke="#0b2249" strokeWidth="2" strokeLinecap="round"/>
-                          </svg>
-                        </span>
-                        <div style={{ fontWeight: 1000, fontSize: 12, letterSpacing: 0.4, textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>
-                          Director's Comments
-                        </div>
-                      </div>
-                      <div style={{ fontWeight: 900, fontSize: 14, lineHeight: 1.35, color: '#fff', whiteSpace: 'pre-wrap' }}>
-                        {comment}
-                      </div>
-                    </div>
-                  </>
+                      {complaintComment ? (
+                        <>
+                          <div style={{ height: 1, background: 'rgba(255,255,255,0.16)', width: '100%' }} />
+                          <div
+                            style={{
+                              border: '1px solid rgba(255,255,255,0.18)',
+                              background: 'rgba(255,255,255,0.10)',
+                              borderRadius: 12,
+                              padding: '10px 12px',
+                              display: 'grid',
+                              gap: 6,
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95, display: 'inline-flex' }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                  <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" fill="currentColor" opacity="0.9"/>
+                                  <path d="M7 8h10M7 12h7" stroke="#0b2249" strokeWidth="2" strokeLinecap="round"/>
+                                </svg>
+                              </span>
+                              <div style={{ fontWeight: 1000, fontSize: 12, letterSpacing: 0.4, textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>
+                                Director's Comments
+                              </div>
+                            </div>
+                            <div style={{ fontWeight: 900, fontSize: 14, lineHeight: 1.35, color: '#fff', whiteSpace: 'pre-wrap' }}>
+                              {complaintComment}
+                            </div>
+                          </div>
+                        </>
+                      ) : null}
+
+                      {missionOrderComment ? (
+                        <>
+                          <div style={{ height: 1, background: 'rgba(255,255,255,0.16)', width: '100%' }} />
+                          <div
+                            style={{
+                              border: '1px solid rgba(255,255,255,0.18)',
+                              background: 'rgba(255,255,255,0.10)',
+                              borderRadius: 12,
+                              padding: '10px 12px',
+                              display: 'grid',
+                              gap: 6,
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95, display: 'inline-flex' }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                  <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" fill="currentColor" opacity="0.9"/>
+                                  <path d="M7 8h10M7 12h7" stroke="#0b2249" strokeWidth="2" strokeLinecap="round"/>
+                                </svg>
+                              </span>
+                              <div style={{ fontWeight: 1000, fontSize: 12, letterSpacing: 0.4, textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>
+                                {missionOrderCommentTitle}
+                              </div>
+                            </div>
+                            <div style={{ fontWeight: 900, fontSize: 14, lineHeight: 1.35, color: '#fff', whiteSpace: 'pre-wrap' }}>
+                              {missionOrderComment}
+                            </div>
+                          </div>
+                        </>
+                      ) : null}
+                    </>
                   );
                 })()}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, alignItems: 'start' }}>
                 <div style={{ display: 'grid', gap: 14, alignSelf: 'start' }}>
-                {isDirectorReviewable ? (
-                  <Panel title="Director Comment" right={<span style={{ fontWeight: 900, fontSize: 12, color: '#64748b' }}>Required if rejecting</span>}>
-                    <textarea
-                      className="mo-title"
-                      value={directorComment}
-                      onChange={(e) => setDirectorComment(e.target.value)}
-                      rows={5}
-                      disabled={loading || savingDecision}
-                      style={{ fontSize: 16, fontWeight: 800, height: 'auto', minHeight: 120, borderRadius: 14 }}
-                      placeholder="Add instruction or reason…"
-                    />
-                  </Panel>
-                ) : null}
 
                 <Panel title="Mission Order Details">
                   <div style={{ display: 'grid', gap: 16 }}>
@@ -2015,12 +2268,13 @@ export default function MissionOrderEditor() {
 
                   {/* Dates side-by-side */}
                   <div className="mo-row-2" style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <div>
-                      <label className="mo-label" htmlFor="dateInspection" style={{ fontSize: 13 }}>Date of Inspection</label>
+                      <div>
+                        <label className="mo-label" htmlFor="dateInspection" style={{ fontSize: 13 }}>Date of Inspection</label>
                       <div
                         role="button"
-                        tabIndex={0}
+                        tabIndex={isReadOnly ? -1 : 0}
                         onClick={() => {
+                          if (isReadOnly) return;
                           // Open the native date picker while keeping a human-readable display.
                           const el = document.getElementById('dateInspectionHidden');
                           if (el?.showPicker) el.showPicker();
@@ -2028,6 +2282,7 @@ export default function MissionOrderEditor() {
                           el?.click?.();
                         }}
                         onKeyDown={(e) => {
+                          if (isReadOnly) return;
                           if (e.key !== 'Enter' && e.key !== ' ') return;
                           e.preventDefault();
                           const el = document.getElementById('dateInspectionHidden');
@@ -2044,7 +2299,7 @@ export default function MissionOrderEditor() {
                           display: 'flex',
                           alignItems: 'center',
                           gap: 10,
-                          cursor: 'pointer',
+                          cursor: isReadOnly ? 'default' : 'pointer',
                           userSelect: 'none',
                         }}
                       >
@@ -2095,7 +2350,7 @@ export default function MissionOrderEditor() {
                   title="Document Preview"
                   right={
                     <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      {!isComplete ? (
+                      {viewerRole !== 'director' && !isComplete && canGenerateDocx ? (
                         <button
                           type="button"
                           className="dash-btn"
@@ -2114,16 +2369,6 @@ export default function MissionOrderEditor() {
                         </button>
                       ) : null}
 
-                      {missionOrder?.generated_docx_url && (isApproved || isAwaitingSignature) ? (
-                        <button
-                          type="button"
-                          className="dash-btn"
-                          onClick={handleDownloadDocx}
-                          style={{ textDecoration: 'none' }}
-                        >
-                          Download
-                        </button>
-                      ) : null}
                     </div>
                   }
                 >
@@ -2365,6 +2610,127 @@ export default function MissionOrderEditor() {
                   ) : null}
 
                   </Panel>
+
+                  {isDirectorReviewable ? (
+                    <div style={{ display: 'grid', gap: 12 }}>
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={() => {
+                          if (showDirectorCommentsEditor) {
+                            setShowDirectorCommentsEditor(false);
+                            return;
+                          }
+                          openDirectorCommentEditor();
+                        }}
+                        style={{
+                          width: '100%',
+                          background: '#0b2249',
+                          color: '#fff',
+                          padding: '14px 16px',
+                          fontSize: 15,
+                          fontWeight: 1000,
+                          borderRadius: 14,
+                          justifyContent: 'center',
+                          outline: 'none',
+                          boxShadow: 'none',
+                          border: 'none',
+                        }}
+                      >
+                        {showDirectorCommentsEditor ? 'Hide Comment Field' : 'Add Comment'}
+                      </button>
+
+                      <div
+                        style={{
+                          overflow: 'hidden',
+                          maxHeight: showDirectorCommentsEditor ? 520 : 0,
+                          opacity: showDirectorCommentsEditor ? 1 : 0,
+                          transform: showDirectorCommentsEditor ? 'translateY(0px)' : 'translateY(-6px)',
+                          transition: 'max-height 260ms ease, opacity 200ms ease, transform 200ms ease',
+                        }}
+                      >
+                        <div
+                          style={{
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 16,
+                            boxShadow: '0 2px 10px rgba(2,6,23,0.06)',
+                            padding: 16,
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                            <div>
+                              <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                                Mission Order Comment
+                              </div>
+                              <div style={{ marginTop: 4, fontSize: 12, color: '#64748b', fontWeight: 700 }}>
+                                Required for rejection, optional for approval.
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: directorComment.trim() ? '#0f172a' : '#64748b' }}>
+                                {directorComment.trim().length} characters
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDirectorComment('');
+                                  if (String(error || '').includes('Rejection requires a director comment.')) {
+                                    setError('');
+                                  }
+                                }}
+                                disabled={loading || savingDecision || !directorComment}
+                                style={{
+                                  padding: '8px 12px',
+                                  background: '#ffffff',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: 10,
+                                  color: '#334155',
+                                  fontSize: 12,
+                                  fontWeight: 800,
+                                  cursor: loading || savingDecision || !directorComment ? 'not-allowed' : 'pointer',
+                                  opacity: loading || savingDecision || !directorComment ? 0.55 : 1,
+                                }}
+                              >
+                                Clear
+                              </button>
+                            </div>
+                          </div>
+
+                          <textarea
+                            ref={directorCommentInputRef}
+                            value={directorComment}
+                            onChange={(e) => {
+                              setDirectorComment(e.target.value);
+                              if (String(error || '').includes('Rejection requires a director comment.')) {
+                                setError('');
+                              }
+                            }}
+                            placeholder="Provide the reason for rejecting, or optional instructions if approving..."
+                            disabled={loading || savingDecision}
+                            style={{
+                              width: '100%',
+                              minHeight: 110,
+                              borderRadius: 12,
+                              border: String(error || '').includes('Rejection requires a director comment.')
+                                ? '1px solid #ef4444'
+                                : '1px solid #cbd5e1',
+                              background: '#fff',
+                              color: '#0f172a',
+                              padding: 12,
+                              outline: 'none',
+                              fontSize: 14,
+                              fontFamily: 'inherit',
+                              transition: 'all 0.2s ease',
+                              resize: 'vertical',
+                              marginTop: 12,
+                            }}
+                          />
+
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
