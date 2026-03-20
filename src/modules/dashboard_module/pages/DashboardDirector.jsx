@@ -2048,6 +2048,11 @@ export default function DashboardDirector() {
                                     title={c.mission_order_id ? 'View inspection details' : 'No mission order available'}
                                     onClick={() => {
                                       if (c.mission_order_id) {
+                                        try {
+                                          sessionStorage.setItem('inspectionSource', 'inspection');
+                                        } catch {
+                                          // ignore
+                                        }
                                         window.location.assign(`/inspection-slip/review?missionOrderId=${c.mission_order_id}&role=director`);
                                       }
                                     }}
@@ -2176,6 +2181,11 @@ export default function DashboardDirector() {
                                 }}
                                 onClick={() => {
                                   if (inspection.id) {
+                                    try {
+                                      sessionStorage.setItem('inspectionSource', 'inspection-history');
+                                    } catch {
+                                      // ignore
+                                    }
                                     window.location.assign(`/inspection-slip/review?id=${inspection.id}&role=director`);
                                   }
                                 }}

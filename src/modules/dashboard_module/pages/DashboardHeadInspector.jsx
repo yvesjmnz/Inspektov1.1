@@ -1106,7 +1106,7 @@ export default function DashboardHeadInspector() {
               </li>
 
               <li className="dash-nav-section">
-                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Analytics</span>
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Reports</span>
               </li>
               <li>
                 <button type="button" className={`dash-nav-item ${tab === 'reports' ? 'active' : ''}`} onClick={() => setTab('reports')}>
@@ -1761,6 +1761,11 @@ export default function DashboardHeadInspector() {
                                     title={c.mission_order_id ? 'View inspection details' : 'No mission order available'}
                                     onClick={() => {
                                       if (c.mission_order_id) {
+                                        try {
+                                          sessionStorage.setItem('inspectionSource', 'inspection');
+                                        } catch {
+                                          // ignore
+                                        }
                                         window.location.assign(`/inspection-slip/review?missionOrderId=${c.mission_order_id}&role=head_inspector`);
                                       }
                                     }}
@@ -1882,6 +1887,11 @@ export default function DashboardHeadInspector() {
                                     title="View inspection slip"
                                     onClick={() => {
                                       if (r.inspection_report_id) {
+                                        try {
+                                          sessionStorage.setItem('inspectionSource', 'inspection-history');
+                                        } catch {
+                                          // ignore
+                                        }
                                         window.location.assign(`/inspection-slip/review?id=${r.inspection_report_id}&role=head_inspector`);
                                       }
                                     }}

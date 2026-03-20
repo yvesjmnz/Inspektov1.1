@@ -551,10 +551,25 @@ export default function InspectionSlipReview() {
     }
   }, [activeTab, isInspectionCompleted]);
 
-  const backHref =
-    role === 'head_inspector'
-      ? '/dashboard/head-inspector#inspection-history'
-      : '/dashboard/director?tab=inspection-history';
+  const backHref = useMemo(() => {
+    const inspectionSource = (() => {
+      try {
+        return sessionStorage.getItem('inspectionSource');
+      } catch {
+        return null;
+      }
+    })();
+
+    if (role === 'head_inspector') {
+      return inspectionSource === 'inspection-history'
+        ? '/dashboard/head-inspector#inspection-history'
+        : '/dashboard/head-inspector#inspection';
+    }
+
+    return inspectionSource === 'inspection-history'
+      ? '/dashboard/director?tab=inspection-history'
+      : '/dashboard/director?tab=inspection';
+  }, [role]);
 
   const handleDownloadInspectionSlipDocx = async () => {
     if (!inspectionReport?.generated_docx_url) return;

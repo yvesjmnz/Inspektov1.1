@@ -106,12 +106,6 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
     if (normalizedRole === 'head_inspector') {
       return [
         {
-          label: 'Dashboard',
-          icon: '/ui_icons/menu.png',
-          href: '/dashboard/head-inspector',
-          section: null,
-        },
-        {
           label: 'Mission Orders',
           section: 'MISSION ORDERS',
         },
@@ -145,11 +139,11 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           tabName: 'revisions',
         },
         {
-          label: 'Inspection',
+          label: 'Inspections',
           section: 'INSPECTION',
         },
         {
-          label: 'Inspection',
+          label: 'Inspections',
           icon: '/ui_icons/inspection.png',
           href: '/dashboard/head-inspector',
           section: null,
@@ -163,8 +157,8 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           tabName: 'inspection-history',
         },
         {
-          label: 'Analytics',
-          section: 'ANALYTICS',
+          label: 'Reports',
+          section: 'REPORTS',
         },
         {
           label: 'Performance Report',
@@ -241,7 +235,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (hash === 'results') return 'Director Approval';
       if (hash === 'for-inspection') return 'Secretary Approval';
       if (hash === 'revisions') return 'Mission Order History';
-      if (hash === 'inspection') return 'Inspection';
+      if (hash === 'inspection') return 'Inspections';
       if (hash === 'inspection-history') return 'Inspection History';
       if (hash === 'reports') return 'Performance Report';
       return 'Draft'; // default to Draft
@@ -250,6 +244,20 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
     // For mission order review page
     if (path === '/mission-order/review') {
       return 'Review Mission Orders';
+    }
+
+    if (path === '/inspection-slip/review') {
+      const inspectionSource = sessionStorage.getItem('inspectionSource');
+
+      if (normalizedRole === 'director') {
+        if (inspectionSource === 'inspection-history') return 'Inspection History';
+        return 'Inspections';
+      }
+
+      if (normalizedRole === 'head_inspector') {
+        if (inspectionSource === 'inspection-history') return 'Inspection History';
+        return 'Inspections';
+      }
     }
 
     // For dashboard pages with tabs
@@ -273,7 +281,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
         if (hash === 'for-inspection') return 'Secretary Approval';
         if (hash === 'revisions') return 'Mission Order History';
         if (hash === 'reports') return 'Performance Report';
-        if (hash === 'inspection') return 'Inspection';
+        if (hash === 'inspection') return 'Inspections';
         if (hash === 'inspection-history') return 'Inspection History';
       }
       if (tab === 'todo') return 'Draft';
@@ -281,9 +289,9 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'for-inspection') return 'Secretary Approval';
       if (tab === 'revisions') return 'Mission Order History';
       if (tab === 'reports') return 'Performance Report';
-      if (tab === 'inspection') return 'Inspection';
+      if (tab === 'inspection') return 'Inspections';
       if (tab === 'inspection-history') return 'Inspection History';
-      return 'Dashboard';
+      return 'Draft';
     }
 
     if (path === '/dashboard/inspector') {
@@ -301,11 +309,6 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
 
     // Hide Dashboard item for Director role (overview tab removed)
     if (normalizedRole === 'director' && item.label === 'Dashboard') {
-      return false;
-    }
-
-    // Hide Dashboard item when on mission order page
-    if (path === '/mission-order' && item.label === 'Dashboard') {
       return false;
     }
 
@@ -363,6 +366,13 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
                     const nextTab = params.get('tab');
                     if (nextTab === 'mission-orders') sessionStorage.setItem('missionOrderSource', 'review');
                     else if (nextTab === 'mission-orders-history') sessionStorage.setItem('missionOrderSource', 'history');
+                    else if (nextTab === 'inspection') sessionStorage.setItem('inspectionSource', 'inspection');
+                    else if (nextTab === 'inspection-history') sessionStorage.setItem('inspectionSource', 'inspection-history');
+                  }
+                  if (normalizedRole === 'head_inspector') {
+                    const nextHash = href.split('#')[1] || '';
+                    if (nextHash === 'inspection') sessionStorage.setItem('inspectionSource', 'inspection');
+                    else if (nextHash === 'inspection-history') sessionStorage.setItem('inspectionSource', 'inspection-history');
                   }
                   window.location.assign(href);
                 }}
