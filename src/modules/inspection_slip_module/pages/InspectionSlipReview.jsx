@@ -129,6 +129,7 @@ export default function InspectionSlipReview() {
   const [evidencePhotos, setEvidencePhotos] = useState([]);
   const [activePhotoUrl, setActivePhotoUrl] = useState('');
   const [hasInspectionData, setHasInspectionData] = useState(false);
+  const [activeTab, setActiveTab] = useState('inspection_details');
 
   const [navCollapsed, setNavCollapsed] = useState(false);
 
@@ -526,9 +527,10 @@ export default function InspectionSlipReview() {
   };
 
   const inspectionStatusLower = String(inspectionReport?.status || '').toLowerCase();
+  const isInspectionCompleted = hasInspectionData && inspectionStatusLower === 'completed';
   const hasGeneratedInspectionSlipDocx = !!inspectionReport?.generated_docx_url;
   const canGenerateInspectionSlipDocx =
-    hasInspectionData && inspectionStatusLower === 'completed';
+    isInspectionCompleted;
 
   const officeViewerUrl = useMemo(() => {
     const baseUrl = inspectionReport?.generated_docx_url || '';
@@ -542,6 +544,12 @@ export default function InspectionSlipReview() {
     const cacheBuster = inspectionReport?.generated_docx_created_at || inspectionReport?.updated_at || '';
     return appendUrlCacheBuster(baseUrl, cacheBuster);
   }, [inspectionReport?.generated_docx_url, inspectionReport?.generated_docx_created_at, inspectionReport?.updated_at]);
+
+  useEffect(() => {
+    if (activeTab === 'summary' && !isInspectionCompleted) {
+      setActiveTab('inspection_details');
+    }
+  }, [activeTab, isInspectionCompleted]);
 
   const backHref =
     role === 'head_inspector'
@@ -615,19 +623,66 @@ export default function InspectionSlipReview() {
 
           <div className="dash-maincol">
             <div className="dash-card">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
-                <div>
-                  <h2 className="dash-title" style={{ marginBottom: 4 }}>
-                    Inspection Slip
-                  </h2>
-                  <p className="dash-subtitle">
-                    Read-only overview of inspection details and summary.
-                  </p>
-                </div>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <a className="dash-btn" href={backHref} style={{ textDecoration: 'none' }}>
-                    Back
-                  </a>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                  <div>
+                    <a
+                      href={backHref}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '6px 10px',
+                        background: 'transparent',
+                        border: 'none',
+                        borderRadius: 8,
+                        color: '#334155',
+                        fontWeight: 800,
+                        fontSize: 14,
+                        textDecoration: 'none',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s ease, color 0.2s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f1f5f9';
+                        e.currentTarget.style.color = '#0f172a';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = '#334155';
+                      }}
+                    >
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        style={{ display: 'block' }}
+                      >
+                        <path
+                          d="M15 18L9 12L15 6"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      Back
+                    </a>
+                  </div>
+
+                  <span
+                    aria-hidden="true"
+                    style={{ width: 1, height: 36, background: '#e2e8f0', display: 'inline-block', marginTop: 2 }}
+                  />
+
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 1000, fontSize: 20, color: '#0f172a' }}>Inspection Slip</div>
+                    <div style={{ color: '#475569', fontWeight: 800, marginTop: 6, fontSize: 14 }}>
+                      Read-only overview of inspection details and summary.
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -646,456 +701,577 @@ export default function InspectionSlipReview() {
                 </div>
               ) : (
                 <div style={{ display: 'grid', gap: 16, marginTop: 16 }}>
-                  <div className="is-card">
-                    <div className="is-section-head">
-                      <div>
-                        <p className="is-section-title">Inspection Details</p>
-                        <p className="is-section-sub">
-                          Mission order and complaint context for this inspection.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-                      <div className="is-field">
-                        <label>Inspection Report ID</label>
-                        <div style={{ fontWeight: 900, color: '#0f172a' }}>
-                          {inspectionReportId ? `${String(inspectionReportId).slice(0, 8)}…` : '—'}
-                        </div>
-                      </div>
-
-                      <div className="is-field">
-                        <label>Mission Order ID</label>
-                        <div style={{ fontWeight: 900, color: '#0f172a' }}>
-                          {missionOrder?.id ? `${String(missionOrder.id).slice(0, 8)}…` : '—'}
-                        </div>
-                      </div>
-
-                      <div className="is-field">
-                        <label>Mission Order Status</label>
-                        <div style={statusBadgeStyle(missionOrder?.status)}>{formatStatus(missionOrder?.status)}</div>
-                      </div>
-
-                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                        <label>Title</label>
-                        <div style={{ fontWeight: 900, color: '#0f172a' }}>{missionOrder?.title || '—'}</div>
-                      </div>
-                    </div>
-
-                    <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', marginTop: 12 }}>
-                      <div className="is-field">
-                        <label>Business Name</label>
-                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                          {complaint?.business_name || ownerDetails.businessName || '—'}
-                        </div>
-                      </div>
-                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                        <label>Business Address</label>
-                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                          {complaint?.business_address || businessDetails.address || '—'}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mo-meta" style={{ marginTop: 12 }}>
-                      Signed attachment uploaded by the Secretary.
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: 12,
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 12,
-                        background: '#ffffff',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {!signedAttachmentUrl ? (
-                        <div className="mo-meta" style={{ padding: 12 }}>
-                          No signed attachment uploaded.
-                        </div>
-                      ) : /\.pdf(\?|#|$)/i.test(String(signedAttachmentUrl)) ? (
-                        <iframe
-                          title="Signed Attachment (PDF)"
-                          src={signedAttachmentUrl}
-                          style={{ width: '100%', height: 560, border: 0, display: 'block' }}
-                        />
-                      ) : (
-                        <div style={{ padding: 12, background: '#0b1220' }}>
-                          <img
-                            src={signedAttachmentUrl}
-                            alt="Signed Attachment"
-                            style={{
-                              width: '100%',
-                              height: 'auto',
-                              maxHeight: 720,
-                              objectFit: 'contain',
-                              display: 'block',
-                              borderRadius: 10,
-                              background: '#0b1220',
-                            }}
-                          />
-                        </div>
-                      )}
-
-                      {signedAttachmentUrl ? (
-                        <div style={{ padding: 12, borderTop: '1px solid #e2e8f0', background: '#f8fafc' }}>
-                          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                            <a
-                              href={signedAttachmentUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mo-link"
-                              style={{ fontWeight: 900 }}
-                            >
-                              Open in new tab
-                            </a>
-                            <span style={{ color: '#64748b', fontWeight: 700, fontSize: 12 }}>
-                              {signedAttachmentMeta.uploadedAt
-                                ? `Uploaded: ${new Date(signedAttachmentMeta.uploadedAt).toLocaleString()}`
-                                : ''}
-                            </span>
-                          </div>
-                        </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 8,
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div className="is-seg" role="tablist" aria-label="Inspection slip review tabs">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'inspection_details'}
+                        className={activeTab === 'inspection_details' ? 'active' : ''}
+                        onClick={() => setActiveTab('inspection_details')}
+                      >
+                        Inspection Details
+                      </button>
+                      {isInspectionCompleted ? (
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={activeTab === 'summary'}
+                          className={activeTab === 'summary' ? 'active' : ''}
+                          onClick={() => setActiveTab('summary')}
+                        >
+                          Summary
+                        </button>
                       ) : null}
                     </div>
 
-                    <div className="is-card" style={{ marginTop: 16 }}>
-                      <div className="is-section-head">
-                        <div>
-                          <p className="is-section-title">Map Preview</p>
-                          <p className="is-section-sub">Uses the complaint business address.</p>
-                        </div>
-                      </div>
-
-                      {!mapUrl ? (
-                        <div className="mo-meta">No address available for map preview.</div>
-                      ) : (
-                        <div
-                          style={{
-                            borderRadius: 12,
-                            overflow: 'hidden',
-                            border: '1px solid #e2e8f0',
-                            background: '#fff',
-                            marginTop: 12,
-                          }}
-                        >
-                          <iframe
-                            title="Business Location"
-                            src={mapUrl}
-                            width="100%"
-                            height="320"
-                            style={{ border: 0 }}
-                            loading="lazy"
-                            referrerPolicy="no-referrer-when-downgrade"
-                          />
-                        </div>
-                      )}
+                    <div style={{ color: '#64748b', fontWeight: 700, fontSize: 12 }}>
+                      {isInspectionCompleted
+                        ? 'Switch between the inspection details and summary overview.'
+                        : 'Inspection summary becomes available once the report is completed.'}
                     </div>
                   </div>
 
-                  <div className="is-card">
-                    <div className="is-section-head">
-                      <div>
-                        <p className="is-section-title">Summary</p>
-                        <p className="is-section-sub">
-                          {hasInspectionData
-                            ? 'Review key details below.'
-                            : 'No inspection has been conducted yet for this mission order.'}
-                        </p>
-                      </div>
-                    </div>
-
-                    {hasInspectionData ? (
-                      <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-                        <div className="is-field">
-                          <label>Owner Type</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                            {ownerType === 'sole' ? 'Sole Proprietor' : 'Corporation'}
-                          </div>
-                        </div>
-
-                        <div className="is-field">
-                          <label>BIN #</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.bin || '—'}</div>
-                        </div>
-
-                        <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                          <label>Business Name</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{ownerDetails.businessName || '—'}</div>
-                        </div>
-
-                        <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                          <label>Business Address</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.address || '—'}</div>
-                        </div>
-
-                        <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                          <label>Owner Name</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                            {`${ownerDetails.lastName || ''}${
-                              ownerDetails.lastName && (ownerDetails.firstName || ownerDetails.middleName) ? ', ' : ''
-                            }${ownerDetails.firstName || ''}${
-                              ownerDetails.middleName ? ` ${ownerDetails.middleName}` : ''
-                            }`.trim() || '—'}
-                          </div>
-                        </div>
-
-                        <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                          <label>Line(s) of Business</label>
-                          <div style={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
-                            {lineOfBusinessList.filter(Boolean).length
-                              ? lineOfBusinessList
-                                  .filter(Boolean)
-                                  .map((x) => `• ${x}`)
-                                  .join('\n')
-                              : '—'}
-                          </div>
-                        </div>
-
-                        <div className="is-field">
-                          <label>Estimated Area (SQM)</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                            {businessDetails.estimatedAreaSqm || '—'}
-                          </div>
-                        </div>
-
-                        <div className="is-field">
-                          <label>No. of Employees</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                            {businessDetails.numberOfEmployees || '—'}
-                          </div>
-                        </div>
-
-                        <div className="is-field">
-                          <label>Landline</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.landline || '—'}</div>
-                        </div>
-
-                        <div className="is-field">
-                          <label>Cellphone</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.cellphone || '—'}</div>
-                        </div>
-
-                        <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                          <label>Email</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.email || '—'}</div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ marginTop: 12, padding: 16, borderRadius: 12, background: '#f8fafc', border: '1px dashed #cbd5e1', fontWeight: 700, color: '#475569' }}>
-                        No inspection slip has been submitted yet. Once the assigned inspector completes the inspection,
-                        the summary will appear here.
-                      </div>
-                    )}
-                  </div>
-
-                  {hasInspectionData ? (
-                    <div className="is-card" style={{ marginTop: 16 }}>
-                      <div className="is-section-head">
+                  {activeTab === 'inspection_details' ? (
+                    <div className="is-card">
+                      <div
+                        className="is-section-head"
+                        style={{
+                          background: '#172b57',
+                          color: '#ffffff',
+                          margin: '-18px -18px 0',
+                          padding: '18px 18px 22px',
+                          borderRadius: '18px 18px 0 0',
+                        }}
+                      >
                         <div>
-                          <p className="is-section-title">Inspection Slip DOCX</p>
-                          <p className="is-section-sub">Generate / regenerate after inspection completion.</p>
+                          <p className="is-section-title" style={{ color: '#ffffff' }}>Inspection Details</p>
+                          <p className="is-section-sub" style={{ color: 'rgba(255, 255, 255, 0.82)' }}>
+                            Mission order and complaint context for this inspection.
+                          </p>
                         </div>
                       </div>
 
-                      {hasGeneratedInspectionSlipDocx ? (
-                        <div style={{ display: 'grid', gap: 12 }}>
-                          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                            <button
-                              type="button"
-                              className="mo-btn mo-btn-primary"
-                              onClick={handleDownloadInspectionSlipDocx}
-                              disabled={downloadingDocx}
-                              style={{ textDecoration: 'none' }}
-                            >
-                              {downloadingDocx ? 'Preparing…' : 'Download DOCX'}
-                            </button>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(0, 1.15fr) minmax(320px, 0.85fr)',
+                          gap: 16,
+                          alignItems: 'start',
+                          marginTop: 16,
+                        }}
+                      >
+                        <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+                          <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+                            <div className="is-field">
+                              <label>Inspection Report ID</label>
+                              <div style={{ fontWeight: 900, color: '#0f172a' }}>
+                                {inspectionReportId ? `${String(inspectionReportId).slice(0, 8)}...` : '--'}
+                              </div>
+                            </div>
 
-                            <span style={{ fontWeight: 900, color: '#166534' }}>Generated</span>
+                            <div className="is-field">
+                              <label>Mission Order ID</label>
+                              <div style={{ fontWeight: 900, color: '#0f172a' }}>
+                                {missionOrder?.id ? `${String(missionOrder.id).slice(0, 8)}...` : '--'}
+                              </div>
+                            </div>
 
-                            {canGenerateInspectionSlipDocx ? (
-                              <button
-                                type="button"
-                                className="mo-btn mo-btn-primary"
-                                onClick={handleGenerateInspectionSlipDocx}
-                                disabled={generatingDocx}
-                              >
-                                {generatingDocx ? 'Generating…' : 'Regenerate DOCX'}
-                              </button>
-                            ) : null}
+                            <div className="is-field">
+                              <label>Mission Order Status</label>
+                              <div style={statusBadgeStyle(missionOrder?.status)}>{formatStatus(missionOrder?.status)}</div>
+                            </div>
+
+                            <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                              <label>Title</label>
+                              <div style={{ fontWeight: 900, color: '#0f172a' }}>{missionOrder?.title || '--'}</div>
+                            </div>
                           </div>
 
-                          <div style={{ display: 'grid', gap: 10 }}>
-                            <iframe
-                              key={`inspection-slip-docx-${inspectionReport?.generated_docx_created_at || inspectionReport?.updated_at || officeViewerUrl}`}
-                              title="Inspection Slip DOCX Preview"
-                              src={officeViewerUrl}
-                              style={{
-                                width: '100%',
-                                height: 560,
-                                border: '1px solid #e2e8f0',
-                                borderRadius: 14,
-                                background: '#fff',
-                              }}
-                              onError={() => setDocxPreviewError(true)}
-                            />
-
-                            {docxPreviewError ? (
-                              <div className="dash-alert dash-alert-error">Preview failed to load.</div>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : canGenerateInspectionSlipDocx ? (
-                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                          <button
-                            type="button"
-                            className="mo-btn mo-btn-primary"
-                            onClick={handleGenerateInspectionSlipDocx}
-                            disabled={generatingDocx}
+                          <div
+                            className="is-grid"
+                            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}
                           >
-                            {generatingDocx ? 'Generating…' : 'Generate DOCX'}
-                          </button>
+                            <div className="is-field">
+                              <label>Business Name</label>
+                              <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                                {complaint?.business_name || ownerDetails.businessName || '--'}
+                              </div>
+                            </div>
+                            <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                              <label>Business Address</label>
+                              <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                                {complaint?.business_address || businessDetails.address || '--'}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="is-card" style={{ marginTop: 0 }}>
+                            <div className="is-section-head">
+                              <div>
+                                <p className="is-section-title">Map Preview</p>
+                                <p className="is-section-sub">Uses the complaint business address.</p>
+                              </div>
+                            </div>
+
+                            {!mapUrl ? (
+                              <div className="mo-meta">No address available for map preview.</div>
+                            ) : (
+                              <div
+                                style={{
+                                  borderRadius: 12,
+                                  overflow: 'hidden',
+                                  border: '1px solid #e2e8f0',
+                                  background: '#fff',
+                                  marginTop: 12,
+                                }}
+                              >
+                                <iframe
+                                  title="Business Location"
+                                  src={mapUrl}
+                                  width="100%"
+                                  height="320"
+                                  style={{ border: 0 }}
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer-when-downgrade"
+                                />
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      ) : (
-                        <div
-                          style={{
-                            marginTop: 12,
-                            padding: 16,
-                            borderRadius: 12,
-                            background: '#f8fafc',
-                            border: '1px dashed #cbd5e1',
-                            fontWeight: 700,
-                            color: '#475569',
-                          }}
-                        >
-                          DOCX generation is available only after the inspection report is marked as <b>completed</b>.
+
+                        <div style={{ minWidth: 0 }}>
+                          <div className="is-card" style={{ marginTop: 0 }}>
+                            <div className="is-section-head">
+                              <div>
+                                <p className="is-section-title">Signed Attachment</p>
+                                <p className="is-section-sub">Uploaded by the Secretary.</p>
+                              </div>
+                            </div>
+
+                            <div
+                              style={{
+                                marginTop: 12,
+                                border: '1px solid #e2e8f0',
+                                borderRadius: 12,
+                                background: '#ffffff',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {!signedAttachmentUrl ? (
+                                <div className="mo-meta" style={{ padding: 12 }}>
+                                  No signed attachment uploaded.
+                                </div>
+                              ) : /\.pdf(\?|#|$)/i.test(String(signedAttachmentUrl)) ? (
+                                <iframe
+                                  title="Signed Attachment (PDF)"
+                                  src={signedAttachmentUrl}
+                                  style={{ width: '100%', height: 560, border: 0, display: 'block' }}
+                                />
+                              ) : (
+                                <div style={{ padding: 12, background: '#0b1220' }}>
+                                  <img
+                                    src={signedAttachmentUrl}
+                                    alt="Signed Attachment"
+                                    style={{
+                                      width: '100%',
+                                      height: 'auto',
+                                      maxHeight: 720,
+                                      objectFit: 'contain',
+                                      display: 'block',
+                                      borderRadius: 10,
+                                      background: '#0b1220',
+                                    }}
+                                  />
+                                </div>
+                              )}
+
+                              {signedAttachmentUrl ? (
+                                <div style={{ padding: 12, borderTop: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                                    <a
+                                      href={signedAttachmentUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="mo-link"
+                                      style={{ fontWeight: 900 }}
+                                    >
+                                      Open in new tab
+                                    </a>
+                                    <span style={{ color: '#64748b', fontWeight: 700, fontSize: 12 }}>
+                                      {signedAttachmentMeta.uploadedAt
+                                        ? `Uploaded: ${new Date(signedAttachmentMeta.uploadedAt).toLocaleString()}`
+                                        : ''}
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   ) : null}
 
-                  {hasInspectionData && (
-                    <>
-                      <div className="is-card">
-                        <div className="is-section-head">
-                          <div>
-                            <p className="is-section-title">Compliance Checklist</p>
-                            <p className="is-section-sub">Summary of the inspector’s selections.</p>
+                  {activeTab === 'summary' && isInspectionCompleted ? (
+                    <div className="is-card">
+                      <div
+                        className="is-section-head"
+                        style={{
+                          background: '#172b57',
+                          color: '#ffffff',
+                          margin: '-18px -18px 0',
+                          padding: '18px 18px 22px',
+                          borderRadius: '18px 18px 0 0',
+                        }}
+                      >
+                        <div>
+                          <p className="is-section-title" style={{ color: '#ffffff' }}>Summary</p>
+                          <p className="is-section-sub" style={{ color: 'rgba(255, 255, 255, 0.82)' }}>
+                            Review key details below.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(0, 1.15fr) minmax(320px, 0.85fr)',
+                          gap: 16,
+                          alignItems: 'stretch',
+                          marginTop: 16,
+                        }}
+                      >
+                        <div
+                          className="is-grid"
+                          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}
+                        >
+                          <div
+                            style={{
+                              gridColumn: '1 / -1',
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                              gap: 16,
+                              padding: 16,
+                              border: '1px solid #dbe5f3',
+                              borderRadius: 16,
+                              background: '#fbfdff',
+                              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)',
+                            }}
+                          >
+                          <div className="is-field">
+                            <label>Owner Type</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                              {ownerType === 'sole' ? 'Sole Proprietor' : 'Corporation'}
+                            </div>
+                          </div>
+
+                          <div className="is-field">
+                            <label>BIN #</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.bin || '--'}</div>
+                          </div>
+
+                          <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                            <label>Business Name</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{ownerDetails.businessName || '--'}</div>
+                          </div>
+
+                          <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                            <label>Business Address</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.address || '--'}</div>
+                          </div>
+
+                          <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                            <label>Owner Name</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                              {`${ownerDetails.lastName || ''}${
+                                ownerDetails.lastName && (ownerDetails.firstName || ownerDetails.middleName) ? ', ' : ''
+                              }${ownerDetails.firstName || ''}${
+                                ownerDetails.middleName ? ` ${ownerDetails.middleName}` : ''
+                              }`.trim() || '--'}
+                            </div>
+                          </div>
+
+                          <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                            <label>Line(s) of Business</label>
+                            <div style={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                              {lineOfBusinessList.filter(Boolean).length
+                                ? lineOfBusinessList
+                                    .filter(Boolean)
+                                    .map((x) => `- ${x}`)
+                                    .join('\n')
+                                : '--'}
+                            </div>
+                          </div>
+
+                          <div className="is-field">
+                            <label>Estimated Area (SQM)</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                              {businessDetails.estimatedAreaSqm || '--'}
+                            </div>
+                          </div>
+
+                          <div className="is-field">
+                            <label>No. of Employees</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                              {businessDetails.numberOfEmployees || '--'}
+                            </div>
+                          </div>
+
+                          <div className="is-field">
+                            <label>Landline</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.landline || '--'}</div>
+                          </div>
+
+                          <div className="is-field">
+                            <label>Cellphone</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.cellphone || '--'}</div>
+                          </div>
+
+                          <div className="is-field" style={{ gridColumn: '1 / -1' }}>
+                            <label>Email</label>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{businessDetails.email || '--'}</div>
+                          </div>
+                          </div>
+
+                          <div className="is-field" style={{ gridColumn: '1 / -1', marginTop: 8 }}>
+                            <div
+                              style={{
+                                border: '1px solid #dbe5f3',
+                                borderRadius: 16,
+                                background: '#ffffff',
+                                padding: 16,
+                              }}
+                            >
+                            <div className="is-section-head" style={{ marginBottom: 12 }}>
+                              <div>
+                                <p className="is-section-title">Compliance Checklist</p>
+                                <p className="is-section-sub">Summary of the inspector's selections.</p>
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gap: 10 }}>
+                              {[
+                                { key: 'business_permit', label: 'Business Permit (Presented)' },
+                                { key: 'with_cctv', label: 'With CCTV' },
+                                { key: 'signage_2sqm', label: '2sqm Signage' },
+                              ].map((item) => {
+                                const v = checklist[item.key];
+                                const text =
+                                  v === 'compliant'
+                                    ? 'Compliant'
+                                    : v === 'non_compliant'
+                                      ? 'Non-Compliant'
+                                      : 'N/A';
+
+                                return (
+                                  <div key={item.key} className="is-check-row">
+                                    <div className="is-check-title">{item.label}</div>
+                                    <div style={{ fontWeight: 900, color: '#0f172a' }}>
+                                      {text}
+                                      {item.key === 'with_cctv' && v === 'compliant' ? (
+                                        <span style={{ marginLeft: 8, fontWeight: 900, color: '#0f172a' }}>
+                                          {cctvCount
+                                            ? `${cctvCount} CCTV${String(cctvCount) === '1' ? '' : 's'}`
+                                            : 'CCTV count not set'}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            </div>
+                          </div>
+
+                          <div className="is-field" style={{ gridColumn: '1 / -1', marginTop: 8 }}>
+                            <div
+                              style={{
+                                border: '1px solid #dbe5f3',
+                                borderRadius: 16,
+                                background: '#ffffff',
+                                padding: 16,
+                              }}
+                            >
+                            <div className="is-section-head" style={{ marginBottom: 12 }}>
+                              <div>
+                                <p className="is-section-title">Additional Observations</p>
+                                <p className="is-section-sub">Inspector remarks / findings.</p>
+                              </div>
+                            </div>
+
+                            <div className="is-field" style={{ marginTop: 4 }}>
+                              <label>Remarks</label>
+                              <div style={{ fontWeight: 800, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                                {additionalComments?.trim() ? additionalComments : '--'}
+                              </div>
+                              <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800, color: '#94a3b8' }}>
+                                {String(additionalComments || '').length} / {COMMENTS_MAX}
+                              </div>
+                            </div>
+
+                            <div className="is-field" style={{ marginTop: 12 }}>
+                              <label>Photo Evidence</label>
+                              {evidencePhotos.length ? (
+                                <div
+                                  style={{
+                                    marginTop: 8,
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
+                                    gap: 10,
+                                  }}
+                                  aria-label="Evidence photos summary"
+                                >
+                                  {evidencePhotos.map((p, idx) => (
+                                    <div
+                                      key={p.url || idx}
+                                      style={{
+                                        borderRadius: 12,
+                                        overflow: 'hidden',
+                                        border: '1px solid #e2e8f0',
+                                        background: '#fff',
+                                        aspectRatio: '1 / 1',
+                                        position: 'relative',
+                                      }}
+                                    >
+                                      <img
+                                        src={p.url}
+                                        alt={`Evidence ${idx + 1}`}
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }}
+                                        onClick={() => setActivePhotoUrl(p.url)}
+                                        title="Click to preview"
+                                      />
+                                      <div
+                                        style={{
+                                          position: 'absolute',
+                                          left: 6,
+                                          right: 6,
+                                          bottom: 6,
+                                          padding: '3px 6px',
+                                          borderRadius: 8,
+                                          background: 'rgba(15,23,42,0.65)',
+                                          color: '#fff',
+                                          fontSize: 10,
+                                          fontWeight: 800,
+                                          lineHeight: '12px',
+                                          textAlign: 'center',
+                                        }}
+                                        title={p.ts ? new Date(p.ts).toLocaleString() : ''}
+                                      >
+                                        {p.ts ? new Date(p.ts).toLocaleString() : ''}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontWeight: 800, color: '#64748b' }}>--</div>
+                              )}
+                            </div>
+                            </div>
                           </div>
                         </div>
 
-                        <div style={{ display: 'grid', gap: 10 }}>
-                          {[
-                            { key: 'business_permit', label: 'Business Permit (Presented)' },
-                            { key: 'with_cctv', label: 'With CCTV' },
-                            { key: 'signage_2sqm', label: '2sqm Signage' },
-                          ].map((item) => {
-                            const v = checklist[item.key];
-                            const text =
-                              v === 'compliant'
-                                ? 'Compliant'
-                                : v === 'non_compliant'
-                                  ? 'Non-Compliant'
-                                  : 'N/A';
+                        <div style={{ minWidth: 0, height: '100%' }}>
+                          <div className="is-card" style={{ marginTop: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                            <div
+                              className="is-section-head"
+                              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}
+                            >
+                              <div>
+                                <p className="is-section-title">Inspection Slip DOCX</p>
+                                <p className="is-section-sub">Generate / regenerate after inspection completion.</p>
+                              </div>
 
-                            return (
-                              <div key={item.key} className="is-check-row">
-                                <div className="is-check-title">{item.label}</div>
-                                <div style={{ fontWeight: 900, color: '#0f172a' }}>
-                                  {text}
-                                  {item.key === 'with_cctv' && v === 'compliant' ? (
-                                    <span style={{ marginLeft: 8, fontWeight: 900, color: '#0f172a' }}>
-                                      {cctvCount
-                                        ? `${cctvCount} CCTV${String(cctvCount) === '1' ? '' : 's'}`
-                                        : 'CCTV count not set'}
-                                    </span>
+                              {hasGeneratedInspectionSlipDocx ? (
+                                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+                                  <span style={{ fontWeight: 900, color: '#166534' }}>Generated</span>
+                                  <button
+                                    type="button"
+                                    className="mo-btn mo-btn-primary"
+                                    onClick={handleDownloadInspectionSlipDocx}
+                                    disabled={downloadingDocx}
+                                    style={{ textDecoration: 'none' }}
+                                  >
+                                    {downloadingDocx ? 'Preparing...' : 'Download DOCX'}
+                                  </button>
+                                  {canGenerateInspectionSlipDocx ? (
+                                    <button
+                                      type="button"
+                                      className="mo-btn mo-btn-primary"
+                                      onClick={handleGenerateInspectionSlipDocx}
+                                      disabled={generatingDocx}
+                                    >
+                                      {generatingDocx ? 'Generating...' : 'Regenerate DOCX'}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ) : canGenerateInspectionSlipDocx ? (
+                                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+                                  <button
+                                    type="button"
+                                    className="mo-btn mo-btn-primary"
+                                    onClick={handleGenerateInspectionSlipDocx}
+                                    disabled={generatingDocx}
+                                  >
+                                    {generatingDocx ? 'Generating...' : 'Generate DOCX'}
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            {hasGeneratedInspectionSlipDocx ? (
+                              <div style={{ display: 'grid', gap: 10, flex: 1, minHeight: 0, marginTop: 8 }}>
+                                <div style={{ display: 'grid', gap: 10, flex: 1, minHeight: 760 }}>
+                                  <iframe
+                                    key={`inspection-slip-docx-${inspectionReport?.generated_docx_created_at || inspectionReport?.updated_at || officeViewerUrl}`}
+                                    title="Inspection Slip DOCX Preview"
+                                    src={officeViewerUrl}
+                                    style={{
+                                      width: '100%',
+                                      height: '100%',
+                                      border: '1px solid #e2e8f0',
+                                      borderRadius: 14,
+                                      background: '#fff',
+                                    }}
+                                    onError={() => setDocxPreviewError(true)}
+                                  />
+
+                                  {docxPreviewError ? (
+                                    <div className="dash-alert dash-alert-error">Preview failed to load.</div>
                                   ) : null}
                                 </div>
                               </div>
-                            );
-                          })}
+                            ) : canGenerateInspectionSlipDocx ? (
+                              <div style={{ flex: 1, minHeight: 0 }} />
+                            ) : (
+                              <div
+                                style={{
+                                  marginTop: 8,
+                                  padding: 16,
+                                  borderRadius: 12,
+                                  background: '#f8fafc',
+                                  border: '1px dashed #cbd5e1',
+                                  fontWeight: 700,
+                                  color: '#475569',
+                                }}
+                              >
+                                DOCX generation is available only after the inspection report is marked as <b>completed</b>.
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
+                    </div>
+                  ) : null}
 
-                      <div className="is-card">
-                        <div className="is-section-head">
-                          <div>
-                            <p className="is-section-title">Additional Observations</p>
-                            <p className="is-section-sub">Inspector remarks / findings.</p>
-                          </div>
-                        </div>
-
-                        <div className="is-field" style={{ marginTop: 4 }}>
-                          <label>Remarks</label>
-                          <div style={{ fontWeight: 800, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
-                            {additionalComments?.trim() ? additionalComments : '—'}
-                          </div>
-                          <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800, color: '#94a3b8' }}>
-                            {String(additionalComments || '').length} / {COMMENTS_MAX}
-                          </div>
-                        </div>
-
-                        <div className="is-field" style={{ marginTop: 12 }}>
-                          <label>Photo Evidence</label>
-                          {evidencePhotos.length ? (
-                            <div
-                              style={{
-                                marginTop: 8,
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
-                                gap: 10,
-                              }}
-                              aria-label="Evidence photos summary"
-                            >
-                              {evidencePhotos.map((p, idx) => (
-                                <div
-                                  key={p.url || idx}
-                                  style={{
-                                    borderRadius: 12,
-                                    overflow: 'hidden',
-                                    border: '1px solid #e2e8f0',
-                                    background: '#fff',
-                                    aspectRatio: '1 / 1',
-                                    position: 'relative',
-                                  }}
-                                >
-                                  <img
-                                    src={p.url}
-                                    alt={`Evidence ${idx + 1}`}
-                                    style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }}
-                                    onClick={() => setActivePhotoUrl(p.url)}
-                                    title="Click to preview"
-                                  />
-                                  <div
-                                    style={{
-                                      position: 'absolute',
-                                      left: 6,
-                                      right: 6,
-                                      bottom: 6,
-                                      padding: '3px 6px',
-                                      borderRadius: 8,
-                                      background: 'rgba(15,23,42,0.65)',
-                                      color: '#fff',
-                                      fontSize: 10,
-                                      fontWeight: 800,
-                                      lineHeight: '12px',
-                                      textAlign: 'center',
-                                    }}
-                                    title={p.ts ? new Date(p.ts).toLocaleString() : ''}
-                                  >
-                                    {p.ts ? new Date(p.ts).toLocaleString() : ''}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div style={{ fontWeight: 800, color: '#64748b' }}>—</div>
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  )}
                 </div>
               )}
             </div>
