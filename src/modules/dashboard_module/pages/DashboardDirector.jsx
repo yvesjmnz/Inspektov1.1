@@ -2213,8 +2213,18 @@ export default function DashboardDirector() {
                             <td style={{ padding: '12px' }}>{formatDateNoSeconds(mo.submitted_at)}</td>
                             <td style={{ padding: '12px' }}>
                               <div className="dash-row-actions">
-                                <a className="dash-btn" href={`/mission-order/review?id=${mo.id}`}>
-                                  Review MO
+                                <a
+                                  className="dash-btn"
+                                  href={`/mission-order?id=${mo.id}`}
+                                  onClick={() => {
+                                    try {
+                                      sessionStorage.setItem('missionOrderSource', 'review');
+                                    } catch {
+                                      // ignore
+                                    }
+                                  }}
+                                >
+                                  Open MO
                                 </a>
                               </div>
                             </td>
@@ -2552,8 +2562,18 @@ export default function DashboardDirector() {
                                 <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(mo.submitted_at)}</td>
                                 <td style={{ padding: '12px' }}>
                           <div className="dash-row-actions">
-                            <a className="dash-btn" href={`/mission-order/review?id=${mo.id}`}>
-                              Review MO
+                            <a
+                              className="dash-btn"
+                              href={`/mission-order?id=${mo.id}`}
+                              onClick={() => {
+                                try {
+                                  sessionStorage.setItem('missionOrderSource', 'review');
+                                } catch {
+                                  // ignore
+                                }
+                              }}
+                            >
+                              Open MO
                             </a>
                           </div>
                         </td>

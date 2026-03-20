@@ -5,6 +5,17 @@ import { notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications
 import HeadInspectorReports from './HeadInspectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
 import './Dashboard.css';
+import { getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
+
+// Helper to extract selected subcategory labels from complaint tags
+function listSelectedSubcategories(tags) {
+  if (!Array.isArray(tags) || tags.length === 0) return [];
+  return tags
+    .map((t) => String(t || ''))
+    .filter((t) => /^Violation:\s*/i.test(t))
+    .map((t) => t.replace(/^Violation:\s*/i, '').trim())
+    .filter(Boolean);
+}
 
 function formatStatus(status) {
   if (!status) return 'Unknown';
@@ -16,6 +27,7 @@ function formatStatus(status) {
   if (s === 'completed') return 'Completed';
 
   // mission_orders statuses
+  if (s === 'rejected') return 'Rejected';
   if (s === 'cancelled' || s === 'canceled') return 'Cancelled';
   if (s === 'for inspection' || s === 'for_inspection') return 'Pre-Approved';
 
@@ -45,6 +57,7 @@ function statusBadgeClass(status) {
   if (s === 'issued') return 'status-badge status-warning';
   if (s === 'awaiting_signature') return 'status-badge status-accent';
   if (s === 'complete') return 'status-badge status-success';
+  if (s === 'rejected') return 'status-badge status-danger';
   if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
   if (s === 'draft') return 'status-badge status-info';
 
@@ -646,9 +659,10 @@ export default function DashboardHeadInspector() {
       if (!userId) throw new Error('Not authenticated. Please login again.');
 
       // Fetch the complaint details from the source table to build MO content.
+      // Include tags so we can derive ordinance citations for the preview text.
       const { data: complaint, error: complaintError } = await supabase
         .from('complaints')
-        .select('id, business_name, business_address, complaint_description')
+        .select('id, business_name, business_address, complaint_description, tags')
         .eq('id', complaintId)
         .single();
 
@@ -657,6 +671,24 @@ export default function DashboardHeadInspector() {
       const businessName = complaint?.business_name || row.business_name || 'N/A';
       const businessAddress = complaint?.business_address || row.business_address || 'N/A';
       const complaintDesc = escapeHtml(complaint?.complaint_description || '');
+
+      // Prefer ordinance citations derived from violation tags (if present).
+      // Falls back to complaint description when no violation tags exist.
+      const selectedSubs = listSelectedSubcategories(complaint?.tags);
+      const ordinancesFromTags = selectedSubs
+        .flatMap((sub) => getOrdinancesForSubcategory(sub))
+        .map((o) => {
+          const code = o?.code_number ? String(o.code_number).trim() : '';
+          const title = o?.title ? String(o.title).trim() : '';
+          if (!code && !title) return null;
+          return code && title ? `Ordinance No. ${code} (${title})` : (code ? `Ordinance No. ${code}` : title);
+        })
+        .filter(Boolean);
+
+      const uniqueOrdinances = Array.from(new Set(ordinancesFromTags));
+      const complaintDetailsText = uniqueOrdinances.length
+        ? `<strong>CITY ORDINANCES VIOLATED:</strong><br/>${uniqueOrdinances.map((x) => `• ${escapeHtml(x)}`).join('<br/>')}`
+        : (complaintDesc || '');
 
       const title = `Mission Order - ${businessName}`;
 
@@ -675,8 +707,8 @@ export default function DashboardHeadInspector() {
         '<p style="margin: 0 0 14px 0;"><strong>TO:</strong>&nbsp; FIELD INSPECTOR [INSPECTOR NAME]</p>',
         '<p style="margin: 0 0 12px 0;"><strong>SUBJECT:</strong>&nbsp; TO CONDUCT INSPECTION ON THE BUSINESS ESTABLISHMENT IDENTIFIED AS [BUSINESS NAME], WITH ADDRESS AT [ADDRESS].</p>',
         '<p style="margin: 0 0 12px 0; text-align: justify;">',
-        `THE CONDUCT OF THIS INSPECTION IS DEEMED NECESSARY IN VIEW OF THE LETTER-COMPLAINT RECEIVED VIA INSPEKTO COMPLAINT MANAGEMENT SYSTEM DATED ${complaintSubmittedDate} FROM A CONCERNED CITIZEN REGARDING THE OPERATION OF THE ABOVE-MENTIONED BUSINESS ESTABLISHMENT. COMPLAINT DETAILS: `,
-        complaintDesc || '',
+        `THE CONDUCT OF THIS INSPECTION IS DEEMED NECESSARY IN VIEW OF THE LETTER-COMPLAINT RECEIVED VIA INSPEKTO COMPLAINT MANAGEMENT SYSTEM DATED ${complaintSubmittedDate} FROM A CONCERNED CITIZEN REGARDING THE OPERATION OF THE ABOVE-MENTIONED BUSINESS ESTABLISHMENT, WITH DETAILS: `,
+        complaintDetailsText || '',
         '</p>',
         '<table style="width: 100%; border-collapse: collapse; margin: 8px 0 14px 0;">',
         '<tr>',
@@ -1482,7 +1514,7 @@ export default function DashboardHeadInspector() {
                       <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#10b981' }}>
                         {complaints.filter((c) => {
                           const s = String(c.mission_order_status || '').toLowerCase();
-                          return s === 'issued' || s === 'for inspection' || s === 'for_inspection';
+                          return s === 'for inspection' || s === 'for_inspection';
                         }).length} items
                       </div>
                     </div>
@@ -1500,7 +1532,7 @@ export default function DashboardHeadInspector() {
                         <tbody>
                           {complaints.filter((c) => {
                             const s = String(c.mission_order_status || '').toLowerCase();
-                            return s === 'issued' || s === 'for inspection' || s === 'for_inspection';
+                            return s === 'for inspection' || s === 'for_inspection';
                           }).length === 0 ? (
                             <tr>
                               <td colSpan="5" style={{ textAlign: 'center', padding: 32, color: '#475569' }}>
@@ -1510,7 +1542,7 @@ export default function DashboardHeadInspector() {
                           ) : (
                             complaints.filter((c) => {
                               const s = String(c.mission_order_status || '').toLowerCase();
-                              return s === 'issued' || s === 'for inspection' || s === 'for_inspection';
+                              return s === 'for inspection' || s === 'for_inspection';
                             }).map((c) => (
                               <React.Fragment key={`preapproved-${c.complaint_id}`}>
                                 <tr

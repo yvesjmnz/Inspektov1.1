@@ -63,7 +63,8 @@ function statusLabel(status) {
   if (s === 'for inspection' || s === 'for_inspection') return 'Pre-Approved';
   if (s === 'awaiting_signature') return 'Awaiting Signature';
   if (s === 'complete' || s === 'completed') return 'Complete';
-  if (s === 'cancelled' || s === 'canceled') return 'Rejected';
+  if (s === 'rejected') return 'Rejected';
+  if (s === 'cancelled' || s === 'canceled') return 'Cancelled';
   return status || '—';
 }
 
@@ -73,6 +74,7 @@ function statusBadgeClass(status) {
   if (s === 'complete' || s === 'completed') return 'status-badge status-success';
   if (s === 'awaiting_signature') return 'status-badge status-purple';
   if (s === 'issued') return 'status-badge status-info';
+  if (s === 'rejected') return 'status-badge status-danger';
   if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
   if (s === 'draft') return 'status-badge status-info';
   if (!s) return 'status-badge status-info';
@@ -148,6 +150,22 @@ export default function MissionOrderEditor() {
   const missionOrderId = useMemo(() => getMissionOrderIdFromQuery(), []);
 
   const [loading, setLoading] = useState(false);
+  const [viewerRole, setViewerRole] = useState(() => {
+    // Avoid sidebar "flash" by using cached role immediately.
+    // 1) Prefer a cached role from localStorage (set at login / other pages).
+    // 2) Fall back to head_inspector until we confirm.
+    try {
+      const cached = localStorage.getItem('auth:role');
+      if (cached) {
+        const r = String(cached).toLowerCase();
+        if (r === 'director') return 'director';
+        if (r === 'head_inspector' || r === 'head-inspector') return 'head_inspector';
+      }
+    } catch {
+      // ignore
+    }
+    return 'head_inspector';
+  });
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [generatingDocx, setGeneratingDocx] = useState(false);
@@ -223,10 +241,17 @@ export default function MissionOrderEditor() {
   const statusLower = String(status).toLowerCase();
   const isApproved = statusLower === 'for inspection' || statusLower === 'for_inspection';
   const isSubmitted = statusLower === 'issued';
+  const isRejected = statusLower === 'rejected';
   const isAwaitingSignature = statusLower === 'awaiting_signature';
   const isComplete = statusLower === 'complete' || statusLower === 'completed';
 
-  // Editing is only allowed while the mission order is still being prepared (draft/submitted).
+  // Director review actions (approve/reject) are only available when the MO is submitted to Director.
+  const isDirectorReviewable = viewerRole === 'director' && isSubmitted;
+  const [directorComment, setDirectorComment] = useState('');
+  const [savingDecision, setSavingDecision] = useState(false);
+
+  // Editing is allowed while the mission order is being prepared or revised.
+  // Rejected mission orders are editable so the Head Inspector can revise and resubmit.
   // After director pre-approval, awaiting signature, or completion, the MO must be read-only.
   const isReadOnly = isApproved || isAwaitingSignature || isComplete;
 
@@ -253,6 +278,34 @@ export default function MissionOrderEditor() {
       return;
     }
 
+    // Determine which sidebar to show based on the authenticated user's role.
+    // This page is used as a full-view for both Head Inspector and Director.
+    // IMPORTANT: keep this fast to avoid a brief render of the wrong sidebar.
+    try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const userId = userData?.user?.id;
+      if (userId) {
+        const { data: profile, error: profErr } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', userId)
+          .single();
+        if (!profErr && profile?.role) {
+          const r = String(profile.role).toLowerCase();
+          const nextRole = r === 'director' ? 'director' : 'head_inspector';
+          setViewerRole(nextRole);
+          try {
+            localStorage.setItem('auth:role', nextRole);
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } catch {
+      // Non-fatal: keep whatever we already have (likely cached) to avoid flashing.
+    }
+
     setLoading(true);
     setError('');
 
@@ -266,13 +319,14 @@ export default function MissionOrderEditor() {
 
       setMissionOrder(mo);
       setDateOfInspection(formatDateInputValue(mo?.date_of_inspection));
+      setDirectorComment(mo?.director_comment || '');
 
       let complaintForAutoPopulate = null;
 
       if (mo?.complaint_id) {
         const { data: c, error: cError } = await supabase
           .from('complaints')
-          .select('id, business_pk, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls')
+          .select('id, business_pk, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls, decline_comment')
           .eq('id', mo.complaint_id)
           .single();
         if (cError) throw cError;
@@ -530,8 +584,9 @@ export default function MissionOrderEditor() {
   const canSubmit = canSave && assignedInspectorIds.length > 0 && !!dateOfInspection && hasGeneratedDocx;
   const isDraft = statusLower === 'draft';
   // Allow generating an UNSIGNED doc even after submit (issued), so the director can see the latest draft output.
+  // Rejected is treated like a revision state: editable + can regenerate UNSIGNED doc for resubmission.
   // Director approval will overwrite it with the SIGNED template automatically.
-  const canGenerateDocx = !loading && !!missionOrderId && !isReadOnly && (isDraft || isSubmitted);
+  const canGenerateDocx = !loading && !!missionOrderId && !isReadOnly && (isDraft || isSubmitted || isRejected);
 
   const saveMissionOrder = async () => {
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -564,6 +619,181 @@ export default function MissionOrderEditor() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const updateMissionOrderDecision = async (nextStatus) => {
+    if (!missionOrderId) return;
+
+    setError('');
+    setToast('');
+    setSavingDecision(true);
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error('Not authenticated. Please login again.');
+
+      if (nextStatus === 'rejected' && !String(directorComment || '').trim()) {
+        throw new Error('Rejection requires a director comment.');
+      }
+
+      const nowIso = new Date().toISOString();
+      const patch = {
+        status: nextStatus,
+        director_comment: String(directorComment || '').trim() || null,
+        reviewed_at: nowIso,
+        reviewed_by: userId,
+        updated_at: nowIso,
+        ...(nextStatus === 'for inspection' ? { date_of_issuance: nowIso.slice(0, 10), director_preapproved_at: nowIso } : {}),
+      };
+
+      const { error: updateError } = await supabase.from('mission_orders').update(patch).eq('id', missionOrderId);
+      if (updateError) throw updateError;
+
+      // On approval, generate SIGNED DOCX and overwrite the previously generated UNSIGNED doc.
+      if (nextStatus === 'for inspection') {
+        const { data: fresh, error: freshErr } = await supabase
+          .from('mission_orders')
+          .select('id, complaint_id, status, director_signature_url, date_of_inspection, date_of_issuance')
+          .eq('id', missionOrderId)
+          .single();
+        if (freshErr) throw freshErr;
+
+        const { data: c, error: cErr } = await supabase
+          .from('complaints')
+          .select('id, business_name, business_address, complaint_description')
+          .eq('id', fresh.complaint_id)
+          .single();
+        if (cErr) throw cErr;
+
+        // Always render the City Ordinances Violated section in the generated document.
+        const { data: assignedOrdRows, error: assignedOrdError } = await supabase
+          .from('mission_order_ordinances')
+          .select('ordinance_id, created_at')
+          .eq('mission_order_id', missionOrderId)
+          .order('created_at', { ascending: true });
+        if (assignedOrdError) throw assignedOrdError;
+
+        const assignedOrdIds = Array.from(new Set((assignedOrdRows || []).map((r) => r.ordinance_id).filter(Boolean)));
+
+        const { data: ordRows, error: ordErr } = assignedOrdIds.length
+          ? await supabase
+              .from('ordinances')
+              .select('id, code_number, title, description')
+              .in('id', assignedOrdIds)
+          : { data: [], error: null };
+        if (ordErr) throw ordErr;
+
+        const ordById = new Map((ordRows || []).map((o) => [o.id, o]));
+
+        const ordinancesText = assignedOrdIds
+          .map((id) => {
+            const o = ordById.get(id);
+            if (!o) return null;
+            const code = o.code_number ? String(o.code_number).trim() : '';
+            const title = o.title ? String(o.title).trim() : '';
+            const desc = o.description ? String(o.description).trim() : '';
+
+            const head = code ? `Ordinance No. ${code}` : 'Ordinance';
+            const mid = title ? ` (${title})` : '';
+            const tail = desc ? ` - ${desc}` : '';
+            return `${head}${mid}${tail}`;
+          })
+          .filter(Boolean)
+          .join('\n');
+
+        const complaintDetailsForDocx = `CITY ORDINANCES VIOLATED:\n${ordinancesText || '—'}`;
+
+        // If signature url points to private storage, attempt to sign. Best-effort.
+        let directorSignatureUrl = fresh?.director_signature_url || null;
+        try {
+          const u = String(directorSignatureUrl || '');
+          if (u && u.includes('/storage/v1/object/') && u.includes('/private/')) {
+            const m2 = u.match(/\/storage\/v1\/object\/private\/([^/]+)\/(.+)$/i);
+            if (m2) {
+              const bucket = m2[1];
+              const path = decodeURIComponent(m2[2]);
+              const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+              if (signed?.signedUrl) directorSignatureUrl = signed.signedUrl;
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        // Signed template
+        const templatePath = 'templates/MISSION-ORDER-TEMPLATE.docx';
+        const { data: signedTemplate, error: signTplErr } = await supabase.storage
+          .from('mission-orders')
+          .createSignedUrl(templatePath, 60);
+        if (signTplErr) throw signTplErr;
+        if (!signedTemplate?.signedUrl) throw new Error('Failed to create signed URL for mission order template.');
+
+        const blob = await generateMissionOrderDocx({
+          templateUrl: signedTemplate.signedUrl,
+          inspectors: assignedInspectorNames || '—',
+          date_of_complaint: complaint?.created_at,
+          date_of_inspection: fresh.date_of_inspection,
+          date_of_issuance: fresh.date_of_issuance,
+          business_name: c?.business_name,
+          business_address: c?.business_address,
+          complaint_details: complaintDetailsForDocx,
+          director_signature_url: directorSignatureUrl,
+        });
+
+        const bucket = 'mission-orders';
+        const objectPath = `${fresh.id}/MISSION-ORDER.docx`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from(bucket)
+          .upload(objectPath, blob, {
+            contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            upsert: true,
+          });
+        if (uploadErr) throw uploadErr;
+
+        const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+        const publicUrl = publicData?.publicUrl;
+        if (!publicUrl) throw new Error('Failed to get public URL for uploaded DOCX.');
+
+        const nowIso2 = new Date().toISOString();
+        const { error: patchDocErr } = await supabase
+          .from('mission_orders')
+          .update({
+            generated_docx_url: publicUrl,
+            generated_docx_created_at: nowIso2,
+            generated_docx_created_by: userId,
+            updated_at: nowIso2,
+          })
+          .eq('id', fresh.id);
+        if (patchDocErr) throw patchDocErr;
+      }
+
+      setMissionOrder((prev) => ({ ...(prev || {}), ...patch }));
+      setToast(nextStatus === 'for inspection' ? 'Approved' : 'Rejected');
+      await load();
+    } catch (e) {
+      setError(e?.message || 'Failed to update mission order.');
+    } finally {
+      setSavingDecision(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!isDirectorReviewable) {
+      setToast('Not reviewable');
+      return;
+    }
+    await updateMissionOrderDecision('for inspection');
+  };
+
+  const handleReject = async () => {
+    if (!isDirectorReviewable) {
+      setToast('Not reviewable');
+      return;
+    }
+    await updateMissionOrderDecision('rejected');
   };
 
   const handleSubmitToDirector = async () => {
@@ -860,11 +1090,12 @@ export default function MissionOrderEditor() {
 
       const freshStatus = String(fresh?.status || '').toLowerCase();
       const isCurrentlyDraft = freshStatus === 'draft';
+      const isCurrentlyRejected = freshStatus === 'rejected';
       const isCurrentlyApproved = freshStatus === 'for inspection' || freshStatus === 'for_inspection';
       const isCurrentlyAwaitingSignature = freshStatus === 'awaiting_signature';
 
-      if (!isCurrentlyDraft && !isCurrentlyApproved && !isCurrentlyAwaitingSignature) {
-        throw new Error('DOCX can only be generated during draft or after approval.');
+      if (!isCurrentlyDraft && !isCurrentlyRejected && !isCurrentlyApproved && !isCurrentlyAwaitingSignature) {
+        throw new Error('DOCX can only be generated during draft/revision or after approval.');
       }
       
       // Use the local state if available, otherwise use the database value
@@ -898,7 +1129,7 @@ export default function MissionOrderEditor() {
       // Template selection:
       // - Draft / Issued: UNSIGNED template
       // - Approved / Awaiting Signature: SIGNED template
-      const templatePath = isCurrentlyDraft || freshStatus === 'issued'
+      const templatePath = isCurrentlyDraft || isCurrentlyRejected || freshStatus === 'issued'
         ? 'templates/MISSION-ORDER-TEMPLATE-UNSIGNED.docx'
         : 'templates/MISSION-ORDER-TEMPLATE.docx';
 
@@ -1040,7 +1271,7 @@ export default function MissionOrderEditor() {
       setDocxPreviewError(false);
 
       if (!silent) {
-        const wasUnsigned = isCurrentlyDraft || freshStatus === 'issued';
+        const wasUnsigned = isCurrentlyDraft || isCurrentlyRejected || freshStatus === 'issued';
         setToast(wasUnsigned ? 'Unsigned DOCX ready' : 'Signed DOCX ready');
       }
     } catch (e) {
@@ -1139,7 +1370,7 @@ export default function MissionOrderEditor() {
       <main className="dash-main">
         <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
           <DashboardSidebar
-            role="head_inspector"
+            role={viewerRole}
             onLogout={handleLogout}
             collapsed={navCollapsed}
             onCollapsedChange={setNavCollapsed}
@@ -1153,23 +1384,28 @@ export default function MissionOrderEditor() {
                     <button
                       type="button"
                       onClick={() => {
+                        // Route back to the correct dashboard and tab.
+                        // - Director: use the stored source (review vs history) when available.
+                        // - Head Inspector: preserve the previous behavior using the hash/tab.
                         try {
-                          const path = (window.location.pathname || '').toLowerCase();
-                          if (path.includes('director')) {
-                            window.location.assign(`/dashboard/director#${sourceTab}`);
+                          if (viewerRole === 'director') {
+                            const moSource = sessionStorage.getItem('missionOrderSource');
+                            if (moSource === 'review') {
+                              window.location.assign('/dashboard/director?tab=mission-orders');
+                              return;
+                            }
+                            if (moSource === 'history') {
+                              window.location.assign('/dashboard/director?tab=mission-orders-history');
+                              return;
+                            }
+                            // Fallback: Director mission order history is the safest default.
+                            window.location.assign('/dashboard/director?tab=mission-orders-history');
                             return;
                           }
-                          if (path.includes('head-inspector') || path.includes('head_inspector')) {
-                            window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
-                            return;
-                          }
-                          const ref = (document.referrer || '').toLowerCase();
-                          if (ref.includes('director')) {
-                            window.location.assign(`/dashboard/director#${sourceTab}`);
-                            return;
-                          }
+
+                          // Head Inspector fallback (original behavior)
                           window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
-                        } catch (e) {
+                        } catch {
                           window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
                         }
                       }}
@@ -1216,7 +1452,28 @@ export default function MissionOrderEditor() {
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  {!isApproved && !isSubmitted && !isAwaitingSignature && !isComplete ? (
+                  {isDirectorReviewable ? (
+                    <>
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={handleApprove}
+                        disabled={loading || savingDecision || !missionOrder}
+                        style={{ background: '#16a34a', color: '#fff', border: '1px solid #16a34a' }}
+                      >
+                        {savingDecision ? 'Saving…' : 'Approve'}
+                      </button>
+                      <button
+                        type="button"
+                        className="dash-btn"
+                        onClick={handleReject}
+                        disabled={loading || savingDecision || !missionOrder}
+                        style={{ background: '#dc2626', color: '#fff', border: '1px solid #dc2626' }}
+                      >
+                        {savingDecision ? 'Saving…' : 'Reject'}
+                      </button>
+                    </>
+                  ) : (!isApproved && !isSubmitted && !isAwaitingSignature && !isComplete ? (
                     <>
                       <button
                         className="dash-btn"
@@ -1237,7 +1494,7 @@ export default function MissionOrderEditor() {
                         {submitting ? 'Submitting…' : 'Submit'}
                       </button>
                     </>
-                  ) : null}
+                  ) : null)}
                 </div>
               </div>
 
@@ -1261,6 +1518,7 @@ export default function MissionOrderEditor() {
                   boxShadow: '0 8px 16px rgba(2,6,23,0.25)',
                 }}
               >
+                {null}
                 {/* make all ribbon icons white */}
                 <style>{`
 #mo-status-ribbon span[aria-hidden="true"] { color: #fff !important; opacity: 0.95; }
@@ -1379,10 +1637,60 @@ export default function MissionOrderEditor() {
                     <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>—</span>
                   )}
                 </div>
+
+                {(() => {
+                  const comment = String(complaint?.decline_comment || missionOrder?.director_comment || '').trim();
+                  if (!comment) return null;
+
+                  return (
+                    <>
+                      <div style={{ height: 1, background: 'rgba(255,255,255,0.16)', width: '100%' }} />
+                      <div
+                        style={{
+                          border: '1px solid rgba(255,255,255,0.18)',
+                          background: 'rgba(255,255,255,0.10)',
+                          borderRadius: 12,
+                          padding: '10px 12px',
+                          display: 'grid',
+                          gap: 6,
+                        }}
+                      >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span aria-hidden="true" style={{ color: '#fff', opacity: 0.95, display: 'inline-flex' }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" fill="currentColor" opacity="0.9"/>
+                            <path d="M7 8h10M7 12h7" stroke="#0b2249" strokeWidth="2" strokeLinecap="round"/>
+                          </svg>
+                        </span>
+                        <div style={{ fontWeight: 1000, fontSize: 12, letterSpacing: 0.4, textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>
+                          Director's Comments
+                        </div>
+                      </div>
+                      <div style={{ fontWeight: 900, fontSize: 14, lineHeight: 1.35, color: '#fff', whiteSpace: 'pre-wrap' }}>
+                        {comment}
+                      </div>
+                    </div>
+                  </>
+                  );
+                })()}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, alignItems: 'start' }}>
                 <div style={{ display: 'grid', gap: 14, alignSelf: 'start' }}>
+                {isDirectorReviewable ? (
+                  <Panel title="Director Comment" right={<span style={{ fontWeight: 900, fontSize: 12, color: '#64748b' }}>Required if rejecting</span>}>
+                    <textarea
+                      className="mo-title"
+                      value={directorComment}
+                      onChange={(e) => setDirectorComment(e.target.value)}
+                      rows={5}
+                      disabled={loading || savingDecision}
+                      style={{ fontSize: 16, fontWeight: 800, height: 'auto', minHeight: 120, borderRadius: 14 }}
+                      placeholder="Add instruction or reason…"
+                    />
+                  </Panel>
+                ) : null}
+
                 <Panel title="Mission Order Details">
                   <div style={{ display: 'grid', gap: 16 }}>
                   {/* 1) Inspectors (editable) */}
