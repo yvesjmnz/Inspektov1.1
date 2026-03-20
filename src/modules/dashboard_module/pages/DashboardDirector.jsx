@@ -494,468 +494,157 @@ export default function DashboardDirector() {
   };
 
   const loadMissionOrders = async () => {
-    setError('');
-    setLoading(true);
+  setError('');
+  setLoading(true);
 
-    try {
-      // Mission orders awaiting Director review use status = 'issued'
-      let query = supabase
-        .from('mission_orders')
-        .select('id, title, status, submitted_at, complaint_id')
-        .order('submitted_at', { ascending: false })
-        .limit(200);
+  const normalizeStatus = (v) => String(v || '').toLowerCase().trim();
+  const inspectionPriority = (v) => {
+    const s = normalizeStatus(v);
+    if (s === 'in progress' || s === 'in_progress') return 3;
+    if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 2;
+    if (s === 'completed' || s === 'complete') return 1;
+    return 0;
+  };
 
-      if (tab === 'mission-orders') {
-        query = query.eq('status', 'issued');
-      } else if (tab === 'mission-orders-history') {
-        // Use merged complaint-level dataset (same as Head Inspector) for Director history
-        try {
-          let complaintQuery = supabase
-            .from('complaints')
-            .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
-            .in('status', ['approved', 'Approved']);
+  try {
+    let query = supabase
+      .from('mission_orders')
+      .select('id, title, status, submitted_at, complaint_id')
+      .order('submitted_at', { ascending: false })
+      .limit(200);
 
-          // Apply date range to approved_at (same as Head Inspector)
-          if (appliedRange?.start && appliedRange?.end) {
-            const start = new Date(appliedRange.start.getFullYear(), appliedRange.start.getMonth(), appliedRange.start.getDate());
-            const endExclusive = new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), appliedRange.end.getDate() + 1);
-            complaintQuery = complaintQuery.gte('approved_at', start.toISOString()).lt('approved_at', endExclusive.toISOString());
-          }
+    if (tab === 'mission-orders') {
+      query = query.eq('status', 'issued');
+    }
 
-          const { data: complaintRows, error: complaintError } = await complaintQuery;
-          if (complaintError) throw complaintError;
+    // =========================
+    // MISSION ORDERS HISTORY
+    // =========================
+    if (tab === 'mission-orders-history') {
+      const complaintQuery = supabase
+        .from('complaints')
+        .select('id, business_name, business_address, reporter_email, approved_at, created_at')
+        .in('status', ['approved', 'Approved']);
 
-          const complaintIds = Array.from(new Set((complaintRows || []).map((c) => c.id).filter(Boolean)));
-
-          const { data: missionOrderRows, error: moError } = complaintIds.length
-            ? await supabase
-                .from('mission_orders')
-                .select('id, complaint_id, status, created_at, submitted_at, date_of_inspection, updated_at, secretary_signed_at, director_preapproved_at, title')
-                .in('complaint_id', complaintIds)
-                .order('created_at', { ascending: false })
-                .limit(500)
-            : { data: [], error: null };
-
-          if (moError) throw moError;
-
-          // Keep the latest MO per complaint
-          const latestMoByComplaintId = new Map();
-          (missionOrderRows || []).forEach((mo) => {
-            if (!mo?.complaint_id) return;
-            if (!latestMoByComplaintId.has(mo.complaint_id)) {
-              latestMoByComplaintId.set(mo.complaint_id, mo);
-            }
-          });
-
-          const missionOrderIds = Array.from(new Set((Array.from(latestMoByComplaintId.values()) || []).map((m) => m.id).filter(Boolean)));
-
-          const { data: assignmentRows, error: assignmentError } = missionOrderIds.length
-            ? await supabase
-                .from('mission_order_assignments')
-                .select('mission_order_id, inspector_id')
-                .in('mission_order_id', missionOrderIds)
-            : { data: [], error: null };
-
-          if (assignmentError) throw assignmentError;
-
-          const { data: reportRows, error: reportErr } = missionOrderIds.length
-            ? await supabase
-                .from('inspection_reports')
-                .select('mission_order_id, status, updated_at, created_at, completed_at')
-                .in('mission_order_id', missionOrderIds)
-                .order('updated_at', { ascending: false })
-                .limit(2000)
-            : { data: [], error: null };
-
-          if (reportErr) throw reportErr;
-
-          // Fetch revision counts for mission orders so Director can see #revisions like Head Inspector
-          const { data: revisionRows, error: revisionErr } = missionOrderIds.length
-            ? await supabase
-                .from('mission_order_revisions')
-                .select('mission_order_id')
-                .in('mission_order_id', missionOrderIds)
-            : { data: [], error: null };
-
-          if (revisionErr) {
-            // non-fatal: continue without revisions
-            console.warn('Failed to load mission order revisions', revisionErr);
-          }
-
-          const revisionCountByMoId = new Map();
-          (revisionRows || []).forEach((r) => {
-            if (!r?.mission_order_id) return;
-            revisionCountByMoId.set(r.mission_order_id, (revisionCountByMoId.get(r.mission_order_id) || 0) + 1);
-          });
-
-          const normalizeInspectionStatus = (v) => String(v || '').toLowerCase().trim();
-          const inspectionPriority = (v) => {
-            const s = normalizeInspectionStatus(v);
-            if (s === 'in progress' || s === 'in_progress') return 3;
-            if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 2;
-            if (s === 'completed' || s === 'complete') return 1;
-            return 0;
-          };
-
-          const inspectionStatusByMissionOrderId = new Map();
-          for (const r of reportRows || []) {
-            const moId = r?.mission_order_id;
-            if (!moId) continue;
-            const cur = inspectionStatusByMissionOrderId.get(moId);
-            if (!cur) {
-              inspectionStatusByMissionOrderId.set(moId, r?.status || null);
-              continue;
-            }
-            if (inspectionPriority(r?.status) > inspectionPriority(cur)) {
-              inspectionStatusByMissionOrderId.set(moId, r?.status || null);
-            }
-          }
-
-          const inspectorIds = Array.from(new Set((assignmentRows || []).map((a) => a?.inspector_id).filter(Boolean)));
-
-          const { data: profileRows, error: profileError } = inspectorIds.length
-            ? await supabase
-                .from('profiles')
-                .select('id, full_name, first_name, middle_name, last_name')
-                .in('id', inspectorIds)
-            : { data: [], error: null };
-
-          if (profileError) throw profileError;
-
-          const profileById = new Map((profileRows || []).map((p) => [p.id, p]));
-
-          const inspectorNamesByMissionOrderId = new Map();
-          (assignmentRows || []).forEach((a) => {
-            if (!a?.mission_order_id || !a?.inspector_id) return;
-            const p = profileById.get(a.inspector_id) || {};
-            const displayName =
-              p?.full_name || [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') || String(a.inspector_id).slice(0, 8);
-            const arr = inspectorNamesByMissionOrderId.get(a.mission_order_id) || [];
-            arr.push(displayName);
-            inspectorNamesByMissionOrderId.set(a.mission_order_id, arr);
-          });
-
-          const merged = (complaintRows || []).map((c) => {
-            const mo = latestMoByComplaintId.get(c.id) || null;
-            const revCount = mo?.id ? (revisionCountByMoId.get(mo.id) || 0) : 0;
-            return {
-              complaint_id: c.id,
-              business_name: c.business_name,
-              business_address: c.business_address,
-              reporter_email: c.reporter_email,
-              approved_at: c.approved_at,
-              created_at: c.created_at,
-              mission_order_id: mo?.id || null,
-              mission_order_status: mo?.status || null,
-              inspection_status: mo?.id ? inspectionStatusByMissionOrderId.get(mo.id) || null : null,
-              mission_order_created_at: mo?.created_at || null,
-              date_of_inspection: mo?.date_of_inspection || null,
-              mission_order_updated_at: mo?.updated_at || null,
-              secretary_signed_at: mo?.secretary_signed_at || null,
-              director_preapproved_at: mo?.director_preapproved_at || null,
-              title: mo?.title || null,
-              inspector_names: mo?.id ? inspectorNamesByMissionOrderId.get(mo.id) || [] : [],
-              revision_count: revCount,
-            };
-          });
-
-          // Only include completed mission orders for the History view (match Head Inspector 'revisions' tab)
-          const statusFiltered = (tab === 'mission-orders-history')
-            ? (merged || []).filter((r) => String(r.mission_order_status || '').toLowerCase() === 'complete')
-            : merged;
-
-          const searchVal = search.trim().toLowerCase();
-          const filtered = !searchVal
-            ? statusFiltered
-            : statusFiltered.filter((r) => {
-                const hay = [r.business_name, r.business_address, r.reporter_email, r.complaint_id, r.mission_order_id]
-                  .filter(Boolean)
-                  .join(' ')
-                  .toLowerCase();
-                return hay.includes(searchVal);
-              });
-
-          setMissionOrders(filtered);
-          // allow finally to unset loading
-          return;
-        } catch (e) {
-          setError(e?.message || 'Failed to load mission orders.');
-          setMissionOrders([]);
-          return;
-        }
-      } else if (tab === 'inspection') {
-        // Director Inspection tab: show all pending and in-progress inspections.
-        // Use a broader selection: include mission orders that are explicitly 'for inspection'
-        // OR mission orders referenced by inspection_reports in pending/in progress.
-        try {
-          // 1) Load mission orders with status 'for inspection' (pre-approved)
-          const { data: moForInspectionRows, error: moForErr } = await supabase
-            .from('mission_orders')
-            .select('id, complaint_id, status, date_of_inspection, title, created_at')
-            .in('status', ['for inspection', 'for_inspection'])
-            .order('created_at', { ascending: false })
-            .limit(500);
-
-          if (moForErr) throw moForErr;
-
-          // 2) Load inspection reports that are pending or in-progress so we can include MOs with active reports
-          const { data: reportRows, error: reportErr } = await supabase
-            .from('inspection_reports')
-            .select('mission_order_id, status')
-            .in('status', ['pending inspection', 'pending_inspection', 'pending', 'in progress', 'in_progress'])
-            .limit(2000);
-
-          if (reportErr) throw reportErr;
-
-          const reportMoIds = Array.from(new Set((reportRows || []).map((r) => r?.mission_order_id).filter(Boolean)));
-
-          // 3) Combine mission order ids (from for-inspection rows + those referenced in active reports)
-          const moIdsSet = new Set((moForInspectionRows || []).map((m) => m.id).filter(Boolean));
-          reportMoIds.forEach((id) => moIdsSet.add(id));
-
-          const missionOrderIds = Array.from(moIdsSet);
-
-          // 4) Fetch mission orders for these ids (to get complaint_id and date info)
-          const { data: moRows, error: moErr } = missionOrderIds.length
-            ? await supabase
-                .from('mission_orders')
-                .select('id, complaint_id, status, date_of_inspection, title, created_at')
-                .in('id', missionOrderIds)
-            : { data: [], error: null };
-
-          if (moErr) throw moErr;
-
-          const complaintIds = Array.from(new Set((moRows || []).map((m) => m?.complaint_id).filter(Boolean)));
-
-          // Fetch complaint info (business name/address)
-          const complaintMap = new Map();
-          if (complaintIds.length) {
-            const { data: complaintRows, error: complaintErr } = await supabase
-              .from('complaints')
-              .select('id, business_name, business_address')
-              .in('id', complaintIds);
-            if (complaintErr) console.warn('Failed to load complaints', complaintErr);
-            (complaintRows || []).forEach((c) => complaintMap.set(c?.id, c));
-          }
-
-          // Load assignments -> profiles for inspector display names
-          const inspectorNamesByMoId = new Map();
-          if (missionOrderIds.length) {
-            const { data: assignmentRows, error: assignmentErr } = await supabase
-              .from('mission_order_assignments')
-              .select('mission_order_id, inspector_id')
-              .in('mission_order_id', missionOrderIds);
-            if (assignmentErr) console.warn('Failed to load assignments', assignmentErr);
-            else if ((assignmentRows || []).length) {
-              const inspectorIds = Array.from(new Set((assignmentRows || []).map((a) => a?.inspector_id).filter(Boolean)));
-              let profileById = new Map();
-              if (inspectorIds.length) {
-                const { data: profileRows, error: profileErr } = await supabase
-                  .from('profiles')
-                  .select('id, full_name, first_name, middle_name, last_name')
-                  .in('id', inspectorIds);
-                if (profileErr) console.warn('Failed to load profiles', profileErr);
-                else profileById = new Map((profileRows || []).map((p) => [p.id, p]));
-              }
-              (assignmentRows || []).forEach((a) => {
-                if (!a?.mission_order_id || !a?.inspector_id) return;
-                const p = profileById.get(a.inspector_id) || {};
-                const displayName = p?.full_name || [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') || String(a.inspector_id).slice(0, 8);
-                const arr = inspectorNamesByMoId.get(a.mission_order_id) || [];
-                arr.push(displayName);
-                inspectorNamesByMoId.set(a.mission_order_id, arr);
-              });
-            }
-          }
-
-          // Load inspection reports for these mission orders to compute inspection status (choose highest priority)
-          const inspectionStatusByMoId = new Map();
-          if (missionOrderIds.length) {
-            const { data: allReports, error: allReportsErr } = await supabase
-              .from('inspection_reports')
-              .select('mission_order_id, status, updated_at, created_at, completed_at')
-              .in('mission_order_id', missionOrderIds)
-              .order('updated_at', { ascending: false })
-              .limit(2000);
-
-            if (allReportsErr) console.warn('Failed to load inspection reports', allReportsErr);
-            else {
-              const normalizeInspectionStatus = (v) => String(v || '').toLowerCase().trim();
-              const inspectionPriority = (v) => {
-                const s = normalizeInspectionStatus(v);
-                if (s === 'in progress' || s === 'in_progress') return 3;
-                if (s === 'pending inspection' || s === 'pending_inspection' || s === 'pending') return 2;
-                if (s === 'completed' || s === 'complete') return 1;
-                return 0;
-              };
-              for (const r of allReports || []) {
-                const moId = r?.mission_order_id;
-                if (!moId) continue;
-                const cur = inspectionStatusByMoId.get(moId);
-                if (!cur) {
-                  inspectionStatusByMoId.set(moId, r?.status || 'pending inspection');
-                  continue;
-                }
-                if (inspectionPriority(r?.status) > inspectionPriority(cur)) {
-                  inspectionStatusByMoId.set(moId, r?.status || 'pending inspection');
-                }
-              }
-            }
-          }
-
-          // Merge all data
-          const merged = (moRows || []).map((mo) => ({
-            ...mo,
-            mission_order_id: mo.id,
-            business_name: complaintMap.get(mo.complaint_id)?.business_name || '—',
-            business_address: complaintMap.get(mo.complaint_id)?.business_address || '',
-            inspection_status: inspectionStatusByMoId.get(mo.id) || 'pending inspection',
-            inspector_names: inspectorNamesByMoId.get(mo.id) || [],
-          }));
-
-          setMissionOrders(merged);
-          setLoading(false);
-          return;
-        } catch (e) {
-          console.warn('Failed to load director inspection rows', e);
-          setMissionOrders([]);
-          setLoading(false);
-          return;
-        }
-      } else if (tab === 'inspection-history') {
-        // Inspection History: show completed inspections via inspection_reports
-        // We need to join with inspection_reports to get completed inspections
-        query = supabase
-          .from('inspection_reports')
-          .select('id, mission_order_id, status, completed_at, business_name')
-          .eq('status', 'completed')
-          .order('completed_at', { ascending: false })
-          .limit(200);
-
-        // Apply completed_at date range for Inspection History using the calendar date range picker
-        if (appliedRange?.start && appliedRange?.end) {
-          const start = new Date(appliedRange.start.getFullYear(), appliedRange.start.getMonth(), appliedRange.start.getDate());
-          const endExclusive = new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), appliedRange.end.getDate() + 1);
-          query = query.gte('completed_at', start.toISOString()).lt('completed_at', endExclusive.toISOString());
-        }
-
-        const searchVal = search.trim();
-        if (searchVal) {
-          query = query.or(`business_name.ilike.%${searchVal}%,id::text.ilike.%${searchVal}%,mission_order_id::text.ilike.%${searchVal}%`);
-        }
-
-        const { data: inspRows, error: inspErr } = await query;
-        if (inspErr) throw inspErr;
-
-        // Merge mission order inspection dates so Director view can display the scheduled inspection date
-        const missionOrderIds = Array.from(new Set((inspRows || []).map((r) => r.mission_order_id).filter(Boolean)));
-        let moMap = new Map();
-        let complaintMap = new Map();
-
-        if (missionOrderIds.length) {
-          const { data: moRows, error: moErr } = await supabase
-            .from('mission_orders')
-            .select('id, date_of_inspection, complaint_id')
-            .in('id', missionOrderIds);
-
-          if (moErr) {
-            console.warn('Failed to load mission orders for inspection dates', moErr);
-          } else {
-            moMap = new Map((moRows || []).map((m) => [m.id, m]));
-
-            const complaintIds = Array.from(new Set((moRows || []).map((m) => m.complaint_id).filter(Boolean)));
-            if (complaintIds.length) {
-              const { data: complaintRows, error: complaintErr } = await supabase
-                .from('complaints')
-                .select('id, business_name, business_address')
-                .in('id', complaintIds);
-
-              if (complaintErr) {
-                console.warn('Failed to load complaints for inspection rows', complaintErr);
-              } else {
-                complaintMap = new Map((complaintRows || []).map((c) => [c.id, c]));
-              }
-            }
-          }
-        }
-
-        // Also load assignment -> profile so we can show inspector display names for Director view
-        const inspectorNamesByMoId = new Map();
-        if (missionOrderIds.length) {
-          try {
-            const { data: assignmentRows, error: assignmentErr } = await supabase
-              .from('mission_order_assignments')
-              .select('mission_order_id, inspector_id')
-              .in('mission_order_id', missionOrderIds);
-
-            if (assignmentErr) {
-              console.warn('Failed to load mission_order_assignments for inspection rows', assignmentErr);
-            } else if ((assignmentRows || []).length) {
-              const inspectorIds = Array.from(new Set((assignmentRows || []).map((a) => a.inspector_id).filter(Boolean)));
-              let profileById = new Map();
-              if (inspectorIds.length) {
-                try {
-                  const { data: profileRows, error: profileErr } = await supabase
-                    .from('profiles')
-                    .select('id, full_name, first_name, middle_name, last_name')
-                    .in('id', inspectorIds);
-                  if (profileErr) {
-                    console.warn('Failed to load profiles for inspectors', profileErr);
-                  } else {
-                    profileById = new Map((profileRows || []).map((p) => [p.id, p]));
-                  }
-                } catch (pe) {
-                  console.warn('Failed to fetch inspector profiles', pe);
-                }
-              }
-
-              (assignmentRows || []).forEach((a) => {
-                if (!a?.mission_order_id || !a?.inspector_id) return;
-                const p = profileById.get(a.inspector_id) || {};
-                const displayName = p?.full_name || [p?.first_name, p?.middle_name, p?.last_name].filter(Boolean).join(' ') || String(a.inspector_id).slice(0, 8);
-                const arr = inspectorNamesByMoId.get(a.mission_order_id) || [];
-                arr.push(displayName);
-                inspectorNamesByMoId.set(a.mission_order_id, arr);
-              });
-            }
-          } catch (e) {
-            console.warn('Failed to load inspector assignments/profiles', e);
-          }
-        }
-
-        const merged = (inspRows || []).map((r) => {
-          const mo = moMap.get(r.mission_order_id) || {};
-          const complaint = mo?.complaint_id ? complaintMap.get(mo.complaint_id) : null;
-          return {
-            ...r,
-            date_of_inspection: mo.date_of_inspection || null,
-            business_name: (complaint && complaint.business_name) || r.business_name || '—',
-            business_address: (complaint && complaint.business_address) || '',
-            inspector_names: inspectorNamesByMoId.get(r.mission_order_id) || [],
-          };
-        });
-
-        setMissionOrders(merged);
-        setLoading(false);
-        return;
+      if (appliedRange?.start && appliedRange?.end) {
+        const start = new Date(appliedRange.start.setHours(0, 0, 0, 0));
+        const end = new Date(appliedRange.end.setHours(23, 59, 59, 999));
+        complaintQuery.gte('approved_at', start.toISOString()).lte('approved_at', end.toISOString());
       }
 
-      const searchVal = search.trim();
-      if (searchVal) {
-        query = query.or(`title.ilike.%${searchVal}%,id::text.ilike.%${searchVal}%,complaint_id::text.ilike.%${searchVal}%`);
-      }
-
-      const { data, error } = await query;
+      const { data: complaints, error } = await complaintQuery;
       if (error) throw error;
 
-      setMissionOrders(data || []);
-    } catch (e) {
-      setError(e?.message || 'Failed to load mission orders.');
-      setMissionOrders([]);
-    } finally {
-      setLoading(false);
+      const complaintIds = [...new Set(complaints.map(c => c.id).filter(Boolean))];
+
+      const { data: mos = [], error: moErr } = complaintIds.length
+        ? await supabase
+            .from('mission_orders')
+            .select('*')
+            .in('complaint_id', complaintIds)
+            .order('created_at', { ascending: false })
+        : { data: [] };
+
+      if (moErr) throw moErr;
+
+      // Latest MO per complaint
+      const latestMO = new Map();
+      mos.forEach(mo => {
+        if (!latestMO.has(mo.complaint_id)) {
+          latestMO.set(mo.complaint_id, mo);
+        }
+      });
+
+      const moIds = [...latestMO.values()].map(m => m.id);
+
+      const [{ data: assignments = [] }, { data: reports = [] }] = await Promise.all([
+        moIds.length
+          ? supabase.from('mission_order_assignments').select('mission_order_id, inspector_id').in('mission_order_id', moIds)
+          : { data: [] },
+        moIds.length
+          ? supabase.from('inspection_reports').select('mission_order_id, status').in('mission_order_id', moIds)
+          : { data: [] }
+      ]);
+
+      // Inspection status (highest priority)
+      const inspectionMap = new Map();
+      reports.forEach(r => {
+        const cur = inspectionMap.get(r.mission_order_id);
+        if (!cur || inspectionPriority(r.status) > inspectionPriority(cur)) {
+          inspectionMap.set(r.mission_order_id, r.status);
+        }
+      });
+
+      // Inspector names
+      const inspectorIds = [...new Set(assignments.map(a => a.inspector_id).filter(Boolean))];
+
+      const { data: profiles = [] } = inspectorIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name, first_name, middle_name, last_name')
+            .in('id', inspectorIds)
+        : { data: [] };
+
+      const profileMap = new Map(profiles.map(p => [p.id, p]));
+
+      const inspectorMap = new Map();
+      assignments.forEach(a => {
+        const p = profileMap.get(a.inspector_id) || {};
+        const name =
+          p.full_name ||
+          [p.first_name, p.middle_name, p.last_name].filter(Boolean).join(' ') ||
+          String(a.inspector_id).slice(0, 8);
+
+        if (!inspectorMap.has(a.mission_order_id)) {
+          inspectorMap.set(a.mission_order_id, []);
+        }
+        inspectorMap.get(a.mission_order_id).push(name);
+      });
+
+      const merged = complaints.map(c => {
+        const mo = latestMO.get(c.id);
+        return {
+          ...c,
+          mission_order_id: mo?.id || null,
+          mission_order_status: mo?.status || null,
+          inspection_status: mo ? inspectionMap.get(mo.id) || null : null,
+          inspector_names: mo ? inspectorMap.get(mo.id) || [] : [],
+          title: mo?.title || null,
+        };
+      });
+
+      const filtered = merged
+        .filter(r => normalizeStatus(r.mission_order_status) === 'complete')
+        .filter(r => {
+          if (!search) return true;
+          const hay = `${r.business_name} ${r.business_address} ${r.reporter_email} ${r.complaint_id}`.toLowerCase();
+          return hay.includes(search.toLowerCase());
+        });
+
+      setMissionOrders(filtered);
+      return;
     }
-  };
+
+    // =========================
+    // DEFAULT QUERY
+    // =========================
+    if (search) {
+      const s = search.trim();
+      query = query.or(`title.ilike.%${s}%,id::text.ilike.%${s}%,complaint_id::text.ilike.%${s}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    setMissionOrders(data || []);
+
+  } catch (e) {
+    setError(e?.message || 'Failed to load mission orders.');
+    setMissionOrders([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     if (tab === 'mission-orders' || tab === 'mission-orders-history' || tab === 'inspection' || tab === 'inspection-history') {
