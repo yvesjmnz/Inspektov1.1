@@ -530,7 +530,24 @@ export default function MissionOrderReview() {
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <a className="dash-btn" href="/dashboard/director?tab=mission-orders" style={{ textDecoration: 'none' }}>Back</a>
+                  <button
+                    type="button"
+                    className="dash-btn"
+                    onClick={() => {
+                      try {
+                        const moSource = sessionStorage.getItem('missionOrderSource');
+                        if (moSource === 'history') {
+                          window.location.assign('/dashboard/director?tab=mission-orders-history');
+                          return;
+                        }
+                      } catch {
+                        // ignore and use default fallback
+                      }
+                      window.location.assign('/dashboard/director?tab=mission-orders');
+                    }}
+                  >
+                    Back
+                  </button>
 
                   {isReviewable ? (
                     <>

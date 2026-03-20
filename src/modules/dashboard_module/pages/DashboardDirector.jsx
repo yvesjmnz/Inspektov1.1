@@ -1,10 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
 import { cancelInspection as cancelInspectionApi } from '../../../lib/api';
 import DirectorReports from './DirectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
+import HistorySearchBar from '../components/HistorySearchBar';
 import './Dashboard.css';
 
 // Complaint category grouping (Director view) from tags like "Violation: <Sub>"
@@ -39,6 +40,18 @@ const GUIDED_SUBCAT_BY_CATEGORY = new Map([
     'CCTV System Non-Compliance',
   ]],
 ]);
+
+const COMPLAINT_HISTORY_FILTER_OPTIONS = [
+  { key: 'businessName', label: 'Business Name' },
+  { key: 'address', label: 'Address' },
+  { key: 'reporterEmail', label: 'Reporter Email' },
+];
+
+const MISSION_ORDER_HISTORY_FILTER_OPTIONS = [
+  { key: 'businessName', label: 'Business Name' },
+  { key: 'address', label: 'Address' },
+  { key: 'inspectorName', label: 'Inspectors' },
+];
 function groupComplaintCategoriesFromTags(tags) {
   const result = [];
   if (!Array.isArray(tags) || tags.length === 0) return result;
@@ -267,19 +280,24 @@ export default function DashboardDirector() {
 
   const [complaints, setComplaints] = useState([]);
   const [missionOrders, setMissionOrders] = useState([]);
-  const [search, setSearch] = useState('');
-  const [searchFocused, setSearchFocused] = useState(false);
   const [auditComplaint, setAuditComplaint] = useState(null);
-  // Advanced filters for history tab
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [filters, setFilters] = useState({
+  const [complaintHistorySearch, setComplaintHistorySearch] = useState('');
+  const [missionOrderHistorySearch, setMissionOrderHistorySearch] = useState('');
+  const [complaintHistoryFilters, setComplaintHistoryFilters] = useState({
     businessName: '',
     address: '',
     reporterEmail: '',
-    complaintId: '',
-    dateMonth: null,
-    dateDay: null,
   });
+  const [missionOrderHistoryFilters, setMissionOrderHistoryFilters] = useState({
+    businessName: '',
+    address: '',
+    inspectorName: '',
+  });
+  const [complaintHistoryAppliedRange, setComplaintHistoryAppliedRange] = useState({ start: null, end: null });
+  const [missionOrderHistoryAppliedRange, setMissionOrderHistoryAppliedRange] = useState({ start: null, end: null });
+  const activeHistorySearch = tab === 'mission-orders-history' ? missionOrderHistorySearch : complaintHistorySearch;
+  const activeHistoryFilters = tab === 'mission-orders-history' ? missionOrderHistoryFilters : complaintHistoryFilters;
+  const activeHistoryAppliedRange = tab === 'mission-orders-history' ? missionOrderHistoryAppliedRange : complaintHistoryAppliedRange;
   // Full complaint sidebar state (for history tab audit view)
   const [fullViewId, setFullViewId] = useState(null);
   const [fullViewLoading, setFullViewLoading] = useState(false);
@@ -287,125 +305,7 @@ export default function DashboardDirector() {
   const [fullComplaint, setFullComplaint] = useState(null);
   const [fullPreviewImage, setFullPreviewImage] = useState(null);
   const [evidenceIndex, setEvidenceIndex] = useState(0);
-  // Date range filter (history tab)
-  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
-  const [viewMonth, setViewMonth] = useState(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-  });
-  const [pendingRange, setPendingRange] = useState({ start: null, end: null }); // inclusive
-  const [appliedRange, setAppliedRange] = useState({ start: null, end: null }); // inclusive
-  const [datePreset, setDatePreset] = useState('last-week'); // 'last-week' | 'last-month' | 'last-year' | 'custom'
-
-  // Date helpers
   const startOfDayLocal = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-  const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
-  const isSameDay = (a, b) => !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  const isBetween = (x, a, b) => {
-    if (!a || !b) return false;
-    const t = startOfDayLocal(x).getTime();
-    const s = startOfDayLocal(a).getTime();
-    const e = startOfDayLocal(b).getTime();
-    return t >= s && t <= e;
-  };
-
-  // Prepare current week (Sunday–Saturday) as pending selection without applying
-  const setCurrentWeekPending = () => {
-    const t = startOfDayLocal(new Date());
-    const weekday = t.getDay(); // 0=Sun..6=Sat
-    const start = addDays(t, -weekday);
-    const end = addDays(start, 6);
-    setPendingRange({ start, end });
-    setDatePreset('custom'); // avoid highlighting any preset by default
-    setViewMonth(new Date(t.getFullYear(), t.getMonth(), 1));
-  };
-
-  const calendarGrid = (base) => {
-    const first = new Date(base.getFullYear(), base.getMonth(), 1);
-    const day = first.getDay(); // 0 Sun - 6 Sat
-    const offset = (day + 6) % 7; // Monday-first
-    const gridStart = addDays(first, -offset);
-    const days = [];
-    for (let i = 0; i < 42; i++) days.push(addDays(gridStart, i));
-    return days;
-  };
-
-  const applyPresetRange = (p) => {
-    setDatePreset(p);
-    const today = new Date();
-    const t = startOfDayLocal(today);
-
-    if (p === 'custom') {
-      setPendingRange({ start: null, end: null });
-      setViewMonth(new Date(t.getFullYear(), t.getMonth(), 1));
-      return;
-    }
-
-    if (p === 'last-week') {
-      // Week alignment: Sunday–Saturday (matches example Feb 1–7 when today is Feb 14, 2026)
-      const weekday = t.getDay(); // 0=Sun..6=Sat
-      const thisWeekStartSun = addDays(t, -weekday);
-      const lastWeekStartSun = addDays(thisWeekStartSun, -7);
-      const lastWeekEndSat = addDays(lastWeekStartSun, 6);
-      setPendingRange({ start: lastWeekStartSun, end: lastWeekEndSat });
-      setViewMonth(new Date(lastWeekEndSat.getFullYear(), lastWeekEndSat.getMonth(), 1));
-      return;
-    }
-
-    if (p === 'last-month') {
-      const firstOfThisMonth = new Date(t.getFullYear(), t.getMonth(), 1);
-      const firstOfLastMonth = new Date(t.getFullYear(), t.getMonth() - 1, 1);
-      const lastOfLastMonth = new Date(t.getFullYear(), t.getMonth(), 0); // day 0 of this month
-      setPendingRange({ start: firstOfLastMonth, end: lastOfLastMonth });
-      setViewMonth(new Date(firstOfLastMonth.getFullYear(), firstOfLastMonth.getMonth(), 1));
-      return;
-    }
-
-    if (p === 'last-year') {
-      const prevYear = t.getFullYear() - 1;
-      const start = new Date(prevYear, 0, 1);
-      const end = new Date(prevYear, 11, 31);
-      setPendingRange({ start, end });
-      setViewMonth(new Date(prevYear, 0, 1));
-      return;
-    }
-  };
-
-  const onDayClick = (d) => {
-    setDatePreset('custom');
-    const day = startOfDayLocal(d);
-    setPendingRange((r) => {
-      if (!r.start || (r.start && r.end)) return { start: day, end: null };
-      if (day < r.start) return { start: day, end: r.start };
-      return { start: r.start, end: day };
-    });
-  };
-
-  const onApplyDateRange = () => {
-    if (pendingRange.start && pendingRange.end) {
-      setAppliedRange({ start: startOfDayLocal(pendingRange.start), end: startOfDayLocal(pendingRange.end) });
-      setDatePopoverOpen(false);
-    }
-  };
-
-  const formatRangeLabel = (start, end) => {
-    if (!start || !end) return 'All time';
-    const fmt = (dt) => dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    const fmtYear = (dt) => dt.getFullYear();
-    const startYear = fmtYear(start);
-    const endYear = fmtYear(end);
-    const startStr = fmt(start);
-    const endStr = fmt(end);
-    // If same year, only show year once at the end
-    if (startYear === endYear) {
-      return `${startStr} – ${endStr}, ${startYear}`;
-    }
-    // Different years, show both
-    return `${startStr}, ${startYear} – ${endStr}, ${endYear}`;
-  };
-
-  const rangeLabel = useMemo(() => formatRangeLabel(appliedRange.start, appliedRange.end), [appliedRange]);
   // Resolved labels for audit drawer (emails or names)
   const [auditApproverLabel, setAuditApproverLabel] = useState('');
   const [auditDeclinerLabel, setAuditDeclinerLabel] = useState('');
@@ -492,9 +392,9 @@ export default function DashboardDirector() {
           'rejected',
         ]);
         // Apply created_at date range for Complaint History if filters are set via range picker (explicit Apply)
-        if (appliedRange?.start && appliedRange?.end) {
-          const start = new Date(appliedRange.start.getFullYear(), appliedRange.start.getMonth(), appliedRange.start.getDate());
-          const endExclusive = new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), appliedRange.end.getDate() + 1);
+        if (complaintHistoryAppliedRange?.start && complaintHistoryAppliedRange?.end) {
+          const start = new Date(complaintHistoryAppliedRange.start.getFullYear(), complaintHistoryAppliedRange.start.getMonth(), complaintHistoryAppliedRange.start.getDate());
+          const endExclusive = new Date(complaintHistoryAppliedRange.end.getFullYear(), complaintHistoryAppliedRange.end.getMonth(), complaintHistoryAppliedRange.end.getDate() + 1);
           query = query.gte('created_at', start.toISOString()).lt('created_at', endExclusive.toISOString());
         }
       } else {
@@ -503,21 +403,19 @@ export default function DashboardDirector() {
 
       // Apply field filters (only one can be active at a time)
       if (tab === 'history') {
-        const searchVal = search.trim();
-        if (filters.businessName && searchVal) {
+        const searchVal = complaintHistorySearch.trim();
+        if (complaintHistoryFilters.businessName && searchVal) {
           query = query.ilike('business_name', `%${searchVal}%`);
-        } else if (filters.address && searchVal) {
+        } else if (complaintHistoryFilters.address && searchVal) {
           query = query.ilike('business_address', `%${searchVal}%`);
-        } else if (filters.reporterEmail && searchVal) {
+        } else if (complaintHistoryFilters.reporterEmail && searchVal) {
           query = query.ilike('reporter_email', `%${searchVal}%`);
-        } else if (filters.complaintId && searchVal) {
-          query = query.ilike('id', `%${searchVal}%`);
         }
 
-        // Date filtering is handled by the calendar date range picker (appliedRange)
+        // Date filtering is handled by the calendar date range picker (complaintHistoryAppliedRange)
       }
 
-      const searchVal = search.trim();
+      const searchVal = tab === 'history' ? complaintHistorySearch.trim() : '';
       if (searchVal) {
         // Basic search across common columns. If a column doesn't exist, Supabase will error.
         // Keep it conservative to the known ones from ComplaintForm: business_name, business_address, reporter_email.
@@ -568,9 +466,11 @@ export default function DashboardDirector() {
         .in('status', ['approved', 'Approved']);
 
       const appliedComplaintQuery = (() => {
-        if (!appliedRange?.start || !appliedRange?.end) return complaintQuery;
-        const start = new Date(appliedRange.start.setHours(0, 0, 0, 0));
-        const end = new Date(appliedRange.end.setHours(23, 59, 59, 999));
+        if (!missionOrderHistoryAppliedRange?.start || !missionOrderHistoryAppliedRange?.end) return complaintQuery;
+        const start = new Date(missionOrderHistoryAppliedRange.start);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(missionOrderHistoryAppliedRange.end);
+        end.setHours(23, 59, 59, 999);
         return complaintQuery.gte('approved_at', start.toISOString()).lte('approved_at', end.toISOString());
       })();
 
@@ -701,9 +601,11 @@ export default function DashboardDirector() {
         .order('completed_at', { ascending: false })
         .limit(1000);
 
-      if (appliedRange?.start && appliedRange?.end) {
-        const start = new Date(appliedRange.start.setHours(0, 0, 0, 0));
-        const endExclusive = new Date(appliedRange.end.setHours(23, 59, 59, 999));
+      if (missionOrderHistoryAppliedRange?.start && missionOrderHistoryAppliedRange?.end) {
+        const start = new Date(missionOrderHistoryAppliedRange.start);
+        start.setHours(0, 0, 0, 0);
+        const endExclusive = new Date(missionOrderHistoryAppliedRange.end);
+        endExclusive.setHours(23, 59, 59, 999);
         // Use inclusive end here because timestamps are exact; the UI is date-based.
         reportQuery = reportQuery.gte('completed_at', start.toISOString()).lte('completed_at', endExclusive.toISOString());
       }
@@ -803,9 +705,11 @@ export default function DashboardDirector() {
         .select('id, business_name, business_address, reporter_email, approved_at, created_at')
         .in('status', ['approved', 'Approved']);
 
-      if (appliedRange?.start && appliedRange?.end) {
-        const start = new Date(appliedRange.start.setHours(0, 0, 0, 0));
-        const end = new Date(appliedRange.end.setHours(23, 59, 59, 999));
+      if (missionOrderHistoryAppliedRange?.start && missionOrderHistoryAppliedRange?.end) {
+        const start = new Date(missionOrderHistoryAppliedRange.start);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(missionOrderHistoryAppliedRange.end);
+        end.setHours(23, 59, 59, 999);
         complaintQuery.gte('approved_at', start.toISOString()).lte('approved_at', end.toISOString());
       }
 
@@ -916,9 +820,11 @@ export default function DashboardDirector() {
         .select('id, business_name, business_address, reporter_email, approved_at, created_at')
         .in('status', ['approved', 'Approved']);
 
-      if (appliedRange?.start && appliedRange?.end) {
-        const start = new Date(appliedRange.start.setHours(0, 0, 0, 0));
-        const end = new Date(appliedRange.end.setHours(23, 59, 59, 999));
+      if (missionOrderHistoryAppliedRange?.start && missionOrderHistoryAppliedRange?.end) {
+        const start = new Date(missionOrderHistoryAppliedRange.start);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(missionOrderHistoryAppliedRange.end);
+        end.setHours(23, 59, 59, 999);
         complaintQuery.gte('approved_at', start.toISOString()).lte('approved_at', end.toISOString());
       }
 
@@ -1016,9 +922,9 @@ export default function DashboardDirector() {
       const filtered = merged
         .filter(r => normalizeStatus(r.mission_order_status) === 'complete')
         .filter(r => {
-          if (!search) return true;
+          if (!missionOrderHistorySearch) return true;
           const hay = `${r.business_name} ${r.business_address} ${r.reporter_email} ${r.complaint_id}`.toLowerCase();
-          return hay.includes(search.toLowerCase());
+          return hay.includes(missionOrderHistorySearch.toLowerCase());
         });
 
       if (!isActiveRequest(request)) return;
@@ -1029,8 +935,8 @@ export default function DashboardDirector() {
     // =========================
     // DEFAULT QUERY
     // =========================
-    if (search) {
-      const s = search.trim();
+    if (missionOrderHistorySearch) {
+      const s = missionOrderHistorySearch.trim();
       query = query.or(`title.ilike.%${s}%,id::text.ilike.%${s}%,complaint_id::text.ilike.%${s}%`);
     }
 
@@ -1058,7 +964,7 @@ export default function DashboardDirector() {
       loadComplaints();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, appliedRange.start, appliedRange.end]);
+  }, [tab, complaintHistoryAppliedRange.start, complaintHistoryAppliedRange.end, missionOrderHistoryAppliedRange.start, missionOrderHistoryAppliedRange.end]);
 
   // Reload history when applied date range changes or filters change
   useEffect(() => {
@@ -1066,7 +972,7 @@ export default function DashboardDirector() {
       loadComplaints();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedRange.start, appliedRange.end, filters.businessName, filters.address, filters.reporterEmail, filters.complaintId, search]);
+  }, [complaintHistoryAppliedRange.start, complaintHistoryAppliedRange.end, complaintHistoryFilters.businessName, complaintHistoryFilters.address, complaintHistoryFilters.reporterEmail, complaintHistorySearch, tab]);
 
   // Resolve approver/decliner labels (email/name) for audit drawer
   useEffect(() => {
@@ -1122,48 +1028,60 @@ export default function DashboardDirector() {
 
   const filteredComplaints = useMemo(() => {
     // If a field filter is active, don't apply client-side filtering (backend already filtered)
-    const hasFieldFilter = filters.businessName || filters.address || filters.reporterEmail || filters.complaintId;
+    const hasFieldFilter = complaintHistoryFilters.businessName || complaintHistoryFilters.address || complaintHistoryFilters.reporterEmail;
     if (hasFieldFilter) {
       return complaints;
     }
 
     // Broad client-side filtering across common fields when no specific field filter is active.
-    const q = search.trim().toLowerCase();
+    const q = complaintHistorySearch.trim().toLowerCase();
     if (!q) return complaints;
 
     return complaints.filter((c) => {
-      const idStr = String(c?.id ?? '').toLowerCase();
       const nameStr = String(c?.business_name ?? '').toLowerCase();
       const addrStr = String(c?.business_address ?? '').toLowerCase();
       const emailStr = String(c?.reporter_email ?? '').toLowerCase();
       return (
-        idStr.includes(q) ||
         nameStr.includes(q) ||
         addrStr.includes(q) ||
         emailStr.includes(q)
       );
     });
-  }, [complaints, search, filters]);
+  }, [complaints, complaintHistorySearch, complaintHistoryFilters]);
 
   const filteredMissionOrders = useMemo(() => {
     if (tab !== 'mission-orders-history') return missionOrders;
 
-    const q = search.trim().toLowerCase();
+    const q = missionOrderHistorySearch.trim().toLowerCase();
+    const hasMissionOrderFieldFilter = missionOrderHistoryFilters.businessName || missionOrderHistoryFilters.address || missionOrderHistoryFilters.inspectorName;
+
     if (!q) return missionOrders;
 
     return missionOrders.filter((mo) => {
       const idStr = String(mo?.id ?? '').toLowerCase();
       const titleStr = String(mo?.title ?? '').toLowerCase();
       const complaintStr = String(mo?.complaint_id ?? '').toLowerCase();
-      return idStr.includes(q) || titleStr.includes(q) || complaintStr.includes(q);
-    });
-  }, [missionOrders, search, tab]);
+      const businessNameStr = String(mo?.business_name ?? '').toLowerCase();
+      const addressStr = String(mo?.business_address ?? '').toLowerCase();
+      const inspectorStr = (mo?.inspector_names || []).join(' ').toLowerCase();
 
-  useEffect(() => {
-    if (tab !== 'history') {
-      setSearchFocused(false);
-    }
-  }, [tab]);
+      if (hasMissionOrderFieldFilter) {
+        if (missionOrderHistoryFilters.businessName) return businessNameStr.includes(q);
+        if (missionOrderHistoryFilters.address) return addressStr.includes(q);
+        if (missionOrderHistoryFilters.inspectorName) return inspectorStr.includes(q);
+      }
+
+      return idStr.includes(q) || titleStr.includes(q) || complaintStr.includes(q) || businessNameStr.includes(q) || addressStr.includes(q) || inspectorStr.includes(q);
+    });
+  }, [missionOrders, missionOrderHistorySearch, tab, missionOrderHistoryFilters.businessName, missionOrderHistoryFilters.address, missionOrderHistoryFilters.inspectorName]);
+
+  const reviewMissionOrdersHeaderLabel = useMemo(() => {
+    const firstIssuedAt = filteredMissionOrders?.[0]?.submitted_at || filteredMissionOrders?.[0]?.mission_order_created_at || filteredMissionOrders?.[0]?.created_at || null;
+    if (!firstIssuedAt) return 'Issued Mission Orders';
+    const d = new Date(firstIssuedAt);
+    if (Number.isNaN(d.getTime())) return 'Issued Mission Orders';
+    return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+  }, [filteredMissionOrders]);
 
   // Group complaints by day for Review Complaints
   const complaintsByDay = useMemo(() => {
@@ -1414,8 +1332,8 @@ export default function DashboardDirector() {
     const moIssued = (missionOrders || []).filter((m) => sLower(m.status) === 'issued').length;
 
     // Complaints submitted bar chart (date range)
-    const rangeStart = appliedRange?.start ? startOfDayLocal(appliedRange.start) : null;
-    const rangeEnd = appliedRange?.end ? startOfDayLocal(appliedRange.end) : null;
+    const rangeStart = complaintHistoryAppliedRange?.start ? startOfDayLocal(complaintHistoryAppliedRange.start) : null;
+    const rangeEnd = complaintHistoryAppliedRange?.end ? startOfDayLocal(complaintHistoryAppliedRange.end) : null;
 
     // Default to last 7 days if no range selected
     const defaultStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6);
@@ -1525,7 +1443,7 @@ export default function DashboardDirector() {
 
     // Title timeframe
     const fmt = (dt) => dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    const timeframeLabel = appliedRange?.start && appliedRange?.end
+    const timeframeLabel = complaintHistoryAppliedRange?.start && complaintHistoryAppliedRange?.end
       ? `Custom (${fmt(startSafe)} — ${fmt(endSafe)})`
       : 'Last 7 Days';
 
@@ -1542,7 +1460,7 @@ export default function DashboardDirector() {
       groupMode,
       timeframeLabel,
     };
-  }, [complaints, missionOrders, appliedRange.start, appliedRange.end]);
+  }, [complaints, missionOrders, complaintHistoryAppliedRange.start, complaintHistoryAppliedRange.end]);
 
   const updateComplaintStatus = async (complaintId, newStatus) => {
     setError('');
@@ -1797,323 +1715,17 @@ export default function DashboardDirector() {
           </div>
 
           {(tab === 'history' || tab === 'mission-orders-history') && (
-            <div style={{ marginBottom: 20, display: 'grid', gap: 12 }}>
-              {/* Search Bar */}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <div style={{ flex: 1, position: 'relative' }}>
-                  <input
-                    type="text"
-                    placeholder={tab === 'mission-orders-history' ? 'Search mission orders...' : 'Search complaints...'}
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 16px',
-                      background: '#ffffff',
-                      color: '#0f172a',
-                      border: '2px solid #cbd5e1',
-                      borderRadius: 10,
-                      fontSize: 14,
-                      fontWeight: 500,
-                      outline: 'none',
-                      transition: 'all 0.2s ease',
-                      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.04)'
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = '#2563eb';
-                      e.target.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.1), 0 2px 8px rgba(0, 0, 0, 0.08)';
-                      setSearchFocused(true);
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = '#cbd5e1';
-                      e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.04)';
-                      setSearchFocused(false);
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Advanced Filters Panel - Shows when search is focused */}
-              {tab === 'history' && searchFocused && (
-                <div 
-                  onMouseDown={(e) => e.preventDefault()}
-                  style={{
-                    background: '#f8fafc',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 12,
-                    padding: 16,
-                    display: 'grid',
-                    gap: 16,
-                    animation: 'fadeIn 0.2s ease-in-out'
-                  }}>
-                  <style>{`
-                    @keyframes fadeIn {
-                      from {
-                        opacity: 0;
-                        transform: translateY(-8px);
-                      }
-                      to {
-                        opacity: 1;
-                        transform: translateY(0);
-                      }
-                    }
-                  `}</style>
-
-                  {/* Field Filters Section - Pill Style */}
-                  <div>
-                    <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 12px 0', fontWeight: 600 }}>Narrow down your search</p>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', position: 'relative' }}>
-                      {/* Business Name Pill */}
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          if (filters.businessName !== '') {
-                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                          } else {
-                            setFilters({ businessName: 'active', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                          }
-                        }}
-                        style={{
-                          padding: '6px 14px',
-                          background: filters.businessName !== '' ? '#2563eb' : '#ffffff',
-                          color: filters.businessName !== '' ? '#ffffff' : '#0f172a',
-                          border: `1px solid ${filters.businessName !== '' ? '#2563eb' : '#cbd5e1'}`,
-                          borderRadius: 999,
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          fontSize: 13,
-                          transition: 'all 0.2s ease',
-                          whiteSpace: 'nowrap'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (filters.businessName === '') {
-                            e.currentTarget.style.borderColor = '#2563eb';
-                            e.currentTarget.style.color = '#2563eb';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (filters.businessName === '') {
-                            e.currentTarget.style.borderColor = '#cbd5e1';
-                            e.currentTarget.style.color = '#0f172a';
-                          }
-                        }}
-                      >
-                        Business Name
-                      </button>
-
-                      {/* Address Pill */}
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          if (filters.address !== '') {
-                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                          } else {
-                            setFilters({ businessName: '', address: 'active', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                          }
-                        }}
-                        style={{
-                          padding: '6px 14px',
-                          background: filters.address !== '' ? '#2563eb' : '#ffffff',
-                          color: filters.address !== '' ? '#ffffff' : '#0f172a',
-                          border: `1px solid ${filters.address !== '' ? '#2563eb' : '#cbd5e1'}`,
-                          borderRadius: 999,
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          fontSize: 13,
-                          transition: 'all 0.2s ease',
-                          whiteSpace: 'nowrap'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (filters.address === '') {
-                            e.currentTarget.style.borderColor = '#2563eb';
-                            e.currentTarget.style.color = '#2563eb';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (filters.address === '') {
-                            e.currentTarget.style.borderColor = '#cbd5e1';
-                            e.currentTarget.style.color = '#0f172a';
-                          }
-                        }}
-                      >
-                        Address
-                      </button>
-
-                      {/* Reporter Email Pill */}
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          if (filters.reporterEmail !== '') {
-                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                          } else {
-                            setFilters({ businessName: '', address: '', reporterEmail: 'active', complaintId: '', dateMonth: null, dateDay: null });
-                          }
-                        }}
-                        style={{
-                          padding: '6px 14px',
-                          background: filters.reporterEmail !== '' ? '#2563eb' : '#ffffff',
-                          color: filters.reporterEmail !== '' ? '#ffffff' : '#0f172a',
-                          border: `1px solid ${filters.reporterEmail !== '' ? '#2563eb' : '#cbd5e1'}`,
-                          borderRadius: 999,
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          fontSize: 13,
-                          transition: 'all 0.2s ease',
-                          whiteSpace: 'nowrap'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (filters.reporterEmail === '') {
-                            e.currentTarget.style.borderColor = '#2563eb';
-                            e.currentTarget.style.color = '#2563eb';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (filters.reporterEmail === '') {
-                            e.currentTarget.style.borderColor = '#cbd5e1';
-                            e.currentTarget.style.color = '#0f172a';
-                          }
-                        }}
-                      >
-                        Reporter Email
-                      </button>
-
-                      {/* Complaint ID Pill */}
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          if (filters.complaintId !== '') {
-                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: '', dateMonth: null, dateDay: null });
-                          } else {
-                            setFilters({ businessName: '', address: '', reporterEmail: '', complaintId: 'active', dateMonth: null, dateDay: null });
-                          }
-                        }}
-                        style={{
-                          padding: '6px 14px',
-                          background: filters.complaintId !== '' ? '#2563eb' : '#ffffff',
-                          color: filters.complaintId !== '' ? '#ffffff' : '#0f172a',
-                          border: `1px solid ${filters.complaintId !== '' ? '#2563eb' : '#cbd5e1'}`,
-                          borderRadius: 999,
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          fontSize: 13,
-                          transition: 'all 0.2s ease',
-                          whiteSpace: 'nowrap'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (filters.complaintId === '') {
-                            e.currentTarget.style.borderColor = '#2563eb';
-                            e.currentTarget.style.color = '#2563eb';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (filters.complaintId === '') {
-                            e.currentTarget.style.borderColor = '#cbd5e1';
-                            e.currentTarget.style.color = '#0f172a';
-                          }
-                        }}
-                      >
-                        Complaint ID
-                      </button>
-
-                      {/* Date Filter Pill with Popup */}
-                      <div className="date-filter" style={{ position: 'relative' }}>
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            if (!datePopoverOpen) {
-                              if (appliedRange.start && appliedRange.end) {
-                                setPendingRange({ start: appliedRange.start, end: appliedRange.end });
-                                setDatePreset('custom');
-                                setViewMonth(new Date(appliedRange.end.getFullYear(), appliedRange.end.getMonth(), 1));
-                              } else {
-                                setCurrentWeekPending();
-                              }
-                            }
-                            setDatePopoverOpen((v) => !v);
-                          }}
-                          aria-haspopup="dialog"
-                          aria-expanded={datePopoverOpen}
-                          style={{
-                            padding: '6px 14px',
-                            background: datePopoverOpen || (appliedRange.start && appliedRange.end) ? '#2563eb' : '#ffffff',
-                            color: datePopoverOpen || (appliedRange.start && appliedRange.end) ? '#ffffff' : '#0f172a',
-                            border: `1px solid ${datePopoverOpen || (appliedRange.start && appliedRange.end) ? '#2563eb' : '#cbd5e1'}`,
-                            borderRadius: 999,
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                            fontSize: 13,
-                            transition: 'all 0.2s ease',
-                            whiteSpace: 'nowrap'
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!datePopoverOpen && (!appliedRange.start || !appliedRange.end)) {
-                              e.currentTarget.style.borderColor = '#2563eb';
-                              e.currentTarget.style.color = '#2563eb';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!datePopoverOpen && (!appliedRange.start || !appliedRange.end)) {
-                              e.currentTarget.style.borderColor = '#cbd5e1';
-                              e.currentTarget.style.color = '#0f172a';
-                            }
-                          }}
-                        >
-                          Date
-                        </button>
-                        {datePopoverOpen ? (
-                          <div className="date-popover" role="dialog" aria-modal="true">
-                            <div className="date-presets">
-                              <button type="button" className={datePreset === 'last-week' ? 'active' : ''} onClick={() => applyPresetRange('last-week')}>Last Week</button>
-                              <button type="button" className={datePreset === 'last-month' ? 'active' : ''} onClick={() => applyPresetRange('last-month')}>Last Month</button>
-                              <button type="button" className={datePreset === 'last-year' ? 'active' : ''} onClick={() => applyPresetRange('last-year')}>Last Year</button>
-                              <button type="button" className={datePreset === 'custom' ? 'active' : ''} onClick={() => applyPresetRange('custom')}>Custom</button>
-                              <div className="date-apply">
-                                <button type="button" className="dash-btn" style={{ width: '100%' }} onClick={onApplyDateRange} disabled={!pendingRange.start || !pendingRange.end}>Apply</button>
-                              </div>
-                            </div>
-                            <div className="cal-wrap">
-                              <div className="cal-header">
-                                <div style={{ fontWeight: 900 }}>{viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
-                                <div className="cal-nav">
-                                  <button type="button" aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>‹</button>
-                                  <button type="button" aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>›</button>
-                                </div>
-                              </div>
-                              <div className="cal-grid">
-                                {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => (
-                                  <div key={`h-${d}`} className="cal-dow">{d}</div>
-                                ))}
-                                {calendarGrid(viewMonth).map((d) => {
-                                  const inMonth = d.getMonth() === viewMonth.getMonth();
-                                  const isStart = pendingRange.start && isSameDay(d, pendingRange.start);
-                                  const isEnd = pendingRange.end && isSameDay(d, pendingRange.end);
-                                  const inSel = pendingRange.start && pendingRange.end && isBetween(d, pendingRange.start, pendingRange.end);
-                                  const cls = ['cal-day', inMonth ? '' : 'muted', inSel ? 'in-range' : '', isStart ? 'start' : '', isEnd ? 'end' : ''].filter(Boolean).join(' ');
-                                  return (
-                                    <div key={d.toISOString()} className={cls} onClick={() => onDayClick(d)}>{d.getDate()}</div>
-                                  );
-                                })}
-                              </div>
-                              <div className="range-summary">
-                                {pendingRange.start && pendingRange.end ? formatRangeLabel(pendingRange.start, pendingRange.end) : 'Select a start and end date'}
-                              </div>
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-
-                                  </div>
-              )}
-            </div>
+            <HistorySearchBar
+              placeholder={tab === 'mission-orders-history' ? 'Search mission orders...' : 'Search complaints...'}
+              searchValue={activeHistorySearch}
+              onSearchChange={tab === 'mission-orders-history' ? setMissionOrderHistorySearch : setComplaintHistorySearch}
+              filters={activeHistoryFilters}
+              onFiltersChange={tab === 'mission-orders-history' ? setMissionOrderHistoryFilters : setComplaintHistoryFilters}
+              filterOptions={tab === 'mission-orders-history' ? MISSION_ORDER_HISTORY_FILTER_OPTIONS : COMPLAINT_HISTORY_FILTER_OPTIONS}
+              appliedRange={activeHistoryAppliedRange}
+              onAppliedRangeChange={tab === 'mission-orders-history' ? setMissionOrderHistoryAppliedRange : setComplaintHistoryAppliedRange}
+            />
           )}
-
           {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
           {tab === 'mission-orders-history' ? (
@@ -2121,7 +1733,14 @@ export default function DashboardDirector() {
               missionOrdersByDay={missionOrdersByDay}
               expandedComplaintId={expandedComplaintId}
               setExpandedComplaintId={setExpandedComplaintId}
-              onRowClick={(mo) => window.location.assign(`/mission-order?id=${encodeURIComponent(mo.mission_order_id || mo.id || mo.mission_order_id)}`)}
+              onRowClick={(mo) => {
+                try {
+                  sessionStorage.setItem('missionOrderSource', 'history');
+                } catch {
+                  // ignore
+                }
+                window.location.assign(`/mission-order?id=${encodeURIComponent(mo.mission_order_id || mo.id || mo.mission_order_id)}`);
+              }}
               formatStatus={formatStatusHI}
               statusBadgeClass={statusBadgeClassHI}
             />
@@ -2268,10 +1887,10 @@ export default function DashboardDirector() {
                 >
                   {/* Header */}
                   <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
-                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Review Mission Orders</h3>
+                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>{reviewMissionOrdersHeaderLabel}</h3>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
-                      <span>{filteredMissionOrders.length} {filteredMissionOrders.length === 1 ? 'Record' : 'Records'}</span>
+                      <span style={{ color: '#F2B705' }}>{filteredMissionOrders.length} Issued Mission Order{filteredMissionOrders.length !== 1 ? 's' : ''}</span>
                     </div>
                   </div>
 
@@ -2329,10 +1948,10 @@ export default function DashboardDirector() {
                               </td>
                               <td>
                                 <div className="dash-cell-title">{mo.business_name || mo.title || 'Mission Order'}</div>
-                                <div className="dash-cell-sub">{mo.business_address || (mo.complaint_id ? ('Complaint: ' + (String(mo.complaint_id).slice(0, 8) + '�')) : '')}</div>
+                                <div className="dash-cell-sub">{mo.business_address || (mo.complaint_id ? ('Complaint: ' + (String(mo.complaint_id).slice(0, 8) + '�')) : '')}</div>
                               </td>
                               <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
-                                {mo.date_of_inspection ? new Date(mo.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '�'}
+                                {mo.date_of_inspection ? new Date(mo.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '�'}
                               </td>
                               <td>{renderInspectorPills(mo.inspector_names, mo.complaint_id || mo.mission_order_id || 'review-mo')}</td>
                             </tr>
@@ -2698,7 +2317,7 @@ export default function DashboardDirector() {
                               href={`/mission-order?id=${mo.id}`}
                               onClick={() => {
                                 try {
-                                  sessionStorage.setItem('missionOrderSource', 'review');
+                                  sessionStorage.setItem('missionOrderSource', 'history');
                                 } catch {
                                   // ignore
                                 }
@@ -3315,3 +2934,6 @@ export default function DashboardDirector() {
       </div>
   );
 }
+
+
+

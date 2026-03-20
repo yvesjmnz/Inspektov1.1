@@ -48,6 +48,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
         {
           label: 'Review Complaints',
           icon: '/ui_icons/queue.png',
+          iconSize: 26,
           href: '/dashboard/director?tab=queue',
           section: null,
         },
@@ -131,6 +132,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
         {
           label: 'Secretary Approval',
           icon: '/ui_icons/queue.png',
+          iconSize: 24,
           href: '/dashboard/head-inspector',
           section: null,
           tabName: 'for-inspection',
@@ -347,6 +349,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           // Navigation item
           const isActive = item.label === activeItem;
           const href = item.tabName ? `${item.href}#${item.tabName}` : item.href;
+          const iconSize = item.iconSize || 22;
           return (
             <li key={`nav-${idx}`}>
               <button
@@ -369,8 +372,8 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
                     src={item.icon}
                     alt=""
                     style={{
-                      width: 22,
-                      height: 22,
+                      width: iconSize,
+                      height: iconSize,
                       objectFit: 'contain',
                       display: 'block',
                       filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)',

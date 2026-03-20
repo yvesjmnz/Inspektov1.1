@@ -70,7 +70,7 @@ export default function MissionOrderHistory({ missionOrdersByDay, expandedCompla
               </h3>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#10b981', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}></div>
-                <span style={{ color: '#d1fae5' }}>{count} Completed Mission Order{count !== 1 ? 's' : ''}</span>
+                <span style={{ color: '#10b981' }}>{count} Completed Mission Order{count !== 1 ? 's' : ''}</span>
               </div>
             </div>
 
@@ -155,3 +155,4 @@ export default function MissionOrderHistory({ missionOrdersByDay, expandedCompla
     </div>
   );
 }
+
