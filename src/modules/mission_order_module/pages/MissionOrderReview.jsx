@@ -31,6 +31,7 @@ function statusBadgeClass(status) {
   const s = String(status || '').toLowerCase();
   if (s === 'for inspection' || s === 'for_inspection') return 'status-badge status-success';
   if (s === 'issued') return 'status-badge status-warning';
+  if (s === 'rejected') return 'status-badge status-danger';
   if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
   if (s === 'draft') return 'status-badge status-info';
   if (!s) return 'status-badge status-info';
@@ -310,7 +311,7 @@ export default function MissionOrderReview() {
         ...(nextStatus === 'for inspection' ? { date_of_issuance: nowIso.slice(0, 10), director_preapproved_at: nowIso } : {}),
       };
 
-      if (nextStatus === 'cancelled' && !String(directorComment || '').trim()) {
+      if (nextStatus === 'rejected' && !String(directorComment || '').trim()) {
         throw new Error('Rejection requires a director comment.');
       }
 
@@ -457,7 +458,7 @@ export default function MissionOrderReview() {
               businessName
             );
           }
-        } else if (nextStatus === 'cancelled') {
+        } else if (nextStatus === 'rejected') {
           await notifyHeadInspectorMissionOrderRejected(missionOrderId, businessName, directorComment);
         }
       } catch (notifErr) {
@@ -487,7 +488,7 @@ export default function MissionOrderReview() {
       setToast('Not reviewable');
       return;
     }
-    await updateMissionOrderDecision('cancelled');
+    await updateMissionOrderDecision('rejected');
   };
 
   const officeViewerUrl = useMemo(() => {

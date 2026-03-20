@@ -1212,28 +1212,7 @@ export default function ComplaintReview() {
                       </div>
                     </div>
 
-                    {/* Complaint History (layout placeholder) */}
-                    {(() => {
-                      const s = String(complaint?.status || '').toLowerCase();
-                      const showHistory = ['approved', 'pre-approved', 'pre_approved', 'jected'].includes(s);
-                      if (!showHistory) return null;
-
-                      return (
-                        <div style={{
-                          background: '#ffffff',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: 12,
-                          padding: 16,
-                        }}>
-                          <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                            Complaint History
-                          </div>
-                          <div style={{ marginTop: 12, color: '#64748b', fontWeight: 700, fontSize: 13 }}>
-                            —
-                          </div>
-                        </div>
-                      );
-                    })()}
+                    {null}
                   </div>
                 </div>
               )}

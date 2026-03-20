@@ -74,13 +74,19 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           section: null,
         },
         {
-          label: 'Inspection',
+          label: 'Inspections',
           section: 'INSPECTION',
         },
         {
           label: 'Inspections',
           icon: '/ui_icons/inspection.png',
           href: '/dashboard/director?tab=inspection',
+          section: null,
+        },
+        {
+          label: 'Inspection History',
+          icon: '/ui_icons/history.png',
+          href: '/dashboard/director?tab=inspection-history',
           section: null,
         },
         {
@@ -210,8 +216,25 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       return 'Review Complaints'; // default to queue
     }
 
-    // For mission order page, check the hash to determine which tab
+    // For mission order page, check the hash to determine which tab.
+    // NOTE: This page is shared across roles, but the sidebar labels differ.
+    // - Head Inspector uses: Draft/Director Approval/Secretary Approval/Mission Order History/Inspection...
+    // - Director uses: Review Mission Orders/Mission Order History/Inspections...
     if (path === '/mission-order') {
+      // Director should NOT see Head Inspector tab labels (Draft/Director Approval/etc.) in the sidebar.
+      // Keep the Director sidebar consistent with /dashboard/director.
+      if (normalizedRole === 'director') {
+        // If the full view is opened from the Director review flow, highlight Review Mission Orders.
+        // Otherwise default to Mission Order History (most common entry point).
+        const moSource = sessionStorage.getItem('missionOrderSource');
+        if (moSource === 'review') return 'Review Mission Orders';
+
+        if (hash === 'inspection') return 'Inspections';
+        if (hash === 'inspection-history') return 'Inspection History';
+        return 'Mission Order History';
+      }
+
+      // Head Inspector / Inspector behavior (existing tab mapping)
       if (hash === 'todo') return 'Draft';
       if (hash === 'results') return 'Director Approval';
       if (hash === 'for-inspection') return 'Secretary Approval';
@@ -234,6 +257,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'mission-orders') return 'Review Mission Orders';
       if (tab === 'mission-orders-history') return 'Mission Order History';
       if (tab === 'inspection') return 'Inspections';
+      if (tab === 'inspection-history') return 'Inspection History';
       if (tab === 'reports') return 'Performance Report';
       // Director dashboard overview tab was removed; default highlight to queue.
       return 'Review Complaints';
@@ -328,7 +352,17 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
               <button
                 type="button"
                 className={`dash-nav-item ${isActive ? 'active' : ''}`}
-                onClick={() => window.location.assign(href)}
+                onClick={() => {
+                  // Track source so the Mission Order full view can keep the correct Director highlight.
+                  // (Avoids showing Head Inspector tab labels when Director opens /mission-order.)
+                  if (normalizedRole === 'director') {
+                    const params = new URLSearchParams(new URL(href, window.location.origin).search);
+                    const nextTab = params.get('tab');
+                    if (nextTab === 'mission-orders') sessionStorage.setItem('missionOrderSource', 'review');
+                    else if (nextTab === 'mission-orders-history') sessionStorage.setItem('missionOrderSource', 'history');
+                  }
+                  window.location.assign(href);
+                }}
               >
                 <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                   <img

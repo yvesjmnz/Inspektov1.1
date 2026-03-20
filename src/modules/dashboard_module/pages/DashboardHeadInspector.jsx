@@ -27,6 +27,7 @@ function formatStatus(status) {
   if (s === 'completed') return 'Completed';
 
   // mission_orders statuses
+  if (s === 'rejected') return 'Rejected';
   if (s === 'cancelled' || s === 'canceled') return 'Cancelled';
   if (s === 'for inspection' || s === 'for_inspection') return 'Pre-Approved';
 
@@ -56,6 +57,7 @@ function statusBadgeClass(status) {
   if (s === 'issued') return 'status-badge status-warning';
   if (s === 'awaiting_signature') return 'status-badge status-accent';
   if (s === 'complete') return 'status-badge status-success';
+  if (s === 'rejected') return 'status-badge status-danger';
   if (s === 'cancelled' || s === 'canceled') return 'status-badge status-danger';
   if (s === 'draft') return 'status-badge status-info';
 
@@ -1512,7 +1514,7 @@ export default function DashboardHeadInspector() {
                       <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#10b981' }}>
                         {complaints.filter((c) => {
                           const s = String(c.mission_order_status || '').toLowerCase();
-                          return s === 'issued' || s === 'for inspection' || s === 'for_inspection';
+                          return s === 'for inspection' || s === 'for_inspection';
                         }).length} items
                       </div>
                     </div>
@@ -1530,7 +1532,7 @@ export default function DashboardHeadInspector() {
                         <tbody>
                           {complaints.filter((c) => {
                             const s = String(c.mission_order_status || '').toLowerCase();
-                            return s === 'issued' || s === 'for inspection' || s === 'for_inspection';
+                            return s === 'for inspection' || s === 'for_inspection';
                           }).length === 0 ? (
                             <tr>
                               <td colSpan="5" style={{ textAlign: 'center', padding: 32, color: '#475569' }}>
@@ -1540,7 +1542,7 @@ export default function DashboardHeadInspector() {
                           ) : (
                             complaints.filter((c) => {
                               const s = String(c.mission_order_status || '').toLowerCase();
-                              return s === 'issued' || s === 'for inspection' || s === 'for_inspection';
+                              return s === 'for inspection' || s === 'for_inspection';
                             }).map((c) => (
                               <React.Fragment key={`preapproved-${c.complaint_id}`}>
                                 <tr
