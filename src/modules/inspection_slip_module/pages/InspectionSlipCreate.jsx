@@ -904,26 +904,31 @@ export default function InspectionSlipCreate() {
       businessName: b.business_name || prev.businessName,
     }));
 
-    // Autofill owner full name for BOTH Sole Proprietor and Corporation.
-    // Source priority:
-    // 1) businesses.owner_name (if present)
-    // 2) composed from legacy name parts (if present)
+    // Only autofill owner name for Sole Proprietorship
+    // For Corporation, leave the owner name field empty for manual entry
     const isSole = ownerType === 'sole';
 
-    const directOwnerName = String(b?.owner_name || '').trim();
-    const lastName = b.owner_last_name || b.last_name || b.lastname || '';
-    const firstName = b.owner_first_name || b.first_name || b.firstname || '';
-    const middleName = b.owner_middle_name || b.middle_name || b.middlename || '';
-    const composed = [firstName, middleName, lastName].map((s) => String(s || '').trim()).filter(Boolean).join(' ');
+    if (isSole) {
+      // Autofill owner name only for Sole Proprietor
+      // Source priority:
+      // 1) businesses.owner_name (if present)
+      // 2) composed from legacy name parts (if present)
+      const directOwnerName = String(b?.owner_name || '').trim();
+      const lastName = b.owner_last_name || b.last_name || b.lastname || '';
+      const firstName = b.owner_first_name || b.first_name || b.firstname || '';
+      const middleName = b.owner_middle_name || b.middle_name || b.middlename || '';
+      const composed = [firstName, middleName, lastName].map((s) => String(s || '').trim()).filter(Boolean).join(' ');
 
-    setOwnerDetails((prev) => ({
-      ...prev,
-      fullName: directOwnerName || composed || prev.fullName,
-      // keep legacy fields populated when available (harmless, helps backward compatibility)
-      lastName: lastName || prev.lastName,
-      firstName: firstName || prev.firstName,
-      middleName: middleName || prev.middleName,
-    }));
+      setOwnerDetails((prev) => ({
+        ...prev,
+        fullName: directOwnerName || composed || prev.fullName,
+        // keep legacy fields populated when available (harmless, helps backward compatibility)
+        lastName: lastName || prev.lastName,
+        firstName: firstName || prev.firstName,
+        middleName: middleName || prev.middleName,
+      }));
+    }
+    // For Corporation (ownerType === 'corp'), do not autofill owner name
 
     const bin = b.epermit_no || b.permit_number || '';
 
@@ -969,16 +974,18 @@ export default function InspectionSlipCreate() {
         setLineOfBusinessList(lobs);
       }
 
-      // If businesses_additional has an owner_name, use it as a fallback.
-      const additionalOwnerName = addRows
-        .map((r) => String(r?.owner_name || '').trim())
-        .find(Boolean);
+      // If businesses_additional has an owner_name, use it as a fallback only for Sole Proprietor.
+      if (isSole) {
+        const additionalOwnerName = addRows
+          .map((r) => String(r?.owner_name || '').trim())
+          .find(Boolean);
 
-      if (additionalOwnerName) {
-        setOwnerDetails((prev) => ({
-          ...prev,
-          fullName: prev.fullName || additionalOwnerName,
-        }));
+        if (additionalOwnerName) {
+          setOwnerDetails((prev) => ({
+            ...prev,
+            fullName: prev.fullName || additionalOwnerName,
+          }));
+        }
       }
 
       // Keep employee autofill only for Sole Proprietor (existing behavior)
