@@ -90,6 +90,9 @@ export default function InspectionSlipCreate() {
   // Only used when "With CCTV" is marked Compliant.
   const [cctvCount, setCctvCount] = useState('');
 
+  // Only used when "Business Signage" is marked Compliant.
+  const [signage_sqm, setSignageSqm] = useState('');
+
   const COMMENTS_MAX = 500;
   const [additionalComments, setAdditionalComments] = useState('');
 
@@ -489,6 +492,7 @@ export default function InspectionSlipCreate() {
             signage_2sqm: fromDbStatus(explicitReport.signage_status) || p.signage_2sqm,
           }));
           setCctvCount(explicitReport.cctv_count != null ? String(explicitReport.cctv_count) : '');
+          setSignageSqm(explicitReport.signage_sqm != null ? String(explicitReport.signage_sqm) : '');
 
           if (explicitReport.owner_name) {
             const ownerName = String(explicitReport.owner_name || '').trim();
@@ -622,6 +626,7 @@ export default function InspectionSlipCreate() {
             signage_2sqm: fromDbStatus(existingReport.signage_status) || p.signage_2sqm,
           }));
           setCctvCount(existingReport.cctv_count != null ? String(existingReport.cctv_count) : '');
+          setSignageSqm(existingReport.signage_sqm != null ? String(existingReport.signage_sqm) : '');
 
           if (existingReport.owner_name) {
             const ownerName = String(existingReport.owner_name || '').trim();
@@ -899,26 +904,31 @@ export default function InspectionSlipCreate() {
       businessName: b.business_name || prev.businessName,
     }));
 
-    // Autofill owner full name for BOTH Sole Proprietor and Corporation.
-    // Source priority:
-    // 1) businesses.owner_name (if present)
-    // 2) composed from legacy name parts (if present)
+    // Only autofill owner name for Sole Proprietorship
+    // For Corporation, leave the owner name field empty for manual entry
     const isSole = ownerType === 'sole';
 
-    const directOwnerName = String(b?.owner_name || '').trim();
-    const lastName = b.owner_last_name || b.last_name || b.lastname || '';
-    const firstName = b.owner_first_name || b.first_name || b.firstname || '';
-    const middleName = b.owner_middle_name || b.middle_name || b.middlename || '';
-    const composed = [firstName, middleName, lastName].map((s) => String(s || '').trim()).filter(Boolean).join(' ');
+    if (isSole) {
+      // Autofill owner name only for Sole Proprietor
+      // Source priority:
+      // 1) businesses.owner_name (if present)
+      // 2) composed from legacy name parts (if present)
+      const directOwnerName = String(b?.owner_name || '').trim();
+      const lastName = b.owner_last_name || b.last_name || b.lastname || '';
+      const firstName = b.owner_first_name || b.first_name || b.firstname || '';
+      const middleName = b.owner_middle_name || b.middle_name || b.middlename || '';
+      const composed = [firstName, middleName, lastName].map((s) => String(s || '').trim()).filter(Boolean).join(' ');
 
-    setOwnerDetails((prev) => ({
-      ...prev,
-      fullName: directOwnerName || composed || prev.fullName,
-      // keep legacy fields populated when available (harmless, helps backward compatibility)
-      lastName: lastName || prev.lastName,
-      firstName: firstName || prev.firstName,
-      middleName: middleName || prev.middleName,
-    }));
+      setOwnerDetails((prev) => ({
+        ...prev,
+        fullName: directOwnerName || composed || prev.fullName,
+        // keep legacy fields populated when available (harmless, helps backward compatibility)
+        lastName: lastName || prev.lastName,
+        firstName: firstName || prev.firstName,
+        middleName: middleName || prev.middleName,
+      }));
+    }
+    // For Corporation (ownerType === 'corp'), do not autofill owner name
 
     const bin = b.epermit_no || b.permit_number || '';
 
@@ -964,16 +974,18 @@ export default function InspectionSlipCreate() {
         setLineOfBusinessList(lobs);
       }
 
-      // If businesses_additional has an owner_name, use it as a fallback.
-      const additionalOwnerName = addRows
-        .map((r) => String(r?.owner_name || '').trim())
-        .find(Boolean);
+      // If businesses_additional has an owner_name, use it as a fallback only for Sole Proprietor.
+      if (isSole) {
+        const additionalOwnerName = addRows
+          .map((r) => String(r?.owner_name || '').trim())
+          .find(Boolean);
 
-      if (additionalOwnerName) {
-        setOwnerDetails((prev) => ({
-          ...prev,
-          fullName: prev.fullName || additionalOwnerName,
-        }));
+        if (additionalOwnerName) {
+          setOwnerDetails((prev) => ({
+            ...prev,
+            fullName: prev.fullName || additionalOwnerName,
+          }));
+        }
       }
 
       // Keep employee autofill only for Sole Proprietor (existing behavior)
@@ -1239,6 +1251,7 @@ export default function InspectionSlipCreate() {
         cctv_status: toDbStatus(checklist.with_cctv),
         signage_status: toDbStatus(checklist.signage_2sqm),
         cctv_count: cctvCount ? Number(cctvCount) : 0,
+        signage_sqm: signage_sqm ? Number(signage_sqm) : 0,
 
         inspection_comments: additionalComments || null,
         lines_of_business: lineOfBusinessList.filter(Boolean),
@@ -1310,12 +1323,18 @@ export default function InspectionSlipCreate() {
     // Checklist items must be answered (not N/A)
     if (checklist.business_permit === 'na') missing.push('Business Permit (Presented) status');
     if (checklist.with_cctv === 'na') missing.push('With CCTV status');
-    if (checklist.signage_2sqm === 'na') missing.push('2sqm Signage status');
+    if (checklist.signage_2sqm === 'na') missing.push('Business Signage status');
 
     // CCTV count required when compliant
     if (checklist.with_cctv === 'compliant') {
       const n = Number(String(cctvCount || '').trim());
       if (!Number.isFinite(n) || n <= 0) missing.push('No. of CCTVs');
+    }
+
+    // Signage area required when compliant
+    if (checklist.signage_2sqm === 'compliant') {
+      const n = Number(String(signage_sqm || '').trim());
+      if (!Number.isFinite(n) || n <= 0) missing.push('Signage Area (sqm)');
     }
 
     // Signatures required
@@ -2121,7 +2140,7 @@ export default function InspectionSlipCreate() {
                       {[
                         { key: 'business_permit', label: 'Business Permit (Presented)' },
                         { key: 'with_cctv', label: 'With CCTV' },
-                        { key: 'signage_2sqm', label: '2sqm Signage' },
+                        { key: 'signage_2sqm', label: 'Business Signage' },
                       ].map((item) => (
                         <div key={item.key} className="is-check-row" style={{ alignItems: 'flex-start' }}>
                           <div className="is-check-title" style={{ paddingTop: 6 }}>
@@ -2142,6 +2161,9 @@ export default function InspectionSlipCreate() {
                                     setChecklist((p) => ({ ...p, [item.key]: opt.v }));
                                     if (item.key === 'with_cctv' && opt.v !== 'compliant') {
                                       setCctvCount('');
+                                    }
+                                    if (item.key === 'signage_2sqm' && opt.v !== 'compliant') {
+                                      setSignageSqm('');
                                     }
                                   }}
                                   aria-pressed={checklist[item.key] === opt.v}
@@ -2172,6 +2194,35 @@ export default function InspectionSlipCreate() {
                                     }
                                   }}
                                   placeholder="Enter count"
+                                />
+                              </div>
+                            ) : null}
+
+                            {item.key === 'signage_2sqm' && checklist.signage_2sqm === 'compliant' ? (
+                              <div className="is-field" style={{ margin: 0, width: 220 }}>
+                                <label style={{ fontSize: 12 }}>Signage Area (sqm)</label>
+                                <input
+                                  className="is-input"
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={signage_sqm}
+                                  onChange={(e) => {
+                                    // Allow positive numbers and decimals
+                                    const next = String(e.target.value || '').replace(/[^0-9.]/g, '');
+                                    // Prevent multiple decimal points
+                                    const parts = next.split('.');
+                                    if (parts.length > 2) {
+                                      return;
+                                    }
+                                    setSignageSqm(next);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    // Block common non-numeric characters
+                                    if (['e', 'E', '+', '-'].includes(e.key)) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                  placeholder="Enter area in sqm"
                                 />
                               </div>
                             ) : null}
@@ -2580,7 +2631,7 @@ export default function InspectionSlipCreate() {
                       {[
                         { key: 'business_permit', label: 'Business Permit (Presented)' },
                         { key: 'with_cctv', label: 'With CCTV' },
-                        { key: 'signage_2sqm', label: '2sqm Signage' },
+                        { key: 'signage_2sqm', label: 'Business Signage' },
                       ].map((item) => {
                         const v = checklist[item.key];
                         const text =
@@ -2598,6 +2649,11 @@ export default function InspectionSlipCreate() {
                               {item.key === 'with_cctv' && v === 'compliant' ? (
                                 <span style={{ marginLeft: 8, fontWeight: 900, color: '#0f172a' }}>
                                   ({cctvCount ? `${cctvCount} CCTV${String(cctvCount) === '1' ? '' : 's'}` : 'CCTV count not set'})
+                                </span>
+                              ) : null}
+                              {item.key === 'signage_2sqm' && v === 'compliant' ? (
+                                <span style={{ marginLeft: 8, fontWeight: 900, color: '#0f172a' }}>
+                                  ({signage_sqm ? `${signage_sqm} sqm` : 'Signage area not set'})
                                 </span>
                               ) : null}
                             </div>
