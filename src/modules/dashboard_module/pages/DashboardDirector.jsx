@@ -569,24 +569,24 @@ export default function DashboardDirector() {
 
           if (reportErr) throw reportErr;
 
-          // // Fetch revision counts for mission orders so Director can see #revisions like Head Inspector
-          // const { data: revisionRows, error: revisionErr } = missionOrderIds.length
-          //   ? await supabase
-          //       .from('mission_order_revisions')
-          //       .select('mission_order_id')
-          //       .in('mission_order_id', missionOrderIds)
-          //   : { data: [], error: null };
+          // Fetch revision counts for mission orders so Director can see #revisions like Head Inspector
+          const { data: revisionRows, error: revisionErr } = missionOrderIds.length
+            ? await supabase
+                .from('mission_order_revisions')
+                .select('mission_order_id')
+                .in('mission_order_id', missionOrderIds)
+            : { data: [], error: null };
 
-          // if (revisionErr) {
-          //   // non-fatal: continue without revisions
-          //   console.warn('Failed to load mission order revisions', revisionErr);
-          // }
+          if (revisionErr) {
+            // non-fatal: continue without revisions
+            console.warn('Failed to load mission order revisions', revisionErr);
+          }
 
-          // const revisionCountByMoId = new Map();
-          // (revisionRows || []).forEach((r) => {
-          //   if (!r?.mission_order_id) return;
-          //   revisionCountByMoId.set(r.mission_order_id, (revisionCountByMoId.get(r.mission_order_id) || 0) + 1);
-          // });
+          const revisionCountByMoId = new Map();
+          (revisionRows || []).forEach((r) => {
+            if (!r?.mission_order_id) return;
+            revisionCountByMoId.set(r.mission_order_id, (revisionCountByMoId.get(r.mission_order_id) || 0) + 1);
+          });
 
           const normalizeInspectionStatus = (v) => String(v || '').toLowerCase().trim();
           const inspectionPriority = (v) => {
