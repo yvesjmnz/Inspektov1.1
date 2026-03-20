@@ -247,6 +247,7 @@ export default function MissionOrderEditor() {
 
   // Director review actions (approve/reject) are only available when the MO is submitted to Director.
   const isDirectorReviewable = viewerRole === 'director' && isSubmitted;
+  const canHeadInspectorSubmit = viewerRole === 'head_inspector' && !isApproved && !isSubmitted && !isAwaitingSignature && !isComplete;
   const [directorComment, setDirectorComment] = useState('');
   const [savingDecision, setSavingDecision] = useState(false);
 
@@ -1473,7 +1474,7 @@ export default function MissionOrderEditor() {
                         {savingDecision ? 'Saving…' : 'Reject'}
                       </button>
                     </>
-                  ) : (!isApproved && !isSubmitted && !isAwaitingSignature && !isComplete ? (
+                  ) : (canHeadInspectorSubmit ? (
                     <>
                       <button
                         className="dash-btn"
