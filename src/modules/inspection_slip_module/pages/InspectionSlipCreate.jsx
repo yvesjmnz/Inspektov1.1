@@ -76,6 +76,81 @@ const GUIDED_SUBCAT_BY_CATEGORY = new Map([
   ]],
 ]);
 
+const COMPLIANCE_OPTIONS = ['Full Compliance', 'Partial Compliance', 'Non-Compliance'];
+
+function parseInspectionComments(value) {
+  const raw = String(value || '');
+  const legacyMatch = raw.match(
+    /^Compliance Status:\s*(Full Compliance|Partial Compliance|Non-Compliance)\s*(?:\r?\n){1,2}([\s\S]*)$/i
+  );
+
+  if (legacyMatch) {
+    const complianceStatus =
+      COMPLIANCE_OPTIONS.find((option) => option.toLowerCase() === String(legacyMatch[1] || '').toLowerCase()) || '';
+    const remarksBody = String(legacyMatch[2] || '').trimStart();
+    const remarks = complianceStatus
+      ? `${formatComplianceTag(complianceStatus)}${remarksBody ? ` ${remarksBody}` : ''}`
+      : remarksBody;
+
+    return {
+      complianceStatus,
+      remarks,
+    };
+  }
+
+  const tagMatch = raw.match(/^\[(Full Compliance|Partial Compliance|Non-Compliance)\]\s*/i);
+  if (!tagMatch) {
+    return {
+      complianceStatus: '',
+      remarks: raw,
+    };
+  }
+
+  return {
+    complianceStatus: COMPLIANCE_OPTIONS.find((option) => option.toLowerCase() === String(tagMatch[1] || '').toLowerCase()) || '',
+    remarks: raw,
+  };
+}
+
+function buildInspectionComments(_complianceStatus, remarks) {
+  const note = String(remarks || '').trim();
+  return note || null;
+}
+
+function formatComplianceTag(status) {
+  return `[${String(status || '').trim()}]`;
+}
+
+function stripComplianceTag(remarks) {
+  return String(remarks || '')
+    .replace(/^Compliance Status:\s*(Full Compliance|Partial Compliance|Non-Compliance)\s*(?:\r?\n){0,2}/i, '')
+    .replace(/^\[(Full Compliance|Partial Compliance|Non-Compliance)\]\s*/i, '');
+}
+
+function upsertComplianceTag(status, remarks) {
+  const tag = formatComplianceTag(status);
+  const withoutExistingTag = stripComplianceTag(remarks);
+  const body = withoutExistingTag.trimStart();
+  return `${tag}${body ? ` ${body}` : ' '}`;
+}
+
+function deriveComplianceStatusFromChecklist(checklist) {
+  const values = [
+    checklist?.business_permit,
+    checklist?.with_cctv,
+    checklist?.signage_2sqm,
+  ];
+  const compliantCount = values.filter((value) => value === 'compliant').length;
+  const nonCompliantCount = values.filter((value) => value === 'non_compliant').length;
+  const answeredCount = values.filter(Boolean).length;
+
+  if (checklist?.business_permit === 'non_compliant') return 'Non-Compliance';
+  if (compliantCount === 3) return 'Full Compliance';
+  if (nonCompliantCount === 3) return 'Non-Compliance';
+  if (answeredCount === 3 && nonCompliantCount >= 1) return 'Partial Compliance';
+  return '';
+}
+
 function groupComplaintCategoriesFromTags(tags) {
   const result = [];
   if (!Array.isArray(tags) || tags.length === 0) return result;
@@ -158,6 +233,7 @@ export default function InspectionSlipCreate() {
   const [businessSearch, setBusinessSearch] = useState('');
   const [businessResult, setBusinessResult] = useState(null);
   const [checkingBusiness, setCheckingBusiness] = useState(false);
+  const [selectedBusiness, setSelectedBusiness] = useState(null);
 
   const [ownerDetails, setOwnerDetails] = useState({
     fullName: '',
@@ -199,11 +275,11 @@ export default function InspectionSlipCreate() {
   // Businesses can have multiple line(s) of business. We store it as an editable list.
   const [lineOfBusinessList, setLineOfBusinessList] = useState(['']);
 
-  // Checklist with tri-state: compliant | non_compliant | na
+  // Checklist with explicit selection: compliant | non_compliant
   const [checklist, setChecklist] = useState({
-    business_permit: 'na',
-    with_cctv: 'na',
-    signage_2sqm: 'na',
+    business_permit: '',
+    with_cctv: '',
+    signage_2sqm: '',
   });
 
   // Only used when "With CCTV" is marked Compliant.
@@ -213,22 +289,8 @@ export default function InspectionSlipCreate() {
   const [signage_sqm, setSignageSqm] = useState('');
 
   const COMMENTS_MAX = 500;
+  const [complianceStatus, setComplianceStatus] = useState('');
   const [additionalComments, setAdditionalComments] = useState('');
-
-  const quickTags = useMemo(
-    () => ['Major Violation', 'Minor Observation', 'Follow-up Required', 'Clean Record'],
-    []
-  );
-
-  const applyQuickTag = (tag) => {
-    const t = `[${tag}]`;
-    setAdditionalComments((prev) => {
-      const cur = String(prev || '');
-      if (!cur.trim()) return `${t} `;
-      if (cur.includes(t)) return cur; // avoid duplicates
-      return `${t} ${cur}`;
-    });
-  };
 
   // Camera capture for evidence photos (Inspection Slip)
   const [evidencePhotos, setEvidencePhotos] = useState([]);
@@ -564,7 +626,7 @@ export default function InspectionSlipCreate() {
         const { data: mo, error: moError } = await supabase
           .from('mission_orders')
           .select(
-            'id, title, content, status, complaint_id, created_at, updated_at, submitted_at, secretary_signed_attachment_url, secretary_signed_attachment_uploaded_at, secretary_signed_attachment_uploaded_by'
+            'id, title, content, status, complaint_id, created_at, updated_at, submitted_at, date_of_issuance, date_of_inspection, secretary_signed_attachment_url, secretary_signed_attachment_uploaded_at, secretary_signed_attachment_uploaded_by'
           )
           .eq('id', missionOrderId)
           .single();
@@ -646,7 +708,11 @@ export default function InspectionSlipCreate() {
           setInspectionOwnerName(inspectorNameById.get(explicitReport.inspector_id) || '');
 
           // Hydrate fields from the explicit report
-          setAdditionalComments(explicitReport.inspection_comments || '');
+          {
+            const parsedComments = parseInspectionComments(explicitReport.inspection_comments);
+            setComplianceStatus(parsedComments.complianceStatus);
+            setAdditionalComments(parsedComments.remarks);
+          }
 
           if (Array.isArray(explicitReport.lines_of_business) && explicitReport.lines_of_business.length) {
             setLineOfBusinessList(explicitReport.lines_of_business);
@@ -755,7 +821,11 @@ export default function InspectionSlipCreate() {
           setInspectionOwnerName(inspectorNameById.get(existingReport.inspector_id) || '');
 
           // Hydrate fields from draft
-          setAdditionalComments(existingReport.inspection_comments || '');
+          {
+            const parsedComments = parseInspectionComments(existingReport.inspection_comments);
+            setComplianceStatus(parsedComments.complianceStatus);
+            setAdditionalComments(parsedComments.remarks);
+          }
 
           if (Array.isArray(existingReport.lines_of_business) && existingReport.lines_of_business.length) {
             setLineOfBusinessList(existingReport.lines_of_business);
@@ -879,15 +949,11 @@ export default function InspectionSlipCreate() {
                     'Autofilled from registered business based on the complained business. Click a result card to change.'
                   );
                 } else {
-                  setAutoFillMessage(
-                    'No registered business found for this complaint. Please fill in the details manually or search by BIN / business name.'
-                  );
+                  setAutoFillMessage('');
                 }
               }
             } else {
-              setAutoFillMessage(
-                'No registered business found for this complaint. Please fill in the details manually or search by BIN / business name.'
-              );
+              setAutoFillMessage('');
             }
           }
         } else {
@@ -1060,8 +1126,10 @@ export default function InspectionSlipCreate() {
     }
   };
 
-  const handleUseBusiness = async (b) => {
+  const handleUseBusiness = async (b, nextOwnerType = ownerType) => {
     if (!b) return;
+    setSelectedBusiness(b);
+    setBusinessResult(null);
 
     // Always fill business name
     setOwnerDetails((prev) => ({
@@ -1071,7 +1139,7 @@ export default function InspectionSlipCreate() {
 
     // Only autofill owner name for Sole Proprietorship
     // For Corporation, leave the owner name field empty for manual entry
-    const isSole = ownerType === 'sole';
+    const isSole = nextOwnerType === 'sole';
 
     if (isSole) {
       // Autofill owner name only for Sole Proprietor
@@ -1092,8 +1160,16 @@ export default function InspectionSlipCreate() {
         firstName: firstName || prev.firstName,
         middleName: middleName || prev.middleName,
       }));
+    } else {
+      setOwnerDetails((prev) => ({
+        ...prev,
+        fullName: '',
+        lastName: '',
+        firstName: '',
+        middleName: '',
+      }));
     }
-    // For Corporation (ownerType === 'corp'), do not autofill owner name
+    // For Corporation, keep the owner name blank and still autofill the rest.
 
     const bin = b.bin || b.permit_bin || b.business_bin || '';
 
@@ -1153,24 +1229,49 @@ export default function InspectionSlipCreate() {
         }
       }
 
-      // Keep employee autofill only for Sole Proprietor (existing behavior)
-      if (isSole) {
-        const maxEmployees = addRows
-          .map((r) => Number(r?.total_employees || 0))
-          .filter((n) => Number.isFinite(n) && n > 0)
-          .reduce((m, n) => (n > m ? n : m), 0);
+      const maxEmployees = addRows
+        .map((r) => Number(r?.total_employees || 0))
+        .filter((n) => Number.isFinite(n) && n > 0)
+        .reduce((m, n) => (n > m ? n : m), 0);
 
-        if (maxEmployees > 0) {
-          setBusinessDetails((prev) => ({
-            ...prev,
-            numberOfEmployees: String(maxEmployees),
-          }));
-        }
+      if (maxEmployees > 0) {
+        setBusinessDetails((prev) => ({
+          ...prev,
+          numberOfEmployees: String(maxEmployees),
+        }));
       }
     } catch {
       // Silent fail
     }
   };
+
+  const handleSelectOwnerType = (nextOwnerType) => {
+    setOwnerType(nextOwnerType);
+
+    if (nextOwnerType === 'corp') {
+      setOwnerDetails((prev) => ({
+        ...prev,
+        fullName: '',
+        lastName: '',
+        firstName: '',
+        middleName: '',
+      }));
+    }
+
+    if (selectedBusiness) {
+      void handleUseBusiness(selectedBusiness, nextOwnerType);
+    }
+  };
+
+  useEffect(() => {
+    const nextStatus = deriveComplianceStatusFromChecklist(checklist);
+    setComplianceStatus((prev) => (prev === nextStatus ? prev : nextStatus));
+    setAdditionalComments((prev) => {
+      const nextComments = nextStatus ? upsertComplianceTag(nextStatus, prev) : stripComplianceTag(prev);
+      const clipped = nextComments.slice(0, COMMENTS_MAX);
+      return clipped === prev ? prev : clipped;
+    });
+  }, [checklist, complianceStatus, additionalComments]);
 
   const statusBadgeStyle = (status) => {
     const s = String(status || '').toLowerCase();
@@ -1314,17 +1415,16 @@ export default function InspectionSlipCreate() {
   };
 
   const toDbStatus = (v) => {
-    // DB defaults show "N/A"; map our values to match
     if (v === 'compliant') return 'Compliant';
     if (v === 'non_compliant') return 'Non-Compliant';
-    return 'N/A';
+    return null;
   };
 
   const fromDbStatus = (v) => {
     const s = String(v || '').toLowerCase();
     if (s.includes('non')) return 'non_compliant';
     if (s.includes('compliant')) return 'compliant';
-    return 'na';
+    return '';
   };
 
   // When loading an existing report (completed view), we store signed URLs in state.
@@ -1429,7 +1529,7 @@ export default function InspectionSlipCreate() {
         cctv_count: cctvCount ? Number(cctvCount) : 0,
         signage_sqm: signage_sqm ? Number(signage_sqm) : 0,
 
-        inspection_comments: additionalComments || null,
+        inspection_comments: buildInspectionComments(complianceStatus, additionalComments),
         lines_of_business: lineOfBusinessList.filter(Boolean),
         no_of_employees: businessDetails.numberOfEmployees ? Number(businessDetails.numberOfEmployees) : null,
         estimated_area_sqm: businessDetails.estimatedAreaSqm ? Number(businessDetails.estimatedAreaSqm) : null,
@@ -1500,10 +1600,12 @@ export default function InspectionSlipCreate() {
     // Photo evidence required (at least 1)
     if (!Array.isArray(evidencePhotos) || evidencePhotos.length === 0) missing.push('Photo Evidence');
 
-    // Checklist items must be answered (not N/A)
-    if (checklist.business_permit === 'na') missing.push('Business Permit (Presented) status');
-    if (checklist.with_cctv === 'na') missing.push('With CCTV status');
-    if (checklist.signage_2sqm === 'na') missing.push('Business Signage status');
+    if (!String(complianceStatus || '').trim()) missing.push('Compliance Status');
+
+    // Checklist items must be answered
+    if (!checklist.business_permit) missing.push('Business Permit (Presented) status');
+    if (!checklist.with_cctv) missing.push('With CCTV status');
+    if (!checklist.signage_2sqm) missing.push('Business Signage status');
 
     // CCTV count required when compliant
     if (checklist.with_cctv === 'compliant') {
@@ -1530,9 +1632,9 @@ export default function InspectionSlipCreate() {
       inspectorLocation.lng == null ||
       !Array.isArray(evidencePhotos) ||
       evidencePhotos.length === 0 ||
-      checklist.business_permit === 'na' ||
-      checklist.with_cctv === 'na' ||
-      checklist.signage_2sqm === 'na' ||
+      !checklist.business_permit ||
+      !checklist.with_cctv ||
+      !checklist.signage_2sqm ||
       !inspectorSignature ||
       !ownerSignature ||
       (checklist.with_cctv === 'compliant' && (!Number.isFinite(Number(String(cctvCount || '').trim())) || Number(String(cctvCount || '').trim()) <= 0)) ||
@@ -2392,7 +2494,7 @@ export default function InspectionSlipCreate() {
                         <button
                           type="button"
                           className={ownerType === 'sole' ? 'active' : ''}
-                          onClick={() => setOwnerType('sole')}
+                          onClick={() => handleSelectOwnerType('sole')}
                           aria-pressed={ownerType === 'sole'}
                           title="Sole Proprietor will autofill owner name fields when available"
                         >
@@ -2401,7 +2503,7 @@ export default function InspectionSlipCreate() {
                         <button
                           type="button"
                           className={ownerType === 'corp' ? 'active' : ''}
-                          onClick={() => setOwnerType('corp')}
+                          onClick={() => handleSelectOwnerType('corp')}
                           aria-pressed={ownerType === 'corp'}
                           title="Corporation will not autofill owner name fields"
                         >
@@ -2480,7 +2582,7 @@ export default function InspectionSlipCreate() {
                       <div>
                         <p className="is-section-title">Step 2: Line of Business</p>
                         <p className="is-section-sub">
-                          Can be multiple lines. Autofilled for Sole Proprietor when available; editable anytime.
+                          Can be multiple lines. Autofilled when available; editable anytime.
                         </p>
                       </div>
                       <div>
@@ -2665,7 +2767,7 @@ export default function InspectionSlipCreate() {
                     <div className="is-section-head">
                       <div>
                         <p className="is-section-title">Step 5: Compliance Checklist</p>
-                        <p className="is-section-sub">Use Compliant / Non-Compliant / N/A per item.</p>
+                        <p className="is-section-sub">Use Compliant or Non-Compliant per item.</p>
                       </div>
                     </div>
 
@@ -2684,7 +2786,6 @@ export default function InspectionSlipCreate() {
                               {[
                                 { v: 'compliant', t: 'Compliant' },
                                 { v: 'non_compliant', t: 'Non-Compliant' },
-                                { v: 'na', t: 'N/A' },
                               ].map((opt) => (
                                 <button
                                   key={opt.v}
@@ -2770,7 +2871,7 @@ export default function InspectionSlipCreate() {
                       <div>
                         <div>
                           <p className="is-section-title">Step 6: Additional Observations</p>
-                          <p className="is-section-sub">Optional notes, findings, or recommendations.</p>
+                          <p className="is-section-sub">Choose the inspection result, then add any optional notes or recommendations.</p>
                         </div>
                       </div>
 
@@ -2997,25 +3098,34 @@ export default function InspectionSlipCreate() {
                     ) : null}
 
                     <div style={{ display: 'grid', gap: 10 }}>
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} aria-label="Quick tags">
-                        {quickTags.map((t) => (
+                      <div style={{ display: 'grid', gap: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                          Compliance Status <span style={{ color: '#b91c1c' }}>*</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="group" aria-label="Compliance status">
+                          {COMPLIANCE_OPTIONS.map((option) => (
                           <button
-                            key={t}
+                            key={option}
                             type="button"
-                            className="mo-btn mo-btn-secondary mo-btn--sm"
-                            onClick={() => applyQuickTag(t)}
-                            title={`Insert ${t}`}
+                            className={complianceStatus === option ? 'mo-btn mo-btn-primary mo-btn--sm' : 'mo-btn mo-btn-secondary mo-btn--sm'}
+                            onClick={() => {
+                              setComplianceStatus(option);
+                              setAdditionalComments((prev) => upsertComplianceTag(option, prev).slice(0, COMMENTS_MAX));
+                            }}
+                            aria-pressed={complianceStatus === option}
+                            title={`Set compliance status to ${option}`}
                             style={{
                               borderRadius: 999,
-                              padding: '4px 8px',
+                              padding: '8px 14px',
                               fontWeight: 800,
-                              fontSize: 11,
-                              lineHeight: '14px',
+                              fontSize: 12,
+                              lineHeight: '16px',
                             }}
                           >
-                            [{t}]
+                            {option}
                           </button>
                         ))}
+                        </div>
                       </div>
 
                       <div
@@ -3193,7 +3303,7 @@ export default function InspectionSlipCreate() {
                             ? 'Compliant'
                             : v === 'non_compliant'
                               ? 'Non-Compliant'
-                              : 'N/A';
+                              : 'Not selected';
 
                         return (
                           <div key={item.key} className="is-check-row">
@@ -3225,6 +3335,13 @@ export default function InspectionSlipCreate() {
                     </div>
 
                     <div className="is-field" style={{ marginTop: 4 }}>
+                      <label>Compliance Status</label>
+                      <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                        {complianceStatus || '—'}
+                      </div>
+                    </div>
+
+                    <div className="is-field" style={{ marginTop: 12 }}>
                       <label>Remarks</label>
                       <div style={{ fontWeight: 800, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
                         {additionalComments?.trim() ? additionalComments : '—'}
