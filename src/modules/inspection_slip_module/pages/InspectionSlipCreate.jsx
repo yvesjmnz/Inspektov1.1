@@ -1685,7 +1685,7 @@ export default function InspectionSlipCreate() {
           completed_at: completedAt,
           updated_at: completedAt,
         })
-        .eq('id', inspectionReportId);
+        .eq('mission_order_id', missionOrderId);
 
       if (subErr) throw subErr;
 
