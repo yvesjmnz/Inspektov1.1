@@ -5,8 +5,8 @@
 // Responsibility:
 // - Load business address from public.businesses by business_pk
 // - Geocode address via Google Geocoding API (server-side; key not exposed to client)
-// - Compute distance from reporter device coordinates
-// - Return tag + distance + resolved business coords
+// - Compute distance from reporter device coordinates when available
+// - Return resolved business coords plus Manila City jurisdiction metadata
 //
 // Notes:
 // - Uses SUPABASE_SERVICE_ROLE_KEY so it can read businesses regardless of RLS.
@@ -18,21 +18,49 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 type VerifyRequest = {
   business_pk?: number | null;
   business_address?: string;
-  reporter_lat: number;
-  reporter_lng: number;
+  reporter_lat?: number;
+  reporter_lng?: number;
   threshold_meters?: number;
 };
 
 type VerifyResponse =
   | {
       ok: true;
-      tag: 'Location Verified' | 'Failed Location Verification';
-      distance_meters: number;
-      threshold_meters: number;
       business_coords: { lat: number; lng: number };
       business_address: string;
+      resolved_address: string;
+      resolved_locality: string | null;
+      within_manila_city: boolean;
+      tag?: 'Location Verified' | 'Failed Location Verification';
+      distance_meters?: number;
+      threshold_meters?: number;
     }
   | { ok: false; error: string };
+
+type GeocodeResult = {
+  lat: number;
+  lng: number;
+  formatted_address: string;
+  address_components: Array<{
+    long_name?: string;
+    short_name?: string;
+    types?: string[];
+  }>;
+};
+
+const MANILA_CITY_NAMES = new Set(['manila', 'city of manila', 'maynila']);
+const METRO_MANILA_NAMES = new Set([
+  'metro manila',
+  'metropolitan manila',
+  'national capital region',
+  'ncr',
+]);
+const MANILA_CITY_BOUNDS = {
+  minLat: 14.54,
+  maxLat: 14.71,
+  minLng: 120.95,
+  maxLng: 121.03,
+};
 
 function haversineMeters(
   a: { latitude: number; longitude: number },
@@ -62,13 +90,13 @@ function getSupabaseClient(req: Request) {
   return createClient(supabaseUrl, supabaseServiceRoleKey);
 }
 
-async function geocodeGoogle(address: string): Promise<{ lat: number; lng: number } | null> {
+async function geocodeGoogle(address: string): Promise<GeocodeResult | null> {
   const apiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
   if (!apiKey) throw new Error('Missing GOOGLE_MAPS_API_KEY');
 
   const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
     address
-  )}&key=${encodeURIComponent(apiKey)}`;
+  )}&components=${encodeURIComponent('country:PH')}&region=PH&key=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url, {
     method: 'GET',
@@ -81,7 +109,15 @@ async function geocodeGoogle(address: string): Promise<{ lat: number; lng: numbe
 
   const json = (await res.json()) as {
     status?: string;
-    results?: Array<{ geometry?: { location?: { lat?: number; lng?: number } } }>;
+    results?: Array<{
+      formatted_address?: string;
+      address_components?: Array<{
+        long_name?: string;
+        short_name?: string;
+        types?: string[];
+      }>;
+      geometry?: { location?: { lat?: number; lng?: number } };
+    }>;
     error_message?: string;
   };
 
@@ -89,12 +125,64 @@ async function geocodeGoogle(address: string): Promise<{ lat: number; lng: numbe
     return null;
   }
 
-  const loc = json.results[0]?.geometry?.location;
+  const first = json.results[0];
+  const loc = first?.geometry?.location;
   const lat = loc?.lat;
   const lng = loc?.lng;
   if (typeof lat !== 'number' || typeof lng !== 'number') return null;
 
-  return { lat, lng };
+  return {
+    lat,
+    lng,
+    formatted_address: String(first?.formatted_address || '').trim(),
+    address_components: Array.isArray(first?.address_components) ? first.address_components : [],
+  };
+}
+
+function normalizeName(value: string | undefined | null) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function getAddressComponentValues(result: GeocodeResult, type: string) {
+  return result.address_components
+    .filter((component) => Array.isArray(component.types) && component.types.includes(type))
+    .flatMap((component) => [component.long_name, component.short_name])
+    .map((value) => normalizeName(value))
+    .filter(Boolean);
+}
+
+function isInsideManilaBounds(lat: number, lng: number) {
+  return (
+    lat >= MANILA_CITY_BOUNDS.minLat &&
+    lat <= MANILA_CITY_BOUNDS.maxLat &&
+    lng >= MANILA_CITY_BOUNDS.minLng &&
+    lng <= MANILA_CITY_BOUNDS.maxLng
+  );
+}
+
+function resolveJurisdiction(result: GeocodeResult) {
+  const localities = [
+    ...getAddressComponentValues(result, 'locality'),
+    ...getAddressComponentValues(result, 'postal_town'),
+    ...getAddressComponentValues(result, 'administrative_area_level_2'),
+  ];
+  const adminRegions = [
+    ...getAddressComponentValues(result, 'administrative_area_level_1'),
+    ...getAddressComponentValues(result, 'administrative_area_level_2'),
+  ];
+
+  const resolvedLocality = localities.find(Boolean) || null;
+  const localityMatchesManila = localities.some((value) => MANILA_CITY_NAMES.has(value));
+  const regionIsMetroManila = adminRegions.some((value) => METRO_MANILA_NAMES.has(value));
+  const withinBounds = isInsideManilaBounds(result.lat, result.lng);
+
+  return {
+    resolvedLocality,
+    withinManilaCity: localityMatchesManila || (withinBounds && (regionIsMetroManila || !resolvedLocality)),
+  };
 }
 
 serve(async (req) => {
@@ -128,17 +216,7 @@ serve(async (req) => {
     const reporterLat = body.reporter_lat;
     const reporterLng = body.reporter_lng;
     const threshold = typeof body.threshold_meters === 'number' ? body.threshold_meters : 200;
-
-    if (typeof reporterLat !== 'number' || typeof reporterLng !== 'number') {
-      const res: VerifyResponse = { ok: false, error: 'Missing reporter coordinates' };
-      return new Response(JSON.stringify(res), {
-        status: 400,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Content-Type': 'application/json',
-        },
-      });
-    }
+    const hasReporterCoords = typeof reporterLat === 'number' && typeof reporterLng === 'number';
 
     let address: string;
 
@@ -188,8 +266,8 @@ serve(async (req) => {
       });
     }
 
-    const coords = await geocodeGoogle(address);
-    if (!coords) {
+    const geocode = await geocodeGoogle(address);
+    if (!geocode) {
       const res: VerifyResponse = { ok: false, error: 'Unable to geocode business address' };
       return new Response(JSON.stringify(res), {
         status: 422,
@@ -213,22 +291,27 @@ serve(async (req) => {
     //   // Ignore persistence failures; proximity result can still be returned.
     // }
 
-    const distance = haversineMeters(
-      { latitude: reporterLat, longitude: reporterLng },
-      { latitude: coords.lat, longitude: coords.lng }
-    );
+    const jurisdiction = resolveJurisdiction(geocode);
 
-    const tag: VerifyResponse & { ok: true }['tag'] =
-      distance <= threshold ? 'Location Verified' : 'Failed Location Verification';
-
-    const res: VerifyResponse = {
+    const res: Extract<VerifyResponse, { ok: true }> = {
       ok: true,
-      tag,
-      distance_meters: distance,
-      threshold_meters: threshold,
-      business_coords: coords,
+      business_coords: { lat: geocode.lat, lng: geocode.lng },
       business_address: address,
+      resolved_address: geocode.formatted_address || address,
+      resolved_locality: jurisdiction.resolvedLocality,
+      within_manila_city: jurisdiction.withinManilaCity,
     };
+
+    if (hasReporterCoords) {
+      const distance = haversineMeters(
+        { latitude: reporterLat, longitude: reporterLng },
+        { latitude: geocode.lat, longitude: geocode.lng }
+      );
+
+      res.tag = distance <= threshold ? 'Location Verified' : 'Failed Location Verification';
+      res.distance_meters = distance;
+      res.threshold_meters = threshold;
+    }
 
     return new Response(JSON.stringify(res), {
       status: 200,

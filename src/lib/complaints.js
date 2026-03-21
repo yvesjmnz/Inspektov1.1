@@ -1,5 +1,23 @@
 import { supabase } from './supabase';
 
+const MANILA_CITY_BOUNDS = {
+  minLat: 14.54,
+  maxLat: 14.71,
+  minLng: 120.95,
+  maxLng: 121.03,
+};
+
+function isInsideManilaBounds(lat, lng) {
+  return (
+    typeof lat === 'number' &&
+    typeof lng === 'number' &&
+    lat >= MANILA_CITY_BOUNDS.minLat &&
+    lat <= MANILA_CITY_BOUNDS.maxLat &&
+    lng >= MANILA_CITY_BOUNDS.minLng &&
+    lng <= MANILA_CITY_BOUNDS.maxLng
+  );
+}
+
 export async function getBusinesses(searchQuery = '') {
   let query = supabase.from('businesses').select('*');
 
@@ -34,6 +52,37 @@ export async function submitComplaint(complaintData) {
     .single();
 
   if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function resolveBusinessJurisdiction(address) {
+  const normalizedAddress = String(address || '').trim();
+
+  const { data, error } = await supabase.functions.invoke('verify-business-proximity', {
+    body: {
+      business_address: normalizedAddress,
+      // Sent for backward compatibility with older deployed versions of the edge function
+      // that still require reporter coordinates before geocoding.
+      reporter_lat: 14.5896,
+      reporter_lng: 120.9747,
+    },
+  });
+
+  if (error) throw new Error(error.message || 'Failed to validate business address.');
+  if (!data?.ok) throw new Error(data?.error || 'Failed to validate business address.');
+
+  if (typeof data.within_manila_city !== 'boolean') {
+    const lat = data?.business_coords?.lat;
+    const lng = data?.business_coords?.lng;
+
+    return {
+      ...data,
+      resolved_address: String(data?.resolved_address || data?.business_address || normalizedAddress),
+      resolved_locality: data?.resolved_locality || null,
+      within_manila_city: isInsideManilaBounds(lat, lng),
+    };
+  }
+
   return data;
 }
 
