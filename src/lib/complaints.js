@@ -117,7 +117,7 @@ export async function getComplaintTracking(complaintId) {
     const { data: reports, error: repErr } = await supabase
       .from('inspection_reports')
       .select(
-        'id, mission_order_id, status, created_at, completed_at, updated_at, generated_docx_url, generated_docx_created_at, business_permit_status, cctv_status, signage_status, cctv_count, no_of_employees'
+        'id, mission_order_id, status, created_at, started_at, completed_at, updated_at, generated_docx_url, generated_docx_created_at, business_permit_status, cctv_status, signage_status, cctv_count, no_of_employees, inspection_comments'
       )
       .in('mission_order_id', moIds)
       .order('created_at', { ascending: true });
