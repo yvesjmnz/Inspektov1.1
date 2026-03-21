@@ -4,8 +4,15 @@ import NotificationBell from '../../../components/NotificationBell';
 import { notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import HeadInspectorReports from './HeadInspectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
+import HistorySearchBar from '../components/HistorySearchBar';
 import './Dashboard.css';
 import { getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
+
+const REVISION_FILTER_OPTIONS = [
+  { key: 'businessName', label: 'Business Name' },
+  { key: 'address', label: 'Address' },
+  { key: 'inspectorName', label: 'Inspectors' },
+];
 
 // Helper to extract selected subcategory labels from complaint tags
 function listSelectedSubcategories(tags) {
@@ -81,6 +88,12 @@ export default function DashboardHeadInspector() {
 
   const [complaints, setComplaints] = useState([]);
   const [search, setSearch] = useState('');
+  const [revisionsSearch, setRevisionsSearch] = useState('');
+  const [revisionsFilters, setRevisionsFilters] = useState({
+    businessName: '',
+    address: '',
+    inspectorName: '',
+  });
 
   // Date range picker state (same UX as Director)
   const [datePopoverOpen, setDatePopoverOpen] = useState(false);
@@ -417,18 +430,7 @@ export default function DashboardHeadInspector() {
         };
       });
 
-      const searchVal = search.trim().toLowerCase();
-      const filtered = !searchVal
-        ? merged
-        : merged.filter((r) => {
-            const hay = [r.business_name, r.business_address, r.reporter_email, r.complaint_id, r.mission_order_id]
-              .filter(Boolean)
-              .join(' ')
-              .toLowerCase();
-            return hay.includes(searchVal);
-          });
-
-      setComplaints(filtered);
+      setComplaints(merged);
     } catch (e) {
       setError(e?.message || 'Failed to load mission orders.');
       setComplaints([]);
@@ -805,17 +807,29 @@ export default function DashboardHeadInspector() {
     });
 
     // 2) Apply search filter
-    const q = search.trim().toLowerCase();
+    const q = tab === 'revisions' ? revisionsSearch.trim().toLowerCase() : '';
+    const hasRevisionFieldFilter = revisionsFilters.businessName || revisionsFilters.address || revisionsFilters.inspectorName;
     if (!q) return byTab;
 
     return byTab.filter((c) => {
-      const hay = [c.business_name, c.business_address, c.reporter_email, c.complaint_id, c.mission_order_id]
+      const businessName = String(c.business_name || '').toLowerCase();
+      const address = String(c.business_address || '').toLowerCase();
+      const reporterEmail = String(c.reporter_email || '').toLowerCase();
+      const complaintId = String(c.complaint_id || '').toLowerCase();
+      const missionOrderId = String(c.mission_order_id || '').toLowerCase();
+      const inspectorNames = (c.inspector_names || []).join(' ').toLowerCase();
+
+      if (tab === 'revisions' && hasRevisionFieldFilter) {
+        if (revisionsFilters.businessName) return businessName.includes(q);
+        if (revisionsFilters.address) return address.includes(q);
+        if (revisionsFilters.inspectorName) return inspectorNames.includes(q);
+      }
+
+      return [businessName, address, reporterEmail, complaintId, missionOrderId, inspectorNames]
         .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(q);
+        .some((value) => value.includes(q));
     });
-  }, [complaints, search, tab]);
+  }, [complaints, revisionsFilters.address, revisionsFilters.businessName, revisionsFilters.inspectorName, revisionsSearch, tab]);
 
   // Group approved complaints by day for easier review.
   const complaintsByDay = useMemo(() => {
@@ -1156,6 +1170,19 @@ export default function DashboardHeadInspector() {
                 </div>
               </div>
 
+              {tab === 'revisions' ? (
+                <HistorySearchBar
+                  placeholder="Search mission orders..."
+                  searchValue={revisionsSearch}
+                  onSearchChange={setRevisionsSearch}
+                  filters={revisionsFilters}
+                  onFiltersChange={setRevisionsFilters}
+                  filterOptions={REVISION_FILTER_OPTIONS}
+                  appliedRange={appliedRange}
+                  onAppliedRangeChange={setAppliedRange}
+                />
+              ) : null}
+
               
               {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
               {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
@@ -1349,8 +1376,9 @@ export default function DashboardHeadInspector() {
                   <div style={{ order: 2, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
                     <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
                       <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Rejected</h3>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#ef4444' }}>
-                        {rejectedMissionOrders.length} items
+                      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#ef4444', flexShrink: 0 }}></div>
+                        <span>{rejectedMissionOrders.length} Rejected Mission Order{rejectedMissionOrders.length !== 1 ? 's' : ''}</span>
                       </div>
                     </div>
                     <div
@@ -1526,8 +1554,9 @@ export default function DashboardHeadInspector() {
                   <div style={{ order: 1, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
                     <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
                       <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Pre-Approved</h3>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#10b981' }}>
-                        {preApprovedMissionOrders.length} items
+                      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#10b981', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}></div>
+                        <span>{preApprovedMissionOrders.length} Pre-Approved Mission Order{preApprovedMissionOrders.length !== 1 ? 's' : ''}</span>
                       </div>
                     </div>
                     <div
