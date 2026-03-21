@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
 import { getComplaintById, getComplaintTracking } from '../../../lib/complaints';
+import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import './TrackComplaint.css';
 
 function formatStatus(status) {
@@ -32,6 +33,48 @@ function formatDateTime(date) {
   });
 
   return `${datePart} | ${timePart}`;
+}
+
+function formatDurationBetweenLegacy(start, end = new Date()) {
+  if (!start || !end) return 'â€”';
+
+  const startDate = start instanceof Date ? start : new Date(start);
+  const endDate = end instanceof Date ? end : new Date(end);
+  const ms = endDate.getTime() - startDate.getTime();
+
+  if (!Number.isFinite(ms) || ms < 0) return 'â€”';
+
+  const totalMinutes = Math.floor(ms / 60000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  return parts.join(' ');
+}
+
+function formatDurationBetween(start, end) {
+  if (!start || !end) return '—';
+
+  const startDate = start instanceof Date ? start : new Date(start);
+  const endDate = end instanceof Date ? end : new Date(end);
+  const ms = endDate.getTime() - startDate.getTime();
+
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+
+  const totalMinutes = Math.floor(ms / 60000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  return parts.join(' ');
 }
 
 function statusBadgeClass(status) {
@@ -201,12 +244,12 @@ export default function TrackComplaint() {
                 const decisionDate = isDecided ? (approvedDate || declinedDate || reviewDate) : null;
 
                 // Inspection step is driven by inspection_reports presence and status
-                const hasAnyInspection = inspections.length > 0;
-                const latestInspection = hasAnyInspection ? inspections[inspections.length - 1] : null;
-                const inspectionStatus = latestInspection ? String(latestInspection.status || '').toLowerCase() : '';
+                const latestInspection = pickPreferredInspectionReport(inspections);
+                const hasAnyInspection = Boolean(latestInspection);
+                const inspectionStatus = normalizeInspectionReportStatus(latestInspection);
                 const inspectionCompleted = inspectionStatus === 'completed';
-                const inspectionInProgress = ['in_progress', 'in progress', 'ongoing', 'processing'].includes(inspectionStatus);
-                const inspectionStartedAt = latestInspection?.created_at ? new Date(latestInspection.created_at) : null;
+                const inspectionInProgress = inspectionStatus === 'in progress';
+                const inspectionStartedAt = latestInspection?.started_at ? new Date(latestInspection.started_at) : null;
                 const inspectionCompletedAt = latestInspection?.completed_at ? new Date(latestInspection.completed_at) : null;
 
                 // Document Processing (MO) timestamps
@@ -244,6 +287,46 @@ export default function TrackComplaint() {
                   return parts.join(' ');
                 })();
 
+                const inspectionStatusLabel = inspectionCompleted
+                  ? 'Complete'
+                  : inspectionInProgress
+                    ? 'In Progress'
+                    : hasAnyInspection || moComplete
+                      ? 'Pending Inspection'
+                      : 'â€”';
+
+                const inspectionStatusClass = inspectionCompleted
+                  ? 'status-complete'
+                  : inspectionInProgress
+                    ? 'status-inprogress'
+                    : hasAnyInspection || moComplete
+                      ? 'status-pending-inspection'
+                    : '';
+
+                const inspectionResolutionTime = inspectionInProgress
+                  ? formatDurationBetween(inspectionStartedAt, new Date())
+                  : inspectionCompleted
+                    ? formatDurationBetween(inspectionStartedAt, inspectionCompletedAt)
+                    : 'â€”';
+
+                const inspectionResolutionTimeDisplay = inspectionCompleted
+                  ? formatDurationBetween(inspectionStartedAt, inspectionCompletedAt)
+                  : '';
+
+                const inspectionStepReached = hasAnyInspection || moComplete;
+
+                const inspectionStatusText = inspectionCompleted
+                  ? 'Complete'
+                  : inspectionInProgress
+                    ? 'In Progress'
+                    : inspectionStepReached
+                      ? 'Pending Inspection'
+                      : '—';
+
+                const inspectionResolutionTimeText = inspectionCompleted
+                  ? formatDurationBetween(inspectionStartedAt, inspectionCompletedAt)
+                  : '—';
+
                 // Resolution step rules:
                 // - If declined: resolution is case closed at decision date.
                 // - Else if inspection completed: resolution by inspection completion.
@@ -275,25 +358,19 @@ export default function TrackComplaint() {
                     ? `${cctvCountNum} CCTV${cctvCountNum === 1 ? '' : 's'}`
                     : null;
 
-                const permitSummary = formatFindingStatus(latestInspection?.business_permit_status);
-                const cctvSummaryBase = formatFindingStatus(latestInspection?.cctv_status);
-                const cctvSummary =
-                  cctvSummaryBase === 'Compliant' && cctvCountDisplay ? `Compliant (${cctvCountDisplay})` : cctvSummaryBase;
-                const signageSummary = formatFindingStatus(latestInspection?.signage_status);
+                const inspectionRemarks = String(latestInspection?.inspection_comments || '').trim();
 
-                // We mark tracking complete when the inspector downloads the slip.
-                // That action updates mission_orders.status = 'complete' (best-effort).
+                // Resolution can now show the inspection remarks as soon as the inspection is completed.
+                // We still also treat completed mission orders as resolved for downstream tracking state.
                 const missionOrderIsComplete = (missionOrders || []).some((m) => {
                   const ms = String(m?.status || '').toLowerCase();
                   return ms === 'complete' || ms === 'completed' || ms === 'done';
                 });
 
-                const showFindingsSummary =
-                  inspectionCompleted &&
-                  (complaintMarkedComplete || missionOrderIsComplete) &&
-                  hasGeneratedInspectionSlipDocx;
+                const showFindingsSummary = inspectionCompleted;
 
-                const effectiveIsResolved = isDeclined || complaintMarkedComplete || missionOrderIsComplete;
+                const effectiveIsResolved = isDeclined || inspectionCompleted;
+                const resolutionStepCompleted = isDeclined || inspectionCompleted;
 
                 // Utility to render date nicely
                 const fmt = (d) => formatDateTime(d);
@@ -394,39 +471,41 @@ export default function TrackComplaint() {
                               <div className="vtl-title">Inspection</div>
                               <div className="vtl-desc">An inspection will be conducted to verify this complaint</div>
                               <>
-                                <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className="vtl-detail-value">{inspectionCompleted ? 'Complete' : ((inspectionInProgress || moComplete) ? 'In-Progress' : '—')}</span></div>
-                                <div className="vtl-detail"><span className="vtl-detail-label">Started:</span> <span className="vtl-detail-value">{fmt(inspectionStartedAt)}</span></div>
-                                <div className="vtl-detail"><span className="vtl-detail-label">Completed:</span> <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${inspectionStatusClass}`}>{inspectionStatusText}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Resolution Time:</span> <span className="vtl-detail-value">{inspectionResolutionTimeText}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span></div>
                               </>
                             </div>
                           </div>
 
                           {/* Step 5 - Resolution */}
-                          <div className={`vtl-step ${effectiveIsResolved ? 'active' : 'inactive'}`}>
+                          <div className={`vtl-step ${resolutionStepCompleted ? 'completed' : 'inactive'}`}>
                             <div className="vtl-marker">{effectiveIsResolved ? '✓' : 5}</div>
                             <div className="vtl-content">
                               <div className="vtl-title">Resolution</div>
                               <div className="vtl-desc">
                                 {showFindingsSummary
-                                  ? 'Business has been inspected. Findings summary (no internal assessments).'
-                                  : 'Summary of findings will appear after the inspection slip is downloaded.'}
+                                  ? 'Inspection completed. Summary from the inspector remarks is shown below.'
+                                  : 'Summary of findings will appear after the inspection is completed.'}
                               </div>
                               {showFindingsSummary ? (
-                                <div style={{ marginTop: 12 }}>
-                                  <div className="vtl-detail">
-                                    <span className="vtl-detail-label">Inspected on:</span>{' '}
-                                    <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span>
-                                  </div>
-                                  <div style={{ marginTop: 10, fontWeight: 900, color: '#0f172a' }}>
-                                    <div className="vtl-desc" style={{ fontWeight: 800, margin: 0 }}>Findings summary</div>
-                                    <div style={{ marginTop: 6 }}>
-                                      <span style={{ fontWeight: 900 }}>Business Permit:</span> <span style={{ fontWeight: 800 }}>{permitSummary}</span>
-                                    </div>
-                                    <div style={{ marginTop: 6 }}>
-                                      <span style={{ fontWeight: 900 }}>With CCTV:</span> <span style={{ fontWeight: 800 }}>{cctvSummary}</span>
-                                    </div>
-                                    <div style={{ marginTop: 6 }}>
-                                      <span style={{ fontWeight: 900 }}>2sqm Signage:</span> <span style={{ fontWeight: 800 }}>{signageSummary}</span>
+                                <div style={{ marginTop: 6 }}>
+                                  <div style={{ marginTop: 2 }}>
+                                    <div className="vtl-desc" style={{ fontWeight: 800, margin: 0 }}>Inspector remarks</div>
+                                    <div
+                                      style={{
+                                        marginTop: 8,
+                                        padding: 12,
+                                        background: '#f8fafc',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: 12,
+                                        color: '#0f172a',
+                                        fontSize: 14,
+                                        lineHeight: 1.6,
+                                        whiteSpace: 'pre-wrap',
+                                      }}
+                                    >
+                                      {inspectionRemarks || 'No remarks were provided in the inspection slip.'}
                                     </div>
                                   </div>
                                 </div>

@@ -1099,6 +1099,7 @@
 .vtl-detail-value.status-declined { color: #b91c1c; font-weight: 800; }
 
 /* Tracking status colors */
+.vtl-detail-value.status-pending-inspection { color: #a16207; font-weight: 800; }
 .vtl-detail-value.status-inprogress { color: #854d0e; font-weight: 800; } /* yellow-ish */
 .vtl-detail-value.status-complete { color: #166534; font-weight: 800; }   /* green */
 
