@@ -41,7 +41,7 @@ begin
 
   if found then
     if v_report.inspector_id <> v_user_id then
-      raise exception 'This mission order already has an inspection slip started by another assigned inspector.';
+      raise exception 'This mission order already has an inspection slip owned by another assigned inspector.';
     end if;
 
     if lower(coalesce(v_report.status, '')) not in ('completed', 'complete', 'in progress', 'in_progress') then
