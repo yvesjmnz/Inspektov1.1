@@ -17,6 +17,107 @@ const params = new URLSearchParams(window.location.search);
 return params.get('inspectionReportId') || params.get('reportId') || params.get('id');
 }
 
+function formatDateHuman(value) {
+  if (!value) return '—';
+  const s = String(value);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+const GUIDED_CATEGORY_LABELS = [
+  'Business Permit & Licensing Issues',
+  'Alcohol & Tobacco Violations',
+  'Sanitation & Environmental Violations',
+  'Health, Hygiene, & Nutrition',
+  'Public Security Compliance',
+];
+
+const GUIDED_SUBCAT_BY_CATEGORY = new Map([
+  ['Business Permit & Licensing Issues', [
+    'Operating Without a Valid Business Permit',
+    'Missing Commerical Space Clearance',
+    'Unregistered or Untaxed Employees',
+  ]],
+  ['Alcohol & Tobacco Violations', [
+    'Selling Alcohol Near Schools',
+    'Selling Alcohol to Minors',
+    'Selling Cigarettes to Minors',
+  ]],
+  ['Sanitation & Environmental Violations', [
+    'Improper Waste Disposal or Segregation',
+    'Illegal Disposing of Cooking Oil',
+    'Unpaid Garbage Tax',
+  ]],
+  ['Health, Hygiene, & Nutrition', [
+    'Poor Food-Handler Hygiene',
+    'Missing Menu Nutrition Labels',
+  ]],
+  ['Public Security Compliance', [
+    'CCTV System Non-Compliance',
+  ]],
+]);
+
+function groupComplaintCategoriesFromTags(tags) {
+  const result = [];
+  if (!Array.isArray(tags) || tags.length === 0) return result;
+
+  const selectedSubs = tags
+    .map((t) => String(t || ''))
+    .filter((t) => /^Violation:\s*/i.test(t))
+    .map((t) => t.replace(/^Violation:\s*/i, '').trim());
+
+  if (selectedSubs.length === 0) return result;
+
+  const subToCat = new Map();
+  for (const cat of GUIDED_CATEGORY_LABELS) {
+    const subs = GUIDED_SUBCAT_BY_CATEGORY.get(cat) || [];
+    subs.forEach((sub) => subToCat.set(sub, cat));
+  }
+
+  const byCat = new Map();
+  for (const sub of selectedSubs) {
+    const cat = subToCat.get(sub);
+    if (!cat) continue;
+    if (!byCat.has(cat)) byCat.set(cat, new Set());
+    byCat.get(cat).add(sub);
+  }
+
+  for (const [category, subs] of byCat) {
+    result.push({ category, subs: Array.from(subs) });
+  }
+
+  return result;
+}
+
+function OverviewField({ label, children, fullWidth = false }) {
+  return (
+    <div
+      className="is-field"
+      style={{
+        gridColumn: fullWidth ? '1 / -1' : undefined,
+        border: '1px solid #dbe5f3',
+        borderRadius: 16,
+        background: '#fbfdff',
+        padding: '14px 16px',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)',
+      }}
+    >
+      <label>{label}</label>
+      <div style={{ fontWeight: 900, color: '#0f172a', marginTop: 8, lineHeight: 1.45, wordBreak: 'break-word' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function normalizeInspectionReportStatus(report) {
+  const s = String(report?.status || '').toLowerCase().trim();
+  if (s === 'completed' || s === 'complete') return 'completed';
+  if ((s === 'in progress' || s === 'in_progress') && report?.started_at) return 'in progress';
+  return 'pending inspection';
+}
+
 export default function InspectionSlipCreate() {
   const missionOrderId = useMemo(() => getMissionOrderIdFromQuery(), []);
   const inspectionReportIdFromQuery = useMemo(() => getInspectionReportIdFromQuery(), []);
@@ -32,11 +133,14 @@ export default function InspectionSlipCreate() {
     uploadedAt: null,
     uploadedBy: null,
   });
+  const [assignedInspectors, setAssignedInspectors] = useState([]);
 
   const [inspectionReportId, setInspectionReportId] = useState(null);
+  const [currentInspectorId, setCurrentInspectorId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
   const [completionKnown, setCompletionKnown] = useState(false);
+  const [inspectionStarted, setInspectionStarted] = useState(false);
 
   const [businessSearch, setBusinessSearch] = useState('');
   const [businessResult, setBusinessResult] = useState(null);
@@ -76,7 +180,7 @@ export default function InspectionSlipCreate() {
   const [autoFillMessage, setAutoFillMessage] = useState('');
 
   // Tabs: order required by UX
-  const [activeTab, setActiveTab] = useState('inspection_details'); // 'inspection_details' | 'inspection' | 'summary'
+  const [activeTab, setActiveTab] = useState('inspection_details'); // 'inspection_details' | 'inspection'
 
   // Businesses can have multiple line(s) of business. We store it as an editable list.
   const [lineOfBusinessList, setLineOfBusinessList] = useState(['']);
@@ -115,6 +219,7 @@ export default function InspectionSlipCreate() {
   // Camera capture for evidence photos (Inspection Slip)
   const [evidencePhotos, setEvidencePhotos] = useState([]);
   const [activePhotoUrl, setActivePhotoUrl] = useState('');
+  const [showSoftCopyFullView, setShowSoftCopyFullView] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const [cameraBusy, setCameraBusy] = useState(false);
@@ -440,6 +545,7 @@ export default function InspectionSlipCreate() {
         if (userError) throw userError;
         const userId = userData?.user?.id;
         if (!userId) throw new Error('Not authenticated. Please login again.');
+        setCurrentInspectorId(userId);
 
         const { data: mo, error: moError } = await supabase
           .from('mission_orders')
@@ -480,6 +586,34 @@ export default function InspectionSlipCreate() {
           uploadedBy: mo?.secretary_signed_attachment_uploaded_by || null,
         });
 
+        const { data: allAssignmentRows, error: allAssignmentError } = await supabase
+          .from('mission_order_assignments')
+          .select('inspector_id, assigned_at')
+          .eq('mission_order_id', missionOrderId)
+          .order('assigned_at', { ascending: true });
+
+        if (allAssignmentError) throw allAssignmentError;
+
+        const inspectorIds = Array.from(new Set((allAssignmentRows || []).map((row) => row.inspector_id).filter(Boolean)));
+        if (inspectorIds.length) {
+          const { data: profiles, error: profilesError } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', inspectorIds);
+
+          if (profilesError) throw profilesError;
+
+          const nameById = new Map((profiles || []).map((profile) => [profile.id, profile.full_name]));
+          setAssignedInspectors(
+            (allAssignmentRows || [])
+              .map((row) => nameById.get(row.inspector_id))
+              .filter(Boolean)
+              .filter((value, index, arr) => arr.indexOf(value) === index)
+          );
+        } else {
+          setAssignedInspectors([]);
+        }
+
         // If the URL explicitly references a specific inspection report (e.g., from history),
         // ALWAYS load that exact report and NEVER create a new draft row.
         if (inspectionReportIdFromQuery) {
@@ -487,6 +621,7 @@ export default function InspectionSlipCreate() {
             .from('inspection_reports')
             .select('*')
             .eq('id', inspectionReportIdFromQuery)
+            .eq('inspector_id', userId)
             .single();
 
           if (explicitErr) throw explicitErr;
@@ -565,14 +700,17 @@ export default function InspectionSlipCreate() {
             }
           }
 
+          const explicitWorkflowStatus = normalizeInspectionReportStatus(explicitReport);
+
           // Completed reports are view-only
-          if (explicitReport.status && String(explicitReport.status).toLowerCase() === 'completed') {
+          if (explicitWorkflowStatus === 'completed') {
             setIsCompleted(true);
-            setActiveTab('summary');
+            setActiveTab('inspection_details');
           } else {
             setIsCompleted(false);
           }
-          setCompletionKnown(true);
+          setCompletionKnown(explicitWorkflowStatus !== 'pending inspection');
+          setInspectionStarted(explicitWorkflowStatus === 'in progress' || explicitWorkflowStatus === 'completed');
 
           await loadComplaintRecord(mo?.complaint_id, {
             shouldHydrateComplaintDirectly: false,
@@ -703,35 +841,24 @@ export default function InspectionSlipCreate() {
             }
           }
 
-          if (existingReport.status && String(existingReport.status).toLowerCase() === 'completed') {
+          const existingWorkflowStatus = normalizeInspectionReportStatus(existingReport);
+
+          if (existingWorkflowStatus === 'completed') {
             setIsCompleted(true);
             setToast(
-              'This inspection report is already completed. Editing is disabled, but you can still view details and summary.'
+              'This inspection report is already completed. Editing is disabled, but you can still view the details.'
             );
-            setActiveTab('summary');
+            setActiveTab('inspection_details');
           } else {
             setIsCompleted(false);
           }
-          setCompletionKnown(true);
+          setCompletionKnown(existingWorkflowStatus !== 'pending inspection');
+          setInspectionStarted(existingWorkflowStatus === 'in progress' || existingWorkflowStatus === 'completed');
         } else {
-          const { data: createdReport, error: createErr } = await supabase
-            .from('inspection_reports')
-            .insert([
-              {
-                mission_order_id: missionOrderId,
-                inspector_id: userId,
-                // When an inspector opens the slip, they are starting the inspection.
-                status: 'in progress',
-                started_at: new Date().toISOString(),
-              },
-            ])
-            .select('id')
-            .single();
-
-          if (createErr) throw createErr;
-          setInspectionReportId(createdReport.id);
+          setInspectionReportId(null);
           setIsCompleted(false);
-          setCompletionKnown(true);
+          setCompletionKnown(false);
+          setInspectionStarted(false);
         }
 
         // Load linked complaint (if any).
@@ -1074,16 +1201,16 @@ export default function InspectionSlipCreate() {
     const s = String(status || '').toLowerCase();
     let bg = '#e2e8f0';
     let fg = '#0f172a';
-    if (['completed', 'approved'].includes(s)) {
+    if (['completed', 'complete', 'approved'].includes(s)) {
       bg = '#dcfce7';
       fg = '#166534';
     } else if (['cancelled', 'declined', 'rejected', 'invalid'].includes(s)) {
       bg = '#fee2e2';
       fg = '#991b1b';
-    } else if (['issued', 'submitted', 'pending', 'new'].includes(s)) {
+    } else if (['issued', 'submitted', 'pending', 'new', 'pending inspection', 'pending_inspection'].includes(s)) {
       bg = '#fef9c3';
       fg = '#854d0e';
-    } else if (['on hold', 'on_hold', 'hold'].includes(s)) {
+    } else if (['on hold', 'on_hold', 'hold', 'in progress', 'in_progress'].includes(s)) {
       bg = '#dbeafe';
       fg = '#1e40af';
     }
@@ -1108,6 +1235,13 @@ export default function InspectionSlipCreate() {
     if (!address) return null;
     return `https://maps.google.com/maps?q=${encodeURIComponent(address)}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
   }, [previewAddress]);
+
+  const displayBusinessName = complaint?.business_name || ownerDetails.businessName || '—';
+  const displayBusinessAddress = previewAddress || businessDetails.address || '—';
+  const complaintViolationGroups = useMemo(() => groupComplaintCategoriesFromTags(complaint?.tags || []), [complaint?.tags]);
+  const inspectionStatusValue = isCompleted ? 'completed' : inspectionStarted ? 'in progress' : 'pending inspection';
+  const inspectionStatusLabel = isCompleted ? 'Completed' : inspectionStarted ? 'In Progress' : 'Pending Inspection';
+  const signedAttachmentIsPdf = /\.pdf(\?|#|$)/i.test(String(signedAttachmentUrl || ''));
 
   const INSPECTION_BUCKET = 'inspection';
 
@@ -1443,7 +1577,7 @@ export default function InspectionSlipCreate() {
       setToast('Inspection report marked as Completed.');
       setIsCompleted(true);
       setCompletionKnown(true);
-      setActiveTab('summary');
+      setActiveTab('inspection_details');
     } catch (e) {
       setError(e?.message || 'Failed to submit inspection report.');
     } finally {
@@ -1477,6 +1611,105 @@ export default function InspectionSlipCreate() {
       setError(e?.message || 'Failed to validate business permit.');
     } finally {
       setCheckingBusiness(false);
+    }
+  };
+
+  const handleStartInspection = async () => {
+    if (isCompleted) {
+      setActiveTab('inspection_details');
+      return;
+    }
+
+    if (inspectionStarted && inspectionReportId) {
+      setActiveTab('inspection');
+      return;
+    }
+
+    if (!missionOrderId) {
+      setError('Missing mission order. Please reopen the inspection slip.');
+      return;
+    }
+
+    setError('');
+    setSaving(true);
+
+    try {
+      let inspectorId = currentInspectorId;
+      if (!inspectorId) {
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError) throw userError;
+        inspectorId = userData?.user?.id || null;
+        if (inspectorId) setCurrentInspectorId(inspectorId);
+      }
+
+      if (!inspectorId) {
+        throw new Error('Not authenticated. Please login again.');
+      }
+
+      const { data: assignmentRows, error: assignmentErr } = await supabase
+        .from('mission_order_assignments')
+        .select('mission_order_id')
+        .eq('mission_order_id', missionOrderId)
+        .eq('inspector_id', inspectorId)
+        .limit(1);
+
+      if (assignmentErr) throw assignmentErr;
+      if (!assignmentRows || assignmentRows.length === 0) {
+        throw new Error('You are not assigned to this mission order.');
+      }
+
+      const { data: existingReport, error: existingErr } = await supabase
+        .from('inspection_reports')
+        .select('id, status, started_at, created_at')
+        .eq('mission_order_id', missionOrderId)
+        .eq('inspector_id', inspectorId)
+        .neq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingErr) throw existingErr;
+
+      let activeReportId = existingReport?.id || null;
+      if (activeReportId) {
+        const existingStatus = String(existingReport?.status || '').toLowerCase().trim();
+        if (existingStatus !== 'in progress' && existingStatus !== 'in_progress') {
+          const { error: updateErr } = await supabase
+            .from('inspection_reports')
+            .update({
+              status: 'in progress',
+              started_at: existingReport?.started_at || new Date().toISOString(),
+            })
+            .eq('id', activeReportId);
+
+          if (updateErr) throw updateErr;
+        }
+      } else {
+        const { data: createdReport, error: createErr } = await supabase
+          .from('inspection_reports')
+          .insert([
+            {
+              mission_order_id: missionOrderId,
+              inspector_id: inspectorId,
+              status: 'in progress',
+              started_at: new Date().toISOString(),
+            },
+          ])
+          .select('id')
+          .single();
+
+        if (createErr) throw createErr;
+        activeReportId = createdReport.id;
+      }
+
+      setInspectionReportId(activeReportId);
+      setCompletionKnown(true);
+      setInspectionStarted(true);
+      setActiveTab('inspection');
+    } catch (e) {
+      setError(e?.message || 'Failed to start inspection.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -1566,71 +1799,120 @@ export default function InspectionSlipCreate() {
         </div>
       ) : null}
 
+      {showSoftCopyFullView && signedAttachmentUrl ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Soft-copy mission order full view"
+          onClick={() => setShowSoftCopyFullView(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setShowSoftCopyFullView(false);
+          }}
+          tabIndex={-1}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2,6,23,0.78)',
+            zIndex: 9998,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 18,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(1100px, 100%)',
+              height: 'min(92vh, 100%)',
+              background: '#2f2f2f',
+              borderRadius: 16,
+              boxShadow: '0 18px 46px rgba(0,0,0,0.35)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '14px 16px',
+                borderBottom: '1px solid rgba(255,255,255,0.12)',
+                background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+              }}
+          >
+            <div>
+              <div style={{ fontWeight: 900, color: '#ffffff' }}>Soft-Copy Mission Order</div>
+            </div>
+            <button
+              type="button"
+              className="mo-btn mo-btn-secondary"
+              onClick={() => setShowSoftCopyFullView(false)}
+              style={{
+                background: 'rgba(255,255,255,0.14)',
+                color: '#ffffff',
+                border: '1px solid rgba(255,255,255,0.24)',
+                boxShadow: 'none',
+              }}
+            >
+              Close
+            </button>
+            </div>
+
+            <div style={{ flex: 1, background: signedAttachmentIsPdf ? '#2f2f2f' : '#0b1220' }}>
+              {signedAttachmentIsPdf ? (
+                <iframe
+                  title="Soft-Copy Mission Order Full View"
+                  src={signedAttachmentUrl}
+                  style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
+                />
+              ) : (
+                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+                  <img
+                    src={signedAttachmentUrl}
+                    alt="Soft-Copy Mission Order Full View"
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain',
+                      display: 'block',
+                      borderRadius: 10,
+                      background: '#0b1220',
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <Header />
       <main className="mo-main">
-        <section className="mo-card">
+        <section className="mo-card is-portrait-shell">
           <div className="mo-header">
             <div className="mo-title-wrap">
               <div className="mo-label">Inspection Slip</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ fontWeight: 900, fontSize: 16, color: '#0f172a' }}>Create (Draft)</div>
-                <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>
-                  Mission Order: {missionOrder?.title || (missionOrderId ? missionOrderId : '—')}
-                </div>
-              </div>
             </div>
 
             <div className="mo-actions">
-              {completionKnown ? (
-                <span
-                  className="mo-link"
-                  aria-disabled="true"
-                  title="Back is disabled once the inspection has started to protect data integrity."
-                  style={{
-                    opacity: 0.55,
-                    cursor: 'not-allowed',
-                    pointerEvents: 'none',
-                    userSelect: 'none',
-                  }}
-                >
-                  Back
-                </span>
-              ) : (
-                <a className="mo-link" href="/dashboard/inspector">
-                  Back
-                </a>
-              )}
-              <button
-                type="button"
-                className="mo-btn mo-btn-secondary"
-                onClick={() => window.print()}
-                style={{ marginLeft: 8 }}
-              >
-                Print
-              </button>
+              <a className="mo-link" href="/dashboard/inspector">
+                Back
+              </a>
               {completionKnown && !isCompleted ? (
-                <>
-                  <button
-                    type="button"
-                    className="mo-btn mo-btn-secondary"
-                    onClick={handleSaveReport}
-                    disabled={saving || loading || !inspectionReportId}
-                    style={{ marginLeft: 8 }}
-                    title="Save draft"
-                  >
-                    {saving ? 'Saving…' : 'Save'}
-                  </button>
-                  <button
-                    type="button"
-                    className="mo-btn mo-btn-primary"
-                    onClick={handleSubmitReport}
-                    disabled={saving || loading || !inspectionReportId}
-                    style={{ marginLeft: 8 }}
-                    title="Submit as Completed"
-                  >
-                    {saving ? 'Submitting…' : 'Submit'}
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="mo-btn mo-btn-primary"
+                  onClick={handleSubmitReport}
+                  disabled={saving || loading || !inspectionReportId}
+                  style={{ marginLeft: 8 }}
+                  title="Submit as Completed"
+                >
+                  {saving ? 'Submitting…' : 'Submit'}
+                </button>
               ) : null}
             </div>
           </div>
@@ -1646,51 +1928,40 @@ export default function InspectionSlipCreate() {
             <div className="mo-meta">Cannot create inspection slip.</div>
           ) : (
             <div style={{ display: 'grid', gap: 14, marginTop: 14 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <div className="is-seg" role="tablist" aria-label="Inspection slip tabs">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === 'inspection_details'}
-                    className={activeTab === 'inspection_details' ? 'active' : ''}
-                    onClick={() => setActiveTab('inspection_details')}
-                  >
-                    Inspection Details
-                  </button>
-                  {!isCompleted ? (
+              {inspectionStarted || isCompleted ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div className="is-seg" role="tablist" aria-label="Inspection slip tabs">
                     <button
                       type="button"
                       role="tab"
-                      aria-selected={activeTab === 'inspection'}
-                      className={activeTab === 'inspection' ? 'active' : ''}
-                      onClick={() => setActiveTab('inspection')}
+                      aria-selected={activeTab === 'inspection_details'}
+                      className={activeTab === 'inspection_details' ? 'active' : ''}
+                      onClick={() => setActiveTab('inspection_details')}
                     >
-                      Inspection
+                      Inspection Details
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === 'summary'}
-                    className={activeTab === 'summary' ? 'active' : ''}
-                    onClick={() => setActiveTab('summary')}
-                  >
-                    Summary
-                  </button>
+                    {!isCompleted ? (
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'inspection'}
+                        className={activeTab === 'inspection' ? 'active' : ''}
+                        onClick={() => setActiveTab('inspection')}
+                      >
+                        Inspection
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-
-                <div style={{ color: '#64748b', fontWeight: 700, fontSize: 12 }}>
-                  You can switch tabs anytime—your inputs are preserved.
-                </div>
-              </div>
+              ) : null}
 
               {autoFillMessage ? (
                 <div
@@ -1708,142 +1979,342 @@ export default function InspectionSlipCreate() {
               {activeTab === 'inspection_details' ? (
                 <>
                   <div className="is-card">
-                    <div className="is-section-head">
-                      <div>
-                        <p className="is-section-title">Inspection Details</p>
-                        <p className="is-section-sub">Mission order + complaint details for your assigned inspection.</p>
-                      </div>
-                    </div>
-
-                    <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-                      <div className="is-field">
-                        <label>Mission Order ID</label>
-                        <div style={{ fontWeight: 900, color: '#0f172a' }}>
-                          {missionOrderId ? `${String(missionOrderId).slice(0, 8)}…` : '—'}
+                    <div
+                      className="is-section-head"
+                      style={{
+                        background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                        color: '#ffffff',
+                        margin: '-16px -16px 0',
+                        padding: '18px 18px 20px',
+                        borderRadius: '14px 14px 0 0',
+                        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          justifyContent: 'space-between',
+                          gap: 14,
+                          flexWrap: 'wrap',
+                          width: '100%',
+                        }}
+                      >
+                        <div style={{ minWidth: 0, flex: '1 1 320px' }}>
+                          <div
+                            style={{
+                              fontSize: 17,
+                              lineHeight: 1.18,
+                              fontWeight: 900,
+                              color: '#ffffff',
+                              textTransform: 'uppercase',
+                              wordBreak: 'break-word',
+                              letterSpacing: '0.01em',
+                            }}
+                          >
+                            {displayBusinessName}
+                          </div>
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              marginTop: 8,
+                              color: 'rgba(255,255,255,0.96)',
+                              fontWeight: 800,
+                              fontSize: 12,
+                              lineHeight: 1.4,
+                            }}
+                          >
+                            <span aria-hidden="true" style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path
+                                  d="M12 21s7-4.35 7-11a7 7 0 1 0-14 0c0 6.65 7 11 7 11Z"
+                                  fill="rgba(255,255,255,0.92)"
+                                />
+                                <circle cx="12" cy="10" r="2.7" fill="#1f3b7a" />
+                              </svg>
+                            </span>
+                            <span>{displayBusinessAddress}</span>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="is-field">
-                        <label>Status</label>
-                        <div style={statusBadgeStyle(missionOrder?.status)}>{formatStatus(missionOrder?.status)}</div>
+                        {inspectionStarted || isCompleted ? (
+                          <div style={{ marginLeft: 'auto', display: 'flex', justifyContent: 'flex-end', whiteSpace: 'nowrap' }}>
+                            <span
+                              style={{
+                                ...statusBadgeStyle(inspectionStatusValue),
+                                padding: '6px 12px',
+                                fontSize: 12,
+                                fontWeight: 900,
+                                border: '1px solid rgba(255,255,255,0.18)',
+                                boxShadow: '0 6px 18px rgba(15,23,42,0.14)',
+                              }}
+                            >
+                              {inspectionStatusLabel}
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
-
-                      <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                        <label>Title</label>
-                        <div style={{ fontWeight: 900, color: '#0f172a' }}>{missionOrder?.title || '—'}</div>
-                      </div>
-
-                      <div className="is-field">
-                        <label>Submitted</label>
-                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                          {missionOrder?.submitted_at ? new Date(missionOrder.submitted_at).toLocaleString() : '—'}
-                        </div>
-                      </div>
-
-                      <div className="is-field">
-                        <label>Updated</label>
-                        <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                          {missionOrder?.updated_at ? new Date(missionOrder.updated_at).toLocaleString() : '—'}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mo-meta" style={{ marginTop: 12 }}>
-                      Signed attachment uploaded by the Head Inspector.
                     </div>
 
                     <div
                       style={{
-                        marginTop: 12,
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 12,
-                        background: '#ffffff',
-                        overflow: 'hidden',
+                        display: 'grid',
+                        gridTemplateColumns: '1fr',
+                        gap: 14,
+                        alignItems: 'stretch',
+                        marginTop: 16,
                       }}
                     >
-                      {!signedAttachmentUrl ? (
-                        <div className="mo-meta" style={{ padding: 12 }}>
-                          No signed attachment uploaded yet.
-                        </div>
-                      ) : /\.pdf(\?|#|$)/i.test(String(signedAttachmentUrl)) ? (
-                        <iframe
-                          title="Signed Attachment (PDF)"
-                          src={signedAttachmentUrl}
-                          style={{ width: '100%', height: 560, border: 0, display: 'block' }}
-                        />
-                      ) : (
-                        <div style={{ padding: 12, background: '#0b1220' }}>
-                          <img
-                            src={signedAttachmentUrl}
-                            alt="Signed Attachment"
-                            style={{
-                              width: '100%',
-                              height: 'auto',
-                              maxHeight: 720,
-                              objectFit: 'contain',
-                              display: 'block',
-                              borderRadius: 10,
-                              background: '#0b1220',
-                            }}
-                          />
-                        </div>
-                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+                        <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                          <OverviewField label="Assigned Inspectors" fullWidth>
+                            {assignedInspectors.length ? (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                {assignedInspectors.map((name) => (
+                                  <span
+                                    key={name}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      minHeight: 34,
+                                      padding: '6px 12px',
+                                      borderRadius: 999,
+                                      border: '1px solid #dbe5f3',
+                                      background: '#ffffff',
+                                      color: '#0f172a',
+                                      fontWeight: 900,
+                                      fontSize: 13,
+                                      boxShadow: '0 2px 8px rgba(15, 23, 42, 0.05)',
+                                    }}
+                                  >
+                                    {name}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              '—'
+                            )}
+                          </OverviewField>
 
-                      {signedAttachmentUrl ? (
-                        <div style={{ padding: 12, borderTop: '1px solid #e2e8f0', background: '#f8fafc' }}>
-                          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                            <a
-                              href={signedAttachmentUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mo-link"
-                              style={{ fontWeight: 900 }}
+                          <OverviewField label="Complaint Date">
+                            {formatDateHuman(complaint?.created_at)}
+                          </OverviewField>
+
+                          <OverviewField label="Issuance Date">
+                            {formatDateHuman(missionOrder?.date_of_issuance)}
+                          </OverviewField>
+
+                          <OverviewField label="Inspection Date">
+                            {formatDateHuman(missionOrder?.date_of_inspection)}
+                          </OverviewField>
+
+                          <OverviewField label="City Ordinances Violated" fullWidth>
+                            {complaintViolationGroups.length ? (
+                              <div style={{ display: 'grid', gap: 10 }}>
+                                {complaintViolationGroups.map((group) => (
+                                  <div
+                                    key={group.category}
+                                    style={{
+                                      border: '1px solid #dbe5f3',
+                                      borderRadius: 12,
+                                      background: '#ffffff',
+                                      padding: 12,
+                                      boxShadow: '0 2px 8px rgba(15, 23, 42, 0.05)',
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                      <span style={{ color: '#0f172a', fontWeight: 900, fontSize: 12 }}>
+                                        {group.category}
+                                      </span>
+                                      <span
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          minWidth: 20,
+                                          height: 20,
+                                          padding: '0 6px',
+                                          borderRadius: 999,
+                                          background: '#e2e8f0',
+                                          color: '#334155',
+                                          fontSize: 11,
+                                          fontWeight: 1000,
+                                        }}
+                                      >
+                                        {Array.isArray(group.subs) ? group.subs.length : 0}
+                                      </span>
+                                    </div>
+
+                                    {Array.isArray(group.subs) && group.subs.length ? (
+                                      <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+                                        {group.subs.map((sub) => (
+                                          <div
+                                            key={`${group.category}-${sub}`}
+                                            style={{
+                                              display: 'flex',
+                                              alignItems: 'flex-start',
+                                              gap: 8,
+                                              color: '#334155',
+                                              fontSize: 12,
+                                              lineHeight: 1.45,
+                                              fontWeight: 700,
+                                            }}
+                                          >
+                                            <span
+                                              aria-hidden="true"
+                                              style={{
+                                                width: 6,
+                                                height: 6,
+                                                borderRadius: '50%',
+                                                background: '#64748b',
+                                                marginTop: 6,
+                                                flexShrink: 0,
+                                              }}
+                                            />
+                                            <span>{sub}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              '—'
+                            )}
+                          </OverviewField>
+                        </div>
+
+                        <div className="is-card" style={{ marginTop: 0, display: 'flex', flexDirection: 'column' }}>
+                          <div className="is-section-head">
+                            <div>
+                              <p className="is-section-title">MAP PREVIEW</p>
+                              <p className="is-section-sub">Approximate location of the reported business address</p>
+                            </div>
+                          </div>
+
+                          {!mapUrl ? (
+                            <div className="mo-meta">No address available for map preview.</div>
+                          ) : (
+                            <div
+                              style={{
+                                borderRadius: 12,
+                                overflow: 'hidden',
+                                border: '1px solid #e2e8f0',
+                                background: '#fff',
+                                display: 'flex',
+                                marginTop: 12,
+                              }}
                             >
-                              Open in new tab
-                            </a>
-                            <span style={{ color: '#64748b', fontWeight: 700, fontSize: 12 }}>
-                              {signedAttachmentMeta.uploadedAt
-                                ? `Uploaded: ${new Date(signedAttachmentMeta.uploadedAt).toLocaleString()}`
-                                : ''}
-                            </span>
+                              <iframe
+                                title="Business Location"
+                                src={mapUrl}
+                                width="100%"
+                                height="100%"
+                                style={{ border: 0, display: 'block', flex: 1, minHeight: 380 }}
+                                loading="lazy"
+                                referrerPolicy="no-referrer-when-downgrade"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ minWidth: 0, display: 'flex' }}>
+                        <div className="is-card" style={{ marginTop: 0, display: 'flex', flexDirection: 'column', flex: 1 }}>
+                          <div className="is-section-head">
+                            <div>
+                              <p className="is-section-title">SOFT-COPY MISSION ORDER</p>
+                            </div>
+                            {signedAttachmentUrl ? (
+                              <button
+                                type="button"
+                                className="mo-btn mo-btn-secondary"
+                                onClick={() => setShowSoftCopyFullView(true)}
+                                style={{
+                                  whiteSpace: 'nowrap',
+                                  background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  boxShadow: '0 8px 18px rgba(15,23,42,0.12)',
+                                  fontWeight: 900,
+                                }}
+                              >
+                                Full View
+                              </button>
+                            ) : null}
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop: 12,
+                              border: '1px solid #e2e8f0',
+                              borderRadius: 12,
+                              background: '#ffffff',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              flex: 1,
+                            }}
+                          >
+                            {!signedAttachmentUrl ? (
+                              <div className="mo-meta" style={{ padding: 12, flex: 1 }}>
+                                No signed attachment uploaded yet.
+                              </div>
+                            ) : signedAttachmentIsPdf ? (
+                              <iframe
+                                title="Signed Attachment (PDF)"
+                                src={signedAttachmentUrl}
+                                style={{ width: '100%', height: '100%', minHeight: 380, border: 0, display: 'block', flex: 1 }}
+                              />
+                            ) : (
+                              <div style={{ padding: 12, background: '#0b1220', flex: 1, display: 'flex', alignItems: 'center' }}>
+                                <img
+                                  src={signedAttachmentUrl}
+                                  alt="Signed Attachment"
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    maxHeight: '100%',
+                                    objectFit: 'contain',
+                                    display: 'block',
+                                    borderRadius: 10,
+                                    background: '#0b1220',
+                                  }}
+                                />
+                              </div>
+                            )}
                           </div>
                         </div>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="is-card">
-                    <div className="is-section-head">
-                      <div>
-                        <p className="is-section-title">Map Preview</p>
-                        <p className="is-section-sub">
-                          Uses the complaint business address.
-                        </p>
                       </div>
                     </div>
 
-                    {!mapUrl ? (
-                      <div className="mo-meta">No address available for map preview.</div>
-                    ) : (
-                      <div
-                        style={{
-                          borderRadius: 12,
-                          overflow: 'hidden',
-                          border: '1px solid #e2e8f0',
-                          background: '#fff',
-                        }}
-                      >
-                        <iframe
-                          title="Business Location"
-                          src={mapUrl}
-                          width="100%"
-                          height="320"
-                          style={{ border: 0 }}
-                          loading="lazy"
-                          referrerPolicy="no-referrer-when-downgrade"
-                        />
+                    {!isCompleted && !inspectionStarted ? (
+                      <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
+                        <button
+                          type="button"
+                          className="mo-btn mo-btn-primary"
+                          onClick={handleStartInspection}
+                          disabled={saving || loading}
+                          style={{
+                            width: 'min(100%, 280px)',
+                            minHeight: 52,
+                            borderRadius: 14,
+                            background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                            color: '#ffffff',
+                            border: 'none',
+                            fontWeight: 1000,
+                            fontSize: 15,
+                            justifyContent: 'center',
+                            boxShadow: '0 10px 24px rgba(15,23,42,0.16)',
+                          }}
+                        >
+                          {saving ? 'Starting…' : 'Start Inspection'}
+                        </button>
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                                   </>

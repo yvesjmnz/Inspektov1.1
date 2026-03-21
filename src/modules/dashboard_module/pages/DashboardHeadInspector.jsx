@@ -74,6 +74,13 @@ function statusBadgeClass(status) {
   return 'status-badge';
 }
 
+function resolveInspectionWorkflowStatus(report) {
+  const s = String(report?.status || '').toLowerCase().trim();
+  if (s === 'completed' || s === 'complete') return 'completed';
+  if ((s === 'in progress' || s === 'in_progress') && report?.started_at) return 'in progress';
+  return 'pending inspection';
+}
+
 function getInitialTab() {
   const hash = window.location.hash.slice(1);
   const validTabs = ['todo', 'results', 'inspection', 'inspection-history', 'for-inspection', 'revisions', 'reports'];
@@ -346,7 +353,7 @@ export default function DashboardHeadInspector() {
       const { data: reportRows, error: reportErr } = missionOrderIds.length
         ? await supabase
             .from('inspection_reports')
-            .select('mission_order_id, status, updated_at, created_at, completed_at')
+            .select('mission_order_id, inspector_id, status, started_at, updated_at, created_at, completed_at')
             .in('mission_order_id', missionOrderIds)
             .order('updated_at', { ascending: false })
             .limit(2000)
@@ -364,17 +371,25 @@ export default function DashboardHeadInspector() {
       };
 
       const inspectionStatusByMissionOrderId = new Map();
+      const validAssignmentKeys = new Set(
+        (assignmentRows || [])
+          .filter((a) => a?.mission_order_id && a?.inspector_id)
+          .map((a) => `${a.mission_order_id}:${a.inspector_id}`)
+      );
       for (const r of reportRows || []) {
         const moId = r?.mission_order_id;
-        if (!moId) continue;
+        const inspectorId = r?.inspector_id;
+        if (!moId || !inspectorId) continue;
+        if (!validAssignmentKeys.has(`${moId}:${inspectorId}`)) continue;
+        const resolvedStatus = resolveInspectionWorkflowStatus(r);
         const cur = inspectionStatusByMissionOrderId.get(moId);
         if (!cur) {
-          inspectionStatusByMissionOrderId.set(moId, r?.status || null);
+          inspectionStatusByMissionOrderId.set(moId, resolvedStatus);
           continue;
         }
         // Keep the highest priority status across reports for this MO.
-        if (inspectionPriority(r?.status) > inspectionPriority(cur)) {
-          inspectionStatusByMissionOrderId.set(moId, r?.status || null);
+        if (inspectionPriority(resolvedStatus) > inspectionPriority(cur)) {
+          inspectionStatusByMissionOrderId.set(moId, resolvedStatus);
         }
       }
 
@@ -411,6 +426,13 @@ export default function DashboardHeadInspector() {
       // Merge into the shape the table expects.
       const merged = (complaintRows || []).map((c) => {
         const mo = latestMoByComplaintId.get(c.id) || null;
+        const inspectionStatus =
+          mo?.id
+            ? inspectionStatusByMissionOrderId.get(mo.id) ||
+              ((String(mo?.status || '').toLowerCase() === 'for inspection' || String(mo?.status || '').toLowerCase() === 'for_inspection')
+                ? 'pending inspection'
+                : null)
+            : null;
         return {
           complaint_id: c.id,
           business_name: c.business_name,
@@ -420,7 +442,7 @@ export default function DashboardHeadInspector() {
           created_at: c.created_at,
           mission_order_id: mo?.id || null,
           mission_order_status: mo?.status || null,
-          inspection_status: mo?.id ? inspectionStatusByMissionOrderId.get(mo.id) || null : null,
+          inspection_status: inspectionStatus,
           mission_order_created_at: mo?.created_at || null,
           date_of_inspection: mo?.date_of_inspection || null,
           mission_order_updated_at: mo?.updated_at || null,
@@ -987,6 +1009,28 @@ export default function DashboardHeadInspector() {
   useEffect(() => {
     if (tab !== 'inspection-history') return;
     loadInspectionHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('head-inspector-inspection-reports')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inspection_reports' }, () => {
+        if (tab === 'inspection') {
+          loadApprovedComplaints();
+        } else if (tab === 'inspection-history') {
+          loadInspectionHistory();
+        }
+      })
+      .subscribe();
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch {
+        // ignore
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 

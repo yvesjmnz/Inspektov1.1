@@ -867,7 +867,7 @@ export default function InspectionSlipReview() {
                     <div
                       className="is-section-head"
                       style={{
-                        background: 'linear-gradient(135deg, #1f3b7a 0%, #172b57 100%)',
+                        background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
                         color: '#ffffff',
                         margin: '-18px -18px 0',
                         padding: '20px 22px 24px',
