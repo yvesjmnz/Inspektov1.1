@@ -82,6 +82,43 @@ function statusBadgeClass(status) {
 }
 
 const TEMPLATE_NAME = 'MISSION-ORDER-TEMPLATE';
+const MONTHLY_ASSIGNMENT_LIMIT = 2;
+const CANCELLED_MISSION_ORDER_STATUSES = new Set(['cancelled', 'canceled']);
+
+function getCurrentMonthBounds(now = new Date()) {
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  return { monthStart, monthEnd };
+}
+
+function normalizeLookupValue(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function unwrapSingleRelation(value) {
+  if (Array.isArray(value)) return value[0] || null;
+  return value || null;
+}
+
+function buildMonthlyLimitReason({ businessCount = 0, barangayCount = 0 } = {}) {
+  if (businessCount >= MONTHLY_ASSIGNMENT_LIMIT && barangayCount >= MONTHLY_ASSIGNMENT_LIMIT) {
+    return `Monthly limit reached: already assigned ${businessCount} times to this business and ${barangayCount} times in this barangay this month.`;
+  }
+  if (businessCount >= MONTHLY_ASSIGNMENT_LIMIT) {
+    return `Monthly limit reached: already assigned ${businessCount} times to this business this month.`;
+  }
+  if (barangayCount >= MONTHLY_ASSIGNMENT_LIMIT) {
+    return `Monthly limit reached: already assigned ${barangayCount} times in this barangay this month.`;
+  }
+  return '';
+}
+
+function buildMonthlyLimitSummary({ businessCount = 0, barangayCount = 0 } = {}) {
+  const parts = [];
+  if (businessCount > 0) parts.push(`Business ${businessCount}x this month`);
+  if (barangayCount > 0) parts.push(`Barangay ${barangayCount}x this month`);
+  return parts.join(', ');
+}
 
 function KeyTile({ label, value, sub }) {
   return (
@@ -189,6 +226,9 @@ export default function MissionOrderEditor() {
   const [smartInspectorRows, setSmartInspectorRows] = useState([]);
   const [smartInspectorsLoading, setSmartInspectorsLoading] = useState(false);
   const smartInspectorsSeqRef = useRef(0);
+  const [inspectorMonthlyLimitById, setInspectorMonthlyLimitById] = useState(() => new Map());
+  const [inspectorMonthlyLimitLoading, setInspectorMonthlyLimitLoading] = useState(false);
+  const inspectorMonthlyLimitSeqRef = useRef(0);
 
   // Fallback workload stats when RPC isn't available/complete.
   // Map<inspector_id, active_pending_count>
@@ -503,6 +543,119 @@ export default function MissionOrderEditor() {
     })();
   }, [complaint?.business_pk, business?.brgy_no, missionOrderId]);
 
+  useEffect(() => {
+    const businessPk = complaint?.business_pk ? Number(complaint.business_pk) : null;
+    const currentBrgyNo = normalizeLookupValue(business?.brgy_no);
+
+    if (!businessPk && !currentBrgyNo) {
+      setInspectorMonthlyLimitById(new Map());
+      setInspectorMonthlyLimitLoading(false);
+      return;
+    }
+
+    const seq = ++inspectorMonthlyLimitSeqRef.current;
+    setInspectorMonthlyLimitLoading(true);
+
+    (async () => {
+      try {
+        const { monthStart, monthEnd } = getCurrentMonthBounds();
+        const { data: assignmentRows, error: assignmentError } = await supabase
+          .from('mission_order_assignments')
+          .select('inspector_id, mission_order_id, assigned_at, mission_orders!inner(id, status, complaint_id)')
+          .gte('assigned_at', monthStart.toISOString())
+          .lt('assigned_at', monthEnd.toISOString());
+        if (assignmentError) throw assignmentError;
+
+        const rowsWithMissionOrders = (assignmentRows || [])
+          .map((row) => ({
+            ...row,
+            mission_order: unwrapSingleRelation(row.mission_orders),
+          }))
+          .filter((row) => {
+            const missionOrderRow = row?.mission_order;
+            if (!row?.inspector_id || !missionOrderRow?.complaint_id) return false;
+            if (missionOrderId && row.mission_order_id === missionOrderId) return false;
+            return !CANCELLED_MISSION_ORDER_STATUSES.has(normalizeLookupValue(missionOrderRow.status));
+          });
+
+        const complaintIds = Array.from(
+          new Set(rowsWithMissionOrders.map((row) => row.mission_order?.complaint_id).filter(Boolean))
+        );
+
+        const { data: complaintRows, error: complaintError } = complaintIds.length
+          ? await supabase
+              .from('complaints')
+              .select('id, business_pk')
+              .in('id', complaintIds)
+          : { data: [], error: null };
+        if (complaintError) throw complaintError;
+
+        const businessPks = Array.from(
+          new Set((complaintRows || []).map((row) => row?.business_pk).filter((value) => value !== null && value !== undefined))
+        );
+
+        const { data: businessRows, error: businessError } = businessPks.length
+          ? await supabase
+              .from('businesses')
+              .select('business_pk, brgy_no')
+              .in('business_pk', businessPks)
+          : { data: [], error: null };
+        if (businessError) throw businessError;
+
+        const complaintById = new Map((complaintRows || []).map((row) => [row.id, row]));
+        const brgyNoByBusinessPk = new Map((businessRows || []).map((row) => [row.business_pk, normalizeLookupValue(row.brgy_no)]));
+        const countsByInspectorId = new Map();
+
+        for (const row of rowsWithMissionOrders) {
+          const missionOrderRow = row.mission_order;
+          const complaintRow = complaintById.get(missionOrderRow.complaint_id);
+          if (!complaintRow) continue;
+
+          const relatedBusinessPk = complaintRow.business_pk ?? null;
+          const relatedBrgyNo = brgyNoByBusinessPk.get(relatedBusinessPk) || '';
+          const matchesBusiness = businessPk !== null && Number(relatedBusinessPk) === businessPk;
+          const matchesBarangay = !!currentBrgyNo && relatedBrgyNo === currentBrgyNo;
+
+          if (!matchesBusiness && !matchesBarangay) continue;
+
+          const currentCounts = countsByInspectorId.get(row.inspector_id) || {
+            businessCount: 0,
+            barangayCount: 0,
+          };
+
+          if (matchesBusiness) currentCounts.businessCount += 1;
+          if (matchesBarangay) currentCounts.barangayCount += 1;
+
+          countsByInspectorId.set(row.inspector_id, currentCounts);
+        }
+
+        const nextBlockedInspectors = new Map();
+
+        for (const [inspectorId, counts] of countsByInspectorId.entries()) {
+          const isBlocked =
+            counts.businessCount >= MONTHLY_ASSIGNMENT_LIMIT || counts.barangayCount >= MONTHLY_ASSIGNMENT_LIMIT;
+          if (!isBlocked) continue;
+
+          nextBlockedInspectors.set(inspectorId, {
+            ...counts,
+            isBlocked: true,
+            reason: buildMonthlyLimitReason(counts),
+            summary: buildMonthlyLimitSummary(counts),
+          });
+        }
+
+        if (seq !== inspectorMonthlyLimitSeqRef.current) return;
+        setInspectorMonthlyLimitById(nextBlockedInspectors);
+      } catch (e) {
+        if (seq !== inspectorMonthlyLimitSeqRef.current) return;
+        console.warn('Monthly inspector assignment limit check unavailable:', e);
+        setInspectorMonthlyLimitById(new Map());
+      } finally {
+        if (seq === inspectorMonthlyLimitSeqRef.current) setInspectorMonthlyLimitLoading(false);
+      }
+    })();
+  }, [complaint?.business_pk, business?.brgy_no, missionOrderId]);
+
   // Fallback workload stats: keep "active workload" accurate even when RPC isn't present.
   // Primary source: inspection_reports (reflects inspector activity). Fallback: mission_orders statuses.
   useEffect(() => {
@@ -592,6 +745,26 @@ export default function MissionOrderEditor() {
       })
       .filter(Boolean);
   }, [assignedOrdinanceIds, ordinances]);
+
+  const blockedInspectorsById = useMemo(() => {
+    const next = new Map();
+
+    for (const row of smartInspectorRows || []) {
+      if (!row?.inspector_id || !row?.rule1_blocked) continue;
+      next.set(row.inspector_id, {
+        isBlocked: true,
+        reason: row.rule1_reason || 'Rotation limit reached this month for this business or barangay.',
+        summary: '',
+      });
+    }
+
+    for (const [inspectorId, blockedState] of inspectorMonthlyLimitById.entries()) {
+      if (!blockedState?.isBlocked) continue;
+      next.set(inspectorId, blockedState);
+    }
+
+    return next;
+  }, [inspectorMonthlyLimitById, smartInspectorRows]);
 
   const canSave = !loading && !!missionOrderId && !isReadOnly;
   const hasGeneratedDocx = !!missionOrder?.generated_docx_url;
@@ -931,6 +1104,13 @@ export default function MissionOrderEditor() {
     setToast('');
 
     try {
+      const blockedState = blockedInspectorsById.get(inspectorId);
+      if (blockedState?.isBlocked) {
+        setSelectedInspectorId('');
+        setInspectorQuery('');
+        throw new Error(blockedState.reason || 'This inspector reached the monthly assignment limit for this business or barangay.');
+      }
+
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
       const userId = userData?.user?.id;
@@ -2075,17 +2255,19 @@ export default function MissionOrderEditor() {
                         const enrichedInspectorsRaw = availableInspectors
                         .map((ins) => {
                         const smart = smartById.get(ins.id) || null;
-                        const isBlocked = !!smart?.rule1_blocked;
+                        const blockedState = blockedInspectorsById.get(ins.id) || null;
+                        const isBlocked = !!blockedState?.isBlocked;
                         const rank = typeof smart?.recommended_rank === 'number' ? smart.recommended_rank : null;
                         const isTop = !!smart?.is_top_recommended;
-                        const reason = smart?.rule1_reason || '';
+                        const reason = blockedState?.reason || smart?.rule1_reason || '';
+                        const limitSummary = blockedState?.summary || '';
                         const activePending = typeof smart?.active_pending_count === 'number'
                         ? smart.active_pending_count
                         : (typeof inspectorActiveWorkloadById?.get === 'function' && typeof inspectorActiveWorkloadById.get(ins.id) === 'number'
                         ? inspectorActiveWorkloadById.get(ins.id)
                         : 0);
                         const idleDays = typeof smart?.idle_days === 'number' ? smart.idle_days : null;
-                        return { ...ins, smart, isBlocked, rank, isTop, reason, activePending, idleDays };
+                        return { ...ins, smart, blockedState, isBlocked, rank, isTop, reason, limitSummary, activePending, idleDays };
                         })
                         .filter((ins) => {
                         if (!q) return true;
@@ -2140,14 +2322,14 @@ export default function MissionOrderEditor() {
 
                         return (
                           <div ref={inspectorDropdownRef} className="mo-multi-select-dropdown" role="listbox">
-                            {smartInspectorsLoading ? (
-                              <div className="mo-multi-select-empty">Updating recommendations…</div>
+                            {smartInspectorsLoading || inspectorMonthlyLimitLoading ? (
+                              <div className="mo-multi-select-empty">Refreshing inspector availability...</div>
                             ) : null}
 
                             {enrichedInspectors.slice(0, 12).map((ins) => {
                               const label = ins.full_name || ins.id;
                               const tip = ins.isBlocked
-                                ? (ins.reason || 'Rotation limit reached this month for this Business or Barangay.')
+                                ? (ins.reason || 'Monthly limit reached for this business or barangay.')
                                 : ins.isTop
                                   ? 'Top Recommended based on workload + idle time.'
                                   : '';
@@ -2155,7 +2337,8 @@ export default function MissionOrderEditor() {
                               const metaParts = [];
                               if (typeof ins.activePending === 'number') metaParts.push(`${ins.activePending} active`);
                               if (typeof ins.idleDays === 'number') metaParts.push(`${ins.idleDays}d idle`);
-                              const meta = metaParts.join(' • ');
+                              if (ins.limitSummary) metaParts.push(ins.limitSummary);
+                              const meta = metaParts.join(' | ');
 
                               const isRecommended = !ins.isBlocked && typeof ins.rank === 'number' && ins.rank <= 3;
 
@@ -2180,9 +2363,10 @@ export default function MissionOrderEditor() {
                                       {label}
                                       {ins.isTop ? <span className="mo-multi-select-badge">Most Recommended</span> : null}
                                       {!ins.isTop && isRecommended ? <span className="mo-multi-select-badge">Recommended</span> : null}
-                                      {ins.isBlocked ? <span className="mo-multi-select-badge mo-multi-select-badge--muted">Rotation limit</span> : null}
+                                      {ins.isBlocked ? <span className="mo-multi-select-badge mo-multi-select-badge--muted">Monthly limit reached</span> : null}
                                     </div>
                                     {meta ? <div className="mo-multi-select-option-meta">{meta}</div> : null}
+                                    {ins.isBlocked && ins.reason ? <div className="mo-multi-select-option-note">{ins.reason}</div> : null}
                                   </div>
                                 </button>
                               );
