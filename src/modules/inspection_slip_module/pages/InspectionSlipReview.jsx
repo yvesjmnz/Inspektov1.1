@@ -85,6 +85,44 @@ function formatDateHuman(value) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+function formatPhotoTimestamp(value) {
+  if (!value) return '--';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '--';
+
+  const datePart = d.toLocaleDateString(undefined, {
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  const timePart = d.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  return `${datePart}, ${timePart}`;
+}
+
+function fromDbStatus(value) {
+  const s = String(value || '').toLowerCase();
+  if (s.includes('non')) return 'non_compliant';
+  if (s.includes('compliant')) return 'compliant';
+  return 'na';
+}
+
+function formatChecklistStatus(value) {
+  if (value === 'compliant') return 'Compliant';
+  if (value === 'non_compliant') return 'Non-Compliant';
+  return 'N/A';
+}
+
+function checklistPillClass(value) {
+  if (value === 'compliant') return 'is-summary-pill is-summary-pill-success';
+  if (value === 'non_compliant') return 'is-summary-pill is-summary-pill-danger';
+  return 'is-summary-pill is-summary-pill-muted';
+}
+
 const GUIDED_CATEGORY_LABELS = [
   'Business Permit & Licensing Issues',
   'Alcohol & Tobacco Violations',
@@ -218,7 +256,6 @@ export default function InspectionSlipReview() {
     signage_2sqm: 'na',
   });
   const [cctvCount, setCctvCount] = useState('');
-  const COMMENTS_MAX = 500;
   const [additionalComments, setAdditionalComments] = useState('');
   const [evidencePhotos, setEvidencePhotos] = useState([]);
   const [activePhotoUrl, setActivePhotoUrl] = useState('');
@@ -226,6 +263,7 @@ export default function InspectionSlipReview() {
   const [assignedInspectors, setAssignedInspectors] = useState([]);
 
   const [navCollapsed, setNavCollapsed] = useState(false);
+  const signageSqm = inspectionReport?.signage_sqm != null ? String(inspectionReport.signage_sqm) : '';
 
   const mapUrl = useMemo(() => {
     const address = complaint?.business_address || '';
@@ -314,9 +352,9 @@ export default function InspectionSlipReview() {
 
           setChecklist((p) => ({
             ...p,
-            business_permit: String(report.business_permit_status || 'na'),
-            with_cctv: String(report.cctv_status || 'na'),
-            signage_2sqm: String(report.signage_status || 'na'),
+            business_permit: fromDbStatus(report.business_permit_status),
+            with_cctv: fromDbStatus(report.cctv_status),
+            signage_2sqm: fromDbStatus(report.signage_status),
           }));
           setCctvCount(report.cctv_count != null ? String(report.cctv_count) : '');
 
@@ -1302,14 +1340,7 @@ export default function InspectionSlipReview() {
                           </div>
 
                           <div className="is-field" style={{ gridColumn: '1 / -1', marginTop: 8 }}>
-                            <div
-                              style={{
-                                border: '1px solid #dbe5f3',
-                                borderRadius: 16,
-                                background: '#ffffff',
-                                padding: 16,
-                              }}
-                            >
+                            <div className="is-summary-subcard">
                             <div className="is-section-head" style={{ marginBottom: 12 }}>
                               <div>
                                 <p className="is-section-title">Compliance Checklist</p>
@@ -1317,32 +1348,32 @@ export default function InspectionSlipReview() {
                               </div>
                             </div>
 
-                            <div style={{ display: 'grid', gap: 10 }}>
+                            <div className="is-summary-list">
                               {[
                                 { key: 'business_permit', label: 'Business Permit (Presented)' },
                                 { key: 'with_cctv', label: 'With CCTV' },
                                 { key: 'signage_2sqm', label: '2sqm Signage' },
                               ].map((item) => {
                                 const v = checklist[item.key];
-                                const text =
-                                  v === 'compliant'
-                                    ? 'Compliant'
-                                    : v === 'non_compliant'
-                                      ? 'Non-Compliant'
-                                      : 'N/A';
+                                const text = formatChecklistStatus(v);
+                                const extraPills = [];
+
+                                if (item.key === 'with_cctv' && v === 'compliant' && cctvCount) {
+                                  extraPills.push(`${cctvCount} CCTV${String(cctvCount) === '1' ? '' : 's'}`);
+                                }
+
+                                if (item.key === 'signage_2sqm' && v === 'compliant' && signageSqm) {
+                                  extraPills.push(`${signageSqm} sqm`);
+                                }
 
                                 return (
-                                  <div key={item.key} className="is-check-row">
+                                  <div key={item.key} className="is-summary-pill-row">
                                     <div className="is-check-title">{item.label}</div>
-                                    <div style={{ fontWeight: 900, color: '#0f172a' }}>
-                                      {text}
-                                      {item.key === 'with_cctv' && v === 'compliant' ? (
-                                        <span style={{ marginLeft: 8, fontWeight: 900, color: '#0f172a' }}>
-                                          {cctvCount
-                                            ? `${cctvCount} CCTV${String(cctvCount) === '1' ? '' : 's'}`
-                                            : 'CCTV count not set'}
-                                        </span>
-                                      ) : null}
+                                    <div className="is-summary-pill-wrap">
+                                      <span className={checklistPillClass(v)}>{text}</span>
+                                      {extraPills.map((pill) => (
+                                        <span key={pill} className="is-summary-pill is-summary-pill-info">{pill}</span>
+                                      ))}
                                     </div>
                                   </div>
                                 );
@@ -1352,14 +1383,7 @@ export default function InspectionSlipReview() {
                           </div>
 
                           <div className="is-field" style={{ gridColumn: '1 / -1', marginTop: 8 }}>
-                            <div
-                              style={{
-                                border: '1px solid #dbe5f3',
-                                borderRadius: 16,
-                                background: '#ffffff',
-                                padding: 16,
-                              }}
-                            >
+                            <div className="is-summary-subcard">
                             <div className="is-section-head" style={{ marginBottom: 12 }}>
                               <div>
                                 <p className="is-section-title">Additional Observations</p>
@@ -1369,63 +1393,26 @@ export default function InspectionSlipReview() {
 
                             <div className="is-field" style={{ marginTop: 4 }}>
                               <label>Remarks</label>
-                              <div style={{ fontWeight: 800, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                              <div className="is-summary-remarks">
                                 {additionalComments?.trim() ? additionalComments : '--'}
-                              </div>
-                              <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800, color: '#94a3b8' }}>
-                                {String(additionalComments || '').length} / {COMMENTS_MAX}
                               </div>
                             </div>
 
                             <div className="is-field" style={{ marginTop: 12 }}>
                               <label>Photo Evidence</label>
                               {evidencePhotos.length ? (
-                                <div
-                                  style={{
-                                    marginTop: 8,
-                                    display: 'grid',
-                                    gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
-                                    gap: 10,
-                                  }}
-                                  aria-label="Evidence photos summary"
-                                >
+                                <div className="is-summary-photo-grid" aria-label="Evidence photos summary">
                                   {evidencePhotos.map((p, idx) => (
-                                    <div
-                                      key={p.url || idx}
-                                      style={{
-                                        borderRadius: 12,
-                                        overflow: 'hidden',
-                                        border: '1px solid #e2e8f0',
-                                        background: '#fff',
-                                        aspectRatio: '1 / 1',
-                                        position: 'relative',
-                                      }}
-                                    >
+                                    <div key={p.url || idx} className="is-summary-photo-card">
                                       <img
                                         src={p.url}
                                         alt={`Evidence ${idx + 1}`}
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }}
+                                        className="is-summary-photo-image"
                                         onClick={() => setActivePhotoUrl(p.url)}
                                         title="Click to preview"
                                       />
-                                      <div
-                                        style={{
-                                          position: 'absolute',
-                                          left: 6,
-                                          right: 6,
-                                          bottom: 6,
-                                          padding: '3px 6px',
-                                          borderRadius: 8,
-                                          background: 'rgba(15,23,42,0.65)',
-                                          color: '#fff',
-                                          fontSize: 10,
-                                          fontWeight: 800,
-                                          lineHeight: '12px',
-                                          textAlign: 'center',
-                                        }}
-                                        title={p.ts ? new Date(p.ts).toLocaleString() : ''}
-                                      >
-                                        {p.ts ? new Date(p.ts).toLocaleString() : ''}
+                                      <div className="is-summary-photo-stamp" title={formatPhotoTimestamp(p.ts)}>
+                                        {formatPhotoTimestamp(p.ts)}
                                       </div>
                                     </div>
                                   ))}

@@ -77,6 +77,16 @@ function formatDurationBetween(start, end) {
   return parts.join(' ');
 }
 
+function pickCompletedInspectionWithRemarks(reports) {
+  const candidates = (reports || []).filter((report) => {
+    const status = normalizeInspectionReportStatus(report);
+    return status === 'completed' && String(report?.inspection_comments || '').trim();
+  });
+
+  if (!candidates.length) return null;
+  return pickPreferredInspectionReport(candidates);
+}
+
 function statusBadgeClass(status) {
   const s = String(status || '').toLowerCase();
   if (['resolved', 'closed', 'completed', 'done'].includes(s)) return 'status-badge status-success';
@@ -245,6 +255,7 @@ export default function TrackComplaint() {
 
                 // Inspection step is driven by inspection_reports presence and status
                 const latestInspection = pickPreferredInspectionReport(inspections);
+                const resolutionInspection = pickCompletedInspectionWithRemarks(inspections) || latestInspection;
                 const hasAnyInspection = Boolean(latestInspection);
                 const inspectionStatus = normalizeInspectionReportStatus(latestInspection);
                 const inspectionCompleted = inspectionStatus === 'completed';
@@ -358,7 +369,7 @@ export default function TrackComplaint() {
                     ? `${cctvCountNum} CCTV${cctvCountNum === 1 ? '' : 's'}`
                     : null;
 
-                const inspectionRemarks = String(latestInspection?.inspection_comments || '').trim();
+                const inspectionRemarks = String(resolutionInspection?.inspection_comments || '').trim();
 
                 // Resolution can now show the inspection remarks as soon as the inspection is completed.
                 // We still also treat completed mission orders as resolved for downstream tracking state.

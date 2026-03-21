@@ -1565,7 +1565,7 @@ export default function InspectionSlipCreate() {
           completed_at: completedAt,
           updated_at: completedAt,
         })
-        .eq('mission_order_id', missionOrderId);
+        .eq('id', inspectionReportId);
 
       if (subErr) throw subErr;
 
@@ -1573,6 +1573,7 @@ export default function InspectionSlipCreate() {
       setIsCompleted(true);
       setCompletionKnown(true);
       setActiveTab('inspection_details');
+      window.location.assign('/dashboard/inspector?tab=history');
     } catch (e) {
       setError(e?.message || 'Failed to submit inspection report.');
     } finally {
