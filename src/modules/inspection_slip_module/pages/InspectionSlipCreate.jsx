@@ -1358,6 +1358,10 @@ export default function InspectionSlipCreate() {
       setError('Inspection report is not initialized yet. Please wait and try again.');
       return;
     }
+    if (!missionOrderId) {
+      setError('Missing mission order. Please reopen the inspection slip.');
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -1552,13 +1556,16 @@ export default function InspectionSlipCreate() {
       // Save first to ensure uploads happen
       await handleSaveReport();
 
+      const completedAt = new Date().toISOString();
+
       const { error: subErr } = await supabase
         .from('inspection_reports')
         .update({
           status: 'completed',
-          completed_at: new Date().toISOString(),
+          completed_at: completedAt,
+          updated_at: completedAt,
         })
-        .eq('id', inspectionReportId);
+        .eq('mission_order_id', missionOrderId);
 
       if (subErr) throw subErr;
 

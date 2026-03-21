@@ -108,11 +108,11 @@ eligible as (
     (s.month_business_count >= 2 or s.month_brgy_count >= 2) as rule1_blocked,
     case
       when (s.month_business_count >= 2 and s.month_brgy_count >= 2) then
-        'Rotation limit: already assigned 2 or more times this month for the same business and barangay.'
+        'Limit reached for this business and barangay.'
       when (s.month_business_count >= 2) then
-        'Rotation limit: already assigned to this business 2 or more times this month.'
+        'Limit reached for this business.'
       when (s.month_brgy_count >= 2) then
-        'Rotation limit: already assigned in this barangay 2 or more times this month.'
+        'Limit reached for this barangay.'
       else null
     end as rule1_reason
   from scored s

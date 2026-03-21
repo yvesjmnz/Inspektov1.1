@@ -102,22 +102,185 @@ function unwrapSingleRelation(value) {
 
 function buildMonthlyLimitReason({ businessCount = 0, barangayCount = 0 } = {}) {
   if (businessCount >= MONTHLY_ASSIGNMENT_LIMIT && barangayCount >= MONTHLY_ASSIGNMENT_LIMIT) {
-    return `Monthly limit reached: already assigned ${businessCount} times to this business and ${barangayCount} times in this barangay this month.`;
+    return 'Limit reached for this business and barangay.';
   }
   if (businessCount >= MONTHLY_ASSIGNMENT_LIMIT) {
-    return `Monthly limit reached: already assigned ${businessCount} times to this business this month.`;
+    return 'Limit reached for this business.';
   }
   if (barangayCount >= MONTHLY_ASSIGNMENT_LIMIT) {
-    return `Monthly limit reached: already assigned ${barangayCount} times in this barangay this month.`;
+    return 'Limit reached for this barangay.';
   }
   return '';
 }
 
 function buildMonthlyLimitSummary({ businessCount = 0, barangayCount = 0 } = {}) {
-  const parts = [];
-  if (businessCount > 0) parts.push(`Business ${businessCount}x this month`);
-  if (barangayCount > 0) parts.push(`Barangay ${barangayCount}x this month`);
-  return parts.join(', ');
+  if (businessCount >= MONTHLY_ASSIGNMENT_LIMIT && barangayCount >= MONTHLY_ASSIGNMENT_LIMIT) {
+    return 'Limit reached for this business and barangay';
+  }
+  if (businessCount >= MONTHLY_ASSIGNMENT_LIMIT) {
+    return 'Limit reached for this business';
+  }
+  if (barangayCount >= MONTHLY_ASSIGNMENT_LIMIT) {
+    return 'Limit reached for this barangay';
+  }
+  return '';
+}
+
+function normalizeBusinessText(value) {
+  return normalizeLookupValue(value).replace(/\s+/g, ' ');
+}
+
+function extractBarangayToken(value) {
+  const normalized = normalizeBusinessText(value);
+  if (!normalized) return '';
+
+  const match = normalized.match(/\b(?:barangay|brgy\.?|brgy)\s+([^,]+)/i);
+  return normalizeBusinessText(match?.[1] || '');
+}
+
+function isSameBusinessRecord({
+  currentBusinessPk = null,
+  currentBusinessName = '',
+  currentBusinessAddress = '',
+  relatedBusinessPk = null,
+  relatedBusinessName = '',
+  relatedBusinessAddress = '',
+} = {}) {
+  if (currentBusinessPk !== null && relatedBusinessPk !== null) {
+    return Number(currentBusinessPk) === Number(relatedBusinessPk);
+  }
+
+  if (!currentBusinessName || !relatedBusinessName) return false;
+  if (currentBusinessName !== relatedBusinessName) return false;
+
+  if (currentBusinessAddress && relatedBusinessAddress) {
+    return currentBusinessAddress === relatedBusinessAddress;
+  }
+
+  return true;
+}
+
+async function fetchBlockedInspectorsForMonthlyLimit({
+  businessPk = null,
+  businessName = '',
+  businessAddress = '',
+  brgyNo = '',
+  excludeMissionOrderId = null,
+  inspectorIds = null,
+} = {}) {
+  const normalizedBusinessName = normalizeBusinessText(businessName);
+  const normalizedBusinessAddress = normalizeBusinessText(businessAddress);
+  const normalizedBrgyNo = normalizeLookupValue(brgyNo);
+  const fallbackBarangayToken = extractBarangayToken(businessAddress);
+  const effectiveBarangay = normalizedBrgyNo || fallbackBarangayToken;
+
+  if (!businessPk && !normalizedBusinessName && !effectiveBarangay) {
+    return new Map();
+  }
+
+  const { monthStart, monthEnd } = getCurrentMonthBounds();
+  let assignmentQuery = supabase
+    .from('mission_order_assignments')
+    .select('inspector_id, mission_order_id, assigned_at, mission_orders!inner(id, status, complaint_id)')
+    .gte('assigned_at', monthStart.toISOString())
+    .lt('assigned_at', monthEnd.toISOString());
+
+  if (Array.isArray(inspectorIds) && inspectorIds.length > 0) {
+    assignmentQuery = assignmentQuery.in('inspector_id', inspectorIds);
+  }
+
+  const { data: assignmentRows, error: assignmentError } = await assignmentQuery;
+  if (assignmentError) throw assignmentError;
+
+  const rowsWithMissionOrders = (assignmentRows || [])
+    .map((row) => ({
+      ...row,
+      mission_order: unwrapSingleRelation(row.mission_orders),
+    }))
+    .filter((row) => {
+      const missionOrderRow = row?.mission_order;
+      if (!row?.inspector_id || !missionOrderRow?.complaint_id) return false;
+      if (excludeMissionOrderId && row.mission_order_id === excludeMissionOrderId) return false;
+      return !CANCELLED_MISSION_ORDER_STATUSES.has(normalizeLookupValue(missionOrderRow.status));
+    });
+
+  const complaintIds = Array.from(
+    new Set(rowsWithMissionOrders.map((row) => row.mission_order?.complaint_id).filter(Boolean))
+  );
+
+  const { data: complaintRows, error: complaintError } = complaintIds.length
+    ? await supabase
+        .from('complaints')
+        .select('id, business_pk, business_name, business_address')
+        .in('id', complaintIds)
+    : { data: [], error: null };
+  if (complaintError) throw complaintError;
+
+  const businessPks = Array.from(
+    new Set((complaintRows || []).map((row) => row?.business_pk).filter((value) => value !== null && value !== undefined))
+  );
+
+  const { data: businessRows, error: businessError } = businessPks.length
+    ? await supabase
+        .from('businesses')
+        .select('business_pk, business_name, business_address, brgy_no')
+        .in('business_pk', businessPks)
+    : { data: [], error: null };
+  if (businessError) throw businessError;
+
+  const complaintById = new Map((complaintRows || []).map((row) => [row.id, row]));
+  const businessByPk = new Map((businessRows || []).map((row) => [row.business_pk, row]));
+  const countsByInspectorId = new Map();
+
+  for (const row of rowsWithMissionOrders) {
+    const missionOrderRow = row.mission_order;
+    const complaintRow = complaintById.get(missionOrderRow.complaint_id);
+    if (!complaintRow) continue;
+
+    const relatedBusinessPk = complaintRow.business_pk ?? null;
+    const relatedBusinessRow = relatedBusinessPk !== null ? businessByPk.get(relatedBusinessPk) : null;
+    const relatedBusinessName = normalizeBusinessText(relatedBusinessRow?.business_name || complaintRow.business_name);
+    const relatedBusinessAddress = normalizeBusinessText(relatedBusinessRow?.business_address || complaintRow.business_address);
+    const relatedBrgyNo = normalizeLookupValue(relatedBusinessRow?.brgy_no) || extractBarangayToken(complaintRow.business_address);
+    const matchesBusiness = isSameBusinessRecord({
+      currentBusinessPk: businessPk,
+      currentBusinessName: normalizedBusinessName,
+      currentBusinessAddress: normalizedBusinessAddress,
+      relatedBusinessPk,
+      relatedBusinessName,
+      relatedBusinessAddress,
+    });
+    const matchesBarangay = !!effectiveBarangay && relatedBrgyNo === effectiveBarangay;
+
+    if (!matchesBusiness && !matchesBarangay) continue;
+
+    const currentCounts = countsByInspectorId.get(row.inspector_id) || {
+      businessCount: 0,
+      barangayCount: 0,
+    };
+
+    if (matchesBusiness) currentCounts.businessCount += 1;
+    if (matchesBarangay) currentCounts.barangayCount += 1;
+
+    countsByInspectorId.set(row.inspector_id, currentCounts);
+  }
+
+  const blockedInspectors = new Map();
+
+  for (const [inspectorId, counts] of countsByInspectorId.entries()) {
+    const isBlocked =
+      counts.businessCount >= MONTHLY_ASSIGNMENT_LIMIT || counts.barangayCount >= MONTHLY_ASSIGNMENT_LIMIT;
+    if (!isBlocked) continue;
+
+    blockedInspectors.set(inspectorId, {
+      ...counts,
+      isBlocked: true,
+      reason: buildMonthlyLimitReason(counts),
+      summary: buildMonthlyLimitSummary(counts),
+    });
+  }
+
+  return blockedInspectors;
 }
 
 function KeyTile({ label, value, sub }) {
@@ -545,9 +708,11 @@ export default function MissionOrderEditor() {
 
   useEffect(() => {
     const businessPk = complaint?.business_pk ? Number(complaint.business_pk) : null;
+    const businessName = business?.business_name || complaint?.business_name || '';
+    const businessAddress = business?.business_address || complaint?.business_address || '';
     const currentBrgyNo = normalizeLookupValue(business?.brgy_no);
 
-    if (!businessPk && !currentBrgyNo) {
+    if (!businessPk && !businessName && !businessAddress && !currentBrgyNo) {
       setInspectorMonthlyLimitById(new Map());
       setInspectorMonthlyLimitLoading(false);
       return;
@@ -558,91 +723,13 @@ export default function MissionOrderEditor() {
 
     (async () => {
       try {
-        const { monthStart, monthEnd } = getCurrentMonthBounds();
-        const { data: assignmentRows, error: assignmentError } = await supabase
-          .from('mission_order_assignments')
-          .select('inspector_id, mission_order_id, assigned_at, mission_orders!inner(id, status, complaint_id)')
-          .gte('assigned_at', monthStart.toISOString())
-          .lt('assigned_at', monthEnd.toISOString());
-        if (assignmentError) throw assignmentError;
-
-        const rowsWithMissionOrders = (assignmentRows || [])
-          .map((row) => ({
-            ...row,
-            mission_order: unwrapSingleRelation(row.mission_orders),
-          }))
-          .filter((row) => {
-            const missionOrderRow = row?.mission_order;
-            if (!row?.inspector_id || !missionOrderRow?.complaint_id) return false;
-            if (missionOrderId && row.mission_order_id === missionOrderId) return false;
-            return !CANCELLED_MISSION_ORDER_STATUSES.has(normalizeLookupValue(missionOrderRow.status));
-          });
-
-        const complaintIds = Array.from(
-          new Set(rowsWithMissionOrders.map((row) => row.mission_order?.complaint_id).filter(Boolean))
-        );
-
-        const { data: complaintRows, error: complaintError } = complaintIds.length
-          ? await supabase
-              .from('complaints')
-              .select('id, business_pk')
-              .in('id', complaintIds)
-          : { data: [], error: null };
-        if (complaintError) throw complaintError;
-
-        const businessPks = Array.from(
-          new Set((complaintRows || []).map((row) => row?.business_pk).filter((value) => value !== null && value !== undefined))
-        );
-
-        const { data: businessRows, error: businessError } = businessPks.length
-          ? await supabase
-              .from('businesses')
-              .select('business_pk, brgy_no')
-              .in('business_pk', businessPks)
-          : { data: [], error: null };
-        if (businessError) throw businessError;
-
-        const complaintById = new Map((complaintRows || []).map((row) => [row.id, row]));
-        const brgyNoByBusinessPk = new Map((businessRows || []).map((row) => [row.business_pk, normalizeLookupValue(row.brgy_no)]));
-        const countsByInspectorId = new Map();
-
-        for (const row of rowsWithMissionOrders) {
-          const missionOrderRow = row.mission_order;
-          const complaintRow = complaintById.get(missionOrderRow.complaint_id);
-          if (!complaintRow) continue;
-
-          const relatedBusinessPk = complaintRow.business_pk ?? null;
-          const relatedBrgyNo = brgyNoByBusinessPk.get(relatedBusinessPk) || '';
-          const matchesBusiness = businessPk !== null && Number(relatedBusinessPk) === businessPk;
-          const matchesBarangay = !!currentBrgyNo && relatedBrgyNo === currentBrgyNo;
-
-          if (!matchesBusiness && !matchesBarangay) continue;
-
-          const currentCounts = countsByInspectorId.get(row.inspector_id) || {
-            businessCount: 0,
-            barangayCount: 0,
-          };
-
-          if (matchesBusiness) currentCounts.businessCount += 1;
-          if (matchesBarangay) currentCounts.barangayCount += 1;
-
-          countsByInspectorId.set(row.inspector_id, currentCounts);
-        }
-
-        const nextBlockedInspectors = new Map();
-
-        for (const [inspectorId, counts] of countsByInspectorId.entries()) {
-          const isBlocked =
-            counts.businessCount >= MONTHLY_ASSIGNMENT_LIMIT || counts.barangayCount >= MONTHLY_ASSIGNMENT_LIMIT;
-          if (!isBlocked) continue;
-
-          nextBlockedInspectors.set(inspectorId, {
-            ...counts,
-            isBlocked: true,
-            reason: buildMonthlyLimitReason(counts),
-            summary: buildMonthlyLimitSummary(counts),
-          });
-        }
+        const nextBlockedInspectors = await fetchBlockedInspectorsForMonthlyLimit({
+          businessPk,
+          businessName,
+          businessAddress,
+          brgyNo: currentBrgyNo,
+          excludeMissionOrderId: missionOrderId,
+        });
 
         if (seq !== inspectorMonthlyLimitSeqRef.current) return;
         setInspectorMonthlyLimitById(nextBlockedInspectors);
@@ -654,7 +741,7 @@ export default function MissionOrderEditor() {
         if (seq === inspectorMonthlyLimitSeqRef.current) setInspectorMonthlyLimitLoading(false);
       }
     })();
-  }, [complaint?.business_pk, business?.brgy_no, missionOrderId]);
+  }, [business?.brgy_no, business?.business_address, business?.business_name, complaint?.business_address, complaint?.business_name, complaint?.business_pk, missionOrderId]);
 
   // Fallback workload stats: keep "active workload" accurate even when RPC isn't present.
   // Primary source: inspection_reports (reflects inspector activity). Fallback: mission_orders statuses.
@@ -753,8 +840,8 @@ export default function MissionOrderEditor() {
       if (!row?.inspector_id || !row?.rule1_blocked) continue;
       next.set(row.inspector_id, {
         isBlocked: true,
-        reason: row.rule1_reason || 'Rotation limit reached this month for this business or barangay.',
-        summary: '',
+        reason: row.rule1_reason || 'Limit reached for this business or barangay.',
+        summary: row.rule1_reason || 'Limit reached for this business or barangay.',
       });
     }
 
@@ -1104,7 +1191,27 @@ export default function MissionOrderEditor() {
     setToast('');
 
     try {
-      const blockedState = blockedInspectorsById.get(inspectorId);
+      const businessPk = complaint?.business_pk ? Number(complaint.business_pk) : null;
+      const businessName = business?.business_name || complaint?.business_name || '';
+      const businessAddress = business?.business_address || complaint?.business_address || '';
+      const currentBrgyNo = normalizeLookupValue(business?.brgy_no);
+      const freshBlockedInspectors = await fetchBlockedInspectorsForMonthlyLimit({
+        businessPk,
+        businessName,
+        businessAddress,
+        brgyNo: currentBrgyNo,
+        excludeMissionOrderId: missionOrderId,
+        inspectorIds: [inspectorId],
+      });
+      const blockedState = freshBlockedInspectors.get(inspectorId) || blockedInspectorsById.get(inspectorId);
+
+      setInspectorMonthlyLimitById((prev) => {
+        const next = new Map(prev);
+        if (blockedState?.isBlocked) next.set(inspectorId, blockedState);
+        else next.delete(inspectorId);
+        return next;
+      });
+
       if (blockedState?.isBlocked) {
         setSelectedInspectorId('');
         setInspectorQuery('');
@@ -2328,11 +2435,14 @@ export default function MissionOrderEditor() {
 
                             {enrichedInspectors.slice(0, 12).map((ins) => {
                               const label = ins.full_name || ins.id;
-                              const tip = ins.isBlocked
-                                ? (ins.reason || 'Monthly limit reached for this business or barangay.')
-                                : ins.isTop
-                                  ? 'Top Recommended based on workload + idle time.'
-                                  : '';
+                              const isOptionDisabled = inspectorMonthlyLimitLoading || ins.isBlocked;
+                              const tip = inspectorMonthlyLimitLoading
+                                ? 'Checking monthly assignment limit...'
+                                : ins.isBlocked
+                                  ? (ins.reason || 'Monthly limit reached for this business or barangay.')
+                                  : ins.isTop
+                                    ? 'Top Recommended based on workload + idle time.'
+                                    : '';
 
                               const metaParts = [];
                               if (typeof ins.activePending === 'number') metaParts.push(`${ins.activePending} active`);
@@ -2348,14 +2458,14 @@ export default function MissionOrderEditor() {
                                   type="button"
                                   className={[
                                     'mo-multi-select-option',
-                                    ins.isBlocked ? 'mo-multi-select-option--disabled' : '',
+                                    isOptionDisabled ? 'mo-multi-select-option--disabled' : '',
                                     ins.isTop ? 'mo-multi-select-option--top' : '',
                                   ]
                                     .filter(Boolean)
                                     .join(' ')}
                                   onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => (ins.isBlocked ? null : setSelectedInspectorId(ins.id))}
-                                  disabled={ins.isBlocked}
+                                  onClick={() => (isOptionDisabled ? null : setSelectedInspectorId(ins.id))}
+                                  disabled={isOptionDisabled}
                                   title={tip}
                                 >
                                   <div className="mo-multi-select-option-row">
@@ -2363,10 +2473,11 @@ export default function MissionOrderEditor() {
                                       {label}
                                       {ins.isTop ? <span className="mo-multi-select-badge">Most Recommended</span> : null}
                                       {!ins.isTop && isRecommended ? <span className="mo-multi-select-badge">Recommended</span> : null}
-                                      {ins.isBlocked ? <span className="mo-multi-select-badge mo-multi-select-badge--muted">Monthly limit reached</span> : null}
+                                      {inspectorMonthlyLimitLoading ? <span className="mo-multi-select-badge mo-multi-select-badge--muted">Checking availability</span> : null}
+                                      {!inspectorMonthlyLimitLoading && ins.isBlocked ? <span className="mo-multi-select-badge mo-multi-select-badge--muted">Monthly limit reached</span> : null}
                                     </div>
                                     {meta ? <div className="mo-multi-select-option-meta">{meta}</div> : null}
-                                    {ins.isBlocked && ins.reason ? <div className="mo-multi-select-option-note">{ins.reason}</div> : null}
+                                    {inspectorMonthlyLimitLoading ? <div className="mo-multi-select-option-note">Checking current-month business/barangay assignment counts...</div> : null}
                                   </div>
                                 </button>
                               );
