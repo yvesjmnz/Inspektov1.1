@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { submitComplaint, getBusinesses, uploadImage } from '../../../lib/complaints';
+import { submitComplaint, getBusinesses, uploadImage, resolveBusinessJurisdiction } from '../../../lib/complaints';
 import { requestEmailVerification } from '../../../lib/api';
 import { supabase } from '../../../lib/supabase';
 import Header from '../../../components/Header.jsx';
@@ -7,6 +7,29 @@ import Stepper from '../../../components/Stepper.jsx';
 import ErrorToast from '../../../components/ErrorToast.jsx';
 import '../../../components/Stepper.css';
 import './ComplaintForm.css';
+
+const EMPTY_MANUAL_JURISDICTION = {
+  checkedAddress: '',
+  resolvedAddress: '',
+  resolvedLocality: '',
+  withinManilaCity: null,
+  errorMessage: '',
+};
+
+function buildOutsideJurisdictionMessage(baseMessage, result) {
+  const resolvedAddress = String(result?.resolved_address || result?.resolvedAddress || '').trim();
+  const resolvedLocality = String(result?.resolved_locality || result?.resolvedLocality || '').trim();
+
+  if (resolvedAddress) {
+    return `${baseMessage} Google Maps resolved this address to: ${resolvedAddress}.`;
+  }
+
+  if (resolvedLocality) {
+    return `${baseMessage} Google Maps resolved this address to ${resolvedLocality}, not Manila City.`;
+  }
+
+  return baseMessage;
+}
 
 export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEmail }) {
   const [verifiedEmail, setVerifiedEmail] = useState(initialVerifiedEmail || null);
@@ -46,17 +69,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
   const [searchQuery, setSearchQuery] = useState('');
   const [firstSearchDone, setFirstSearchDone] = useState(false);
   const [nameSearchQuery, setNameSearchQuery] = useState('');
-
-  // Manila City jurisdiction check (whitelist approach)
-  // If the address does NOT clearly indicate "Manila" / "City of Manila" / "Maynila",
-  // treat it as outside jurisdiction.
-  const isOutsideManilaCity = useMemo(() => {
-    const addr = String(formData.business_address || '').toLowerCase();
-    if (!addr) return false; // don't block while empty
-
-    const withinManila = /\b(manila|city of manila|maynila)\b/.test(addr);
-    return !withinManila;
-  }, [formData.business_address]);
+  const [manualJurisdictionCheck, setManualJurisdictionCheck] = useState(EMPTY_MANUAL_JURISDICTION);
 
   const OUTSIDE_JURISDICTION_MESSAGE =
     'Location Outside Jurisdiction: This business address falls outside the City of Manila. Digital inspections are currently restricted to Manila City limits.';
@@ -268,6 +281,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
 
   const selectBusiness = (business, source = 'initial') => {
     setBusinessNotInDb(false);
+    setManualJurisdictionCheck(EMPTY_MANUAL_JURISDICTION);
 
     setFormData((prev) => ({
       ...prev,
@@ -295,6 +309,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     setSearchQuery('');
     setNameSearchQuery('');
     setFirstSearchDone(false);
+    setManualJurisdictionCheck(EMPTY_MANUAL_JURISDICTION);
 
     setFormData((prev) => {
       return {
@@ -355,7 +370,58 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     setEvidenceImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const goNext = () => {
+  const validateManualBusinessJurisdiction = async () => {
+    if (!businessNotInDb || formData.business_pk) return true;
+
+    const address = String(formData.business_address || '').trim();
+    if (!address) return true;
+
+    if (manualJurisdictionCheck.checkedAddress === address) {
+      if (manualJurisdictionCheck.withinManilaCity === true) {
+        return true;
+      }
+
+      if (manualJurisdictionCheck.withinManilaCity === false) {
+        showError(
+          manualJurisdictionCheck.errorMessage ||
+            buildOutsideJurisdictionMessage(OUTSIDE_JURISDICTION_MESSAGE, manualJurisdictionCheck)
+        );
+        return false;
+      }
+    }
+
+    setLoading(true);
+
+    try {
+      const result = await resolveBusinessJurisdiction(address);
+      const errorMessage = result.within_manila_city
+        ? ''
+        : buildOutsideJurisdictionMessage(OUTSIDE_JURISDICTION_MESSAGE, result);
+
+      setManualJurisdictionCheck({
+        checkedAddress: address,
+        resolvedAddress: result.resolved_address || '',
+        resolvedLocality: result.resolved_locality || '',
+        withinManilaCity: result.within_manila_city === true,
+        errorMessage,
+      });
+
+      if (!result.within_manila_city) {
+        showError(errorMessage);
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Business jurisdiction validation failed:', err);
+      showError(err?.message || 'Unable to validate the business address. Please enter a more specific Manila City address.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const goNext = async () => {
     setError(null);
 
     // Step validations
@@ -365,9 +431,11 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
         return;
       }
 
-      if (isOutsideManilaCity) {
-        showError(OUTSIDE_JURISDICTION_MESSAGE);
-        return;
+      if (businessNotInDb) {
+        const withinJurisdiction = await validateManualBusinessJurisdiction();
+        if (!withinJurisdiction) {
+          return;
+        }
       }
     }
 
@@ -675,9 +743,10 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                     id="business_name_manual"
                     type="text"
                     value={formData.business_name}
-                    onChange={(e) =>
-                      setFormData((prev) => ({ ...prev, business_name: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      setManualJurisdictionCheck(EMPTY_MANUAL_JURISDICTION);
+                      setFormData((prev) => ({ ...prev, business_name: e.target.value }));
+                    }}
                     placeholder="Enter business name"
                     className="form-input"
                     required
@@ -693,9 +762,10 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                       id="business_address"
                       type="text"
                       value={formData.business_address}
-                      onChange={(e) =>
-                        setFormData((prev) => ({ ...prev, business_address: e.target.value }))
-                      }
+                      onChange={(e) => {
+                        setManualJurisdictionCheck(EMPTY_MANUAL_JURISDICTION);
+                        setFormData((prev) => ({ ...prev, business_address: e.target.value }));
+                      }}
                       placeholder="Full business address"
                       className="form-input"
                       readOnly={!!formData.business_pk}
