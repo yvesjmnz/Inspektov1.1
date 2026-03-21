@@ -322,9 +322,49 @@
   border-bottom: 1px solid #e2e8f0;
 }
 
+.track-result-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .track-result-header .track-title {
   margin: 0 0 10px 0;
   font-size: 28px;
+}
+
+.track-refresh-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+}
+
+.track-refresh-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.22);
+}
+
+.track-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.track-refresh-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
 }
 
 .track-meta-container {

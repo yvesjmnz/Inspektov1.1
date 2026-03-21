@@ -100,7 +100,7 @@ function getUrgencyText(authenticityLevel) {
 
 function getUrgencyStyle(urgency) {
   const u = Number(urgency);
-  if (u === 100) {
+  if (u > 50) {
     return {
       badge: { background: '#dcfce7', border: '1px solid #22c55e', color: '#166534' },
     };
@@ -110,7 +110,7 @@ function getUrgencyStyle(urgency) {
       badge: { background: '#fef3c7', border: '1px solid #eab308', color: '#854d0e' },
     };
   }
-  if (u === 25) {
+  if (u < 50) {
     return {
       badge: { background: '#fee2e2', border: '1px solid #ef4444', color: '#991b1b' },
     };

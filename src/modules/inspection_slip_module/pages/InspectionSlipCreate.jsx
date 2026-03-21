@@ -2831,28 +2831,7 @@ export default function InspectionSlipCreate() {
 
                   <div className="is-card">
                     <div className="is-section-head">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          xmlns="http://www.w3.org/2000/svg"
-                          aria-hidden="true"
-                        >
-                          <path
-                            d="M12 20h9"
-                            stroke="#7c3aed"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          />
-                          <path
-                            d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-                            stroke="#7c3aed"
-                            strokeWidth="2"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
+                      <div>
                         <div>
                           <p className="is-section-title">Step 6: Additional Observations</p>
                           <p className="is-section-sub">Optional notes, findings, or recommendations.</p>
@@ -3187,7 +3166,6 @@ export default function InspectionSlipCreate() {
                     <div className="is-section-head">
                       <div>
                         <p className="is-section-title">Summary</p>
-                        <p className="is-section-sub">Review key details below.</p>
                       </div>
                     </div>
 
@@ -3217,10 +3195,7 @@ export default function InspectionSlipCreate() {
                       <div className="is-field" style={{ gridColumn: '1 / -1' }}>
                         <label>Owner Name</label>
                         <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                          {`${ownerDetails.lastName || ''}${
-                            ownerDetails.lastName && (ownerDetails.firstName || ownerDetails.middleName) ? ', ' : ''
-                          }${ownerDetails.firstName || ''}${ownerDetails.middleName ? ` ${ownerDetails.middleName}` : ''}`.trim() ||
-                            '—'}
+                          {toOwnerNameString() || '--'}
                         </div>
                       </div>
 
@@ -3267,7 +3242,6 @@ export default function InspectionSlipCreate() {
                     <div className="is-section-head">
                       <div>
                         <p className="is-section-title">Compliance Checklist</p>
-                        <p className="is-section-sub">Summary of the inspector’s selections.</p>
                       </div>
                     </div>
 
@@ -3311,7 +3285,6 @@ export default function InspectionSlipCreate() {
                     <div className="is-section-head">
                       <div>
                         <p className="is-section-title">Additional Observations</p>
-                        <p className="is-section-sub">Inspector remarks / findings.</p>
                       </div>
                     </div>
 
@@ -3388,7 +3361,6 @@ export default function InspectionSlipCreate() {
                     <div className="is-section-head">
                       <div>
                         <p className="is-section-title">Signatures</p>
-                        <p className="is-section-sub">Capture signatures after the inspection if needed.</p>
                       </div>
                     </div>
 

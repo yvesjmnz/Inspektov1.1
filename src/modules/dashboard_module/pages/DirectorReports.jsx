@@ -70,20 +70,10 @@ export default function DirectorReports() {
     );
   }
 
-  const { complaints, missionOrders, inspections, recurring, timeline, complaintToMOPreapproval } = metrics;
+  const { complaints, missionOrders, inspections, timeline, complaintToMOPreapproval } = metrics;
 
   return (
     <div style={{ display: 'grid', gap: 24 }}>
-      {/* Header */}
-      <div style={{ display: 'grid', gap: 8 }}>
-        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: '#0f172a' }}>
-          Director Performance Report
-        </h2>
-        <p style={{ margin: 0, fontSize: 14, color: '#64748b' }}>
-          Comprehensive metrics for complaint management, mission orders, and inspections
-        </p>
-      </div>
-
       {/* KPI Cards - Overview */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
         <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
@@ -296,98 +286,6 @@ export default function DirectorReports() {
         )}
       </div>
 
-      {/* Recurring Complaints Section */}
-      <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
-        <div
-          onClick={() => setExpandedSection(expandedSection === 'recurring' ? null : 'recurring')}
-          style={{
-            padding: '16px 20px',
-            background: '#0b2249',
-            color: '#ffffff',
-            cursor: 'pointer',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            userSelect: 'none',
-          }}
-        >
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900 }}>
-            Recurring Complaints ({recurring.total})
-          </h3>
-          <span style={{ fontSize: 20, fontWeight: 900 }}>
-            {expandedSection === 'recurring' ? '−' : '+'}
-          </span>
-        </div>
-
-        {expandedSection === 'recurring' && (
-          <div style={{ padding: 20 }}>
-            {recurring.topOffenders.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 20, color: '#64748b' }}>
-                No recurring complaints found
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gap: 12 }}>
-                {recurring.topOffenders.map((item, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      background: '#f8fafc',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 8,
-                      padding: 12,
-                      display: 'grid',
-                      gridTemplateColumns: '30px 1fr 60px',
-                      gap: 12,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <div
-                      style={{
-                        background: '#ef4444',
-                        color: '#ffffff',
-                        borderRadius: '50%',
-                        width: 30,
-                        height: 30,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 900,
-                        fontSize: 12,
-                      }}
-                    >
-                      {idx + 1}
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
-                        {item.businessName}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>
-                        {item.complaints.length} complaints
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 18, fontWeight: 900, color: '#ef4444', textAlign: 'right' }}>
-                      {item.count}×
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* High Authenticity Complaints */}
-      <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
-          High Authenticity Complaints
-        </div>
-        <div style={{ fontSize: 32, fontWeight: 900, color: '#22c55e', marginBottom: 4 }}>
-          {complaints.highAuthenticity}
-        </div>
-        <div style={{ fontSize: 13, color: '#64748b' }}>
-          Complaints with authenticity level {'>'} 50%
-        </div>
-      </div>
     </div>
   );
 }

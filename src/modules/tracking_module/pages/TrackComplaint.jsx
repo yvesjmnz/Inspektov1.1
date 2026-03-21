@@ -76,27 +76,42 @@ export default function TrackComplaint() {
 
   const canSearch = useMemo(() => String(complaintId).trim().length > 0, [complaintId]);
 
+  const loadTrackingData = async (rawId) => {
+    const idRaw = String(rawId || '').trim();
+    if (!idRaw) {
+      throw new Error('Please enter your complaint ID.');
+    }
+
+    const idForQuery = /^\d+$/.test(idRaw) ? Number(idRaw) : idRaw;
+    const data = await getComplaintTracking(idForQuery);
+    setComplaint(data.complaint);
+    setRelated({ missionOrders: data.missionOrders, inspections: data.inspections });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setComplaint(null);
 
-    const idRaw = String(complaintId).trim();
-    if (!idRaw) {
-      setError('Please enter your complaint ID.');
-      return;
+    try {
+      setLoading(true);
+      await loadTrackingData(complaintId);
+    } catch (err) {
+      setError(err?.message || 'Unable to find this complaint ID.');
+    } finally {
+      setLoading(false);
     }
+  };
 
-    // complaints.id is likely numeric; allow either numeric or uuid-like input.
-    const idForQuery = /^\d+$/.test(idRaw) ? Number(idRaw) : idRaw;
+  const handleRefresh = async () => {
+    if (!complaint?.id && !String(complaintId || '').trim()) return;
 
     try {
       setLoading(true);
-      const data = await getComplaintTracking(idForQuery);
-      setComplaint(data.complaint);
-      setRelated({ missionOrders: data.missionOrders, inspections: data.inspections });
+      setError('');
+      await loadTrackingData(complaint?.id || complaintId);
     } catch (err) {
-      setError(err?.message || 'Unable to find this complaint ID.');
+      setError(err?.message || 'Unable to refresh complaint tracking.');
     } finally {
       setLoading(false);
     }
@@ -140,7 +155,19 @@ export default function TrackComplaint() {
           ) : (
             <div className="track-result">
               <div className="track-result-header">
-                <h2 className="track-title">Complaint Status</h2>
+                <div className="track-result-title-row">
+                  <h2 className="track-title">Complaint Status</h2>
+                  <button
+                    type="button"
+                    className="track-refresh-btn"
+                    onClick={handleRefresh}
+                    disabled={loading}
+                    aria-label="Refresh complaint tracking"
+                    title="Refresh"
+                  >
+                    <img src="/refresh.png" alt="" aria-hidden="true" className="track-refresh-icon" />
+                  </button>
+                </div>
                 <div className="track-meta-container">
                   <div className="track-meta-left">
                     <div className="track-meta-item">

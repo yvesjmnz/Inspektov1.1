@@ -190,7 +190,7 @@ function getUrgencyText(authenticityLevel) {
 
 function getUrgencyStyle(urgency) {
   const u = Number(urgency);
-  if (u === 100) {
+  if (u > 50) {
     return {
       badge: { background: '#dcfce7', border: '1px solid #22c55e', color: '#166534' },
       hover: { borderLeft: '4px solid #22c55e' }
@@ -202,7 +202,7 @@ function getUrgencyStyle(urgency) {
       hover: { borderLeft: '4px solid #eab308' }
     };
   }
-  if (u === 25) {
+  if (u < 50) {
     return {
       badge: { background: '#fee2e2', border: '1px solid #ef4444', color: '#991b1b' },
       hover: { borderLeft: '4px solid #ef4444' }
@@ -2496,9 +2496,9 @@ export default function DashboardDirector() {
                               const urgencyStyle = tab === 'queue' ? getUrgencyStyle(c?.authenticity_level) : null;
                               const urgencyColor = tab === 'queue' ? (() => {
                                 const u = Number(c?.authenticity_level);
-                                if (u === 100) return '#22c55e'; // green
+                                if (u > 50) return '#22c55e'; // green
                                 if (u === 50) return '#eab308'; // yellow
-                                if (u === 25) return '#ef4444'; // red
+                                if (u < 50) return '#ef4444'; // red
                                 return '#cbd5e1'; // gray
                               })() : null;
                               return (
