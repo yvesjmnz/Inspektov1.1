@@ -455,6 +455,8 @@ export default function InspectionSlipCreate() {
 
   const [inspectorSignature, setInspectorSignature] = useState('');
   const [ownerSignature, setOwnerSignature] = useState('');
+  const [inspectorSignaturePath, setInspectorSignaturePath] = useState(null);
+  const [ownerSignaturePath, setOwnerSignaturePath] = useState(null);
 
   const configureCanvas = (canvas) => {
     if (!canvas) return;
@@ -497,7 +499,6 @@ export default function InspectionSlipCreate() {
 
   useEffect(() => {
     void requestInspectorLocation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -677,7 +678,6 @@ export default function InspectionSlipCreate() {
           if (Array.isArray(explicitReport.attachment_urls) && explicitReport.attachment_urls.length) {
             const mapped = [];
             for (const path of explicitReport.attachment_urls.filter(Boolean)) {
-              // eslint-disable-next-line no-await-in-loop
               const { data: signed } = await supabase.storage.from('inspection').createSignedUrl(path, 60 * 60 * 24 * 7);
               mapped.push({ url: signed?.signedUrl || '', blob: null, ts: Date.now(), storagePath: path });
             }
@@ -685,16 +685,22 @@ export default function InspectionSlipCreate() {
           }
 
           if (explicitReport.inspector_signature_url) {
+            setInspectorSignaturePath(explicitReport.inspector_signature_url);
             const { data: signed } = await supabase.storage
               .from('inspection')
               .createSignedUrl(explicitReport.inspector_signature_url, 60 * 60 * 24 * 7);
             if (signed?.signedUrl) setInspectorSignature(signed.signedUrl);
+          } else {
+            setInspectorSignaturePath(null);
           }
           if (explicitReport.owner_signature_url) {
+            setOwnerSignaturePath(explicitReport.owner_signature_url);
             const { data: signed } = await supabase.storage
               .from('inspection')
               .createSignedUrl(explicitReport.owner_signature_url, 60 * 60 * 24 * 7);
             if (signed?.signedUrl) setOwnerSignature(signed.signedUrl);
+          } else {
+            setOwnerSignaturePath(null);
           }
 
           // Checklist
@@ -783,7 +789,6 @@ export default function InspectionSlipCreate() {
             // Convert stored paths into signed urls for preview
             const mapped = [];
             for (const path of existingReport.attachment_urls.filter(Boolean)) {
-              // eslint-disable-next-line no-await-in-loop
               const { data: signed } = await supabase.storage.from('inspection').createSignedUrl(path, 60 * 60 * 24 * 7);
               mapped.push({ url: signed?.signedUrl || '', blob: null, ts: Date.now(), storagePath: path });
             }
@@ -791,16 +796,22 @@ export default function InspectionSlipCreate() {
           }
 
           if (existingReport.inspector_signature_url) {
+            setInspectorSignaturePath(existingReport.inspector_signature_url);
             const { data: signed } = await supabase.storage
               .from('inspection')
               .createSignedUrl(existingReport.inspector_signature_url, 60 * 60 * 24 * 7);
             if (signed?.signedUrl) setInspectorSignature(signed.signedUrl);
+          } else {
+            setInspectorSignaturePath(null);
           }
           if (existingReport.owner_signature_url) {
+            setOwnerSignaturePath(existingReport.owner_signature_url);
             const { data: signed } = await supabase.storage
               .from('inspection')
               .createSignedUrl(existingReport.owner_signature_url, 60 * 60 * 24 * 7);
             if (signed?.signedUrl) setOwnerSignature(signed.signedUrl);
+          } else {
+            setOwnerSignaturePath(null);
           }
 
           // Checklist
@@ -840,6 +851,8 @@ export default function InspectionSlipCreate() {
           setInspectionReportId(null);
           setInspectionOwnerId(null);
           setInspectionOwnerName('');
+          setInspectorSignaturePath(null);
+          setOwnerSignaturePath(null);
           setIsCompleted(false);
           setCompletionKnown(false);
           setInspectionStarted(false);
@@ -873,7 +886,6 @@ export default function InspectionSlipCreate() {
                   setBusinessResult({ matches: bizMatches });
                   setBusinessSearch(name || addr || '');
                   // Use the first match to pre-fill fields; inspector can override.
-                  // eslint-disable-next-line no-use-before-define
                   handleUseBusiness(bizMatches[0]);
                   setAutoFillMessage(
                     'Autofilled from registered business based on the complained business. Click a result card to change.'
@@ -1003,8 +1015,10 @@ export default function InspectionSlipCreate() {
 
     const dataUrl = canvas.toDataURL('image/png');
     if (who === 'inspector') {
+      setInspectorSignaturePath(null);
       setInspectorSignature(dataUrl);
     } else {
+      setOwnerSignaturePath(null);
       setOwnerSignature(dataUrl);
     }
   };
@@ -1016,8 +1030,10 @@ export default function InspectionSlipCreate() {
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (who === 'inspector') {
+      setInspectorSignaturePath(null);
       setInspectorSignature('');
     } else {
+      setOwnerSignaturePath(null);
       setOwnerSignature('');
     }
   };
@@ -1395,6 +1411,7 @@ export default function InspectionSlipCreate() {
         const storagePath = `inspection-reports/${inspectionReportId}/signatures/${file.name}`;
         const { path, signedUrl } = await uploadToInspectionBucket({ path: storagePath, file, contentType: file.type });
         inspectorSigPath = path;
+        setInspectorSignaturePath(path);
         setInspectorSignature(signedUrl);
       }
 
@@ -1404,6 +1421,7 @@ export default function InspectionSlipCreate() {
         const storagePath = `inspection-reports/${inspectionReportId}/signatures/${file.name}`;
         const { path, signedUrl } = await uploadToInspectionBucket({ path: storagePath, file, contentType: file.type });
         ownerSigPath = path;
+        setOwnerSignaturePath(path);
         setOwnerSignature(signedUrl);
       }
 
@@ -1439,14 +1457,14 @@ export default function InspectionSlipCreate() {
         attachment_urls: attachmentUrlsForDb.length ? attachmentUrlsForDb : null,
 
         // Save signature storage paths into their dedicated columns
-        inspector_signature_url: inspectorSigPath,
-        owner_signature_url: ownerSigPath,
+        inspector_signature_url: inspectorSigPath || inspectorSignaturePath || null,
+        owner_signature_url: ownerSigPath || ownerSignaturePath || null,
       };
 
       const { error: upErr } = await supabase
         .from('inspection_reports')
         .update(payload)
-        .eq('id', inspectionReportId);
+        .eq('mission_order_id', missionOrderId);
 
       if (upErr) throw upErr;
 
@@ -1569,9 +1587,37 @@ export default function InspectionSlipCreate() {
 
       if (subErr) throw subErr;
 
-      setToast('Inspection report marked as Completed.');
+      const complaintId = missionOrder?.complaint_id || complaint?.id || null;
+      if (complaintId) {
+        const { error: complaintUpdateErr } = await supabase
+          .from('complaints')
+          .update({
+            status: 'completed',
+            updated_at: completedAt,
+          })
+          .eq('id', complaintId);
+
+        if (complaintUpdateErr) throw complaintUpdateErr;
+
+        setComplaint((prev) => (prev?.id === complaintId ? { ...prev, status: 'completed', updated_at: completedAt } : prev));
+      }
+
+      const { error: missionOrderUpdateErr } = await supabase
+        .from('mission_orders')
+        .update({
+          status: 'complete',
+          updated_at: completedAt,
+        })
+        .eq('id', missionOrderId);
+
+      if (missionOrderUpdateErr) throw missionOrderUpdateErr;
+
+      setMissionOrder((prev) => (prev ? { ...prev, status: 'complete', updated_at: completedAt } : prev));
+
+      setToast('Inspection report submitted and complaint tracking marked complete.');
       setIsCompleted(true);
       setCompletionKnown(true);
+      setInspectionStarted(true);
       setActiveTab('inspection_details');
     } catch (e) {
       setError(e?.message || 'Failed to submit inspection report.');

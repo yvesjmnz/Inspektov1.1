@@ -1,17 +1,9 @@
 import { useMemo, useState } from 'react';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
-import { getComplaintById, getComplaintTracking } from '../../../lib/complaints';
+import { getComplaintTracking } from '../../../lib/complaints';
+import { pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import './TrackComplaint.css';
-
-function formatStatus(status) {
-  if (!status) return 'Unknown';
-  return String(status)
-    .replace(/_/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 function formatDateTime(date) {
   if (!date) return '—';
@@ -34,38 +26,6 @@ function formatDateTime(date) {
   return `${datePart} | ${timePart}`;
 }
 
-function statusBadgeClass(status) {
-  const s = String(status || '').toLowerCase();
-  if (['resolved', 'closed', 'completed', 'done'].includes(s)) return 'status-badge status-success';
-  if (['rejected', 'invalid', 'cancelled', 'canceled', 'declined'].includes(s)) return 'status-badge status-danger';
-  if (['pending', 'new', 'submitted'].includes(s)) return 'status-badge status-warning';
-  if (['in_progress', 'in progress', 'processing', 'under_review', 'under review'].includes(s)) return 'status-badge status-info';
-  return 'status-badge';
-}
-
-// Map complaint status to progress step based on actual system statuses
-function getStatusStep(status) {
-  const s = String(status || '').toLowerCase();
-  
-  // Define the ordered steps using only actual statuses in the system
-  const steps = [
-    { index: 0, statuses: ['submitted', 'new', 'pending'] },
-    { index: 1, statuses: ['approved', 'declined'] },
-  ];
-  
-  for (const step of steps) {
-    if (step.statuses.includes(s)) {
-      return step.index;
-    }
-  }
-  
-  return 0; // Default to first step
-}
-
-const PROGRESS_STEPS = [
-  'Submitted',
-  'Decision',
-];
 
 export default function TrackComplaint() {
   const [complaintId, setComplaintId] = useState('');
@@ -202,16 +162,17 @@ export default function TrackComplaint() {
 
                 // Inspection step is driven by inspection_reports presence and status
                 const hasAnyInspection = inspections.length > 0;
-                const latestInspection = hasAnyInspection ? inspections[inspections.length - 1] : null;
+                const latestInspection = hasAnyInspection ? pickPreferredInspectionReport(inspections) : null;
                 const inspectionStatus = latestInspection ? String(latestInspection.status || '').toLowerCase() : '';
-                const inspectionCompleted = inspectionStatus === 'completed';
+                const inspectionCompleted = inspectionStatus === 'completed' || inspectionStatus === 'complete';
                 const inspectionInProgress = ['in_progress', 'in progress', 'ongoing', 'processing'].includes(inspectionStatus);
-                const inspectionStartedAt = latestInspection?.created_at ? new Date(latestInspection.created_at) : null;
+                const inspectionStartedAt = latestInspection?.started_at || latestInspection?.created_at
+                  ? new Date(latestInspection?.started_at || latestInspection?.created_at)
+                  : null;
                 const inspectionCompletedAt = latestInspection?.completed_at ? new Date(latestInspection.completed_at) : null;
 
                 // Document Processing (MO) timestamps
                 const hasMo = missionOrders.length > 0;
-                const moCreatedAt = hasMo && missionOrders[0]?.created_at ? new Date(missionOrders[0].created_at) : null;
                 // UX requirement: Document Processing resolution time starts when the complaint was received,
                 // not when the draft mission order was created.
                 const moStartAt = receivedDate;
@@ -250,11 +211,10 @@ export default function TrackComplaint() {
                 // - Else terminal complaint states also considered resolved.
                 const complaintMarkedComplete = ['resolved', 'closed', 'completed', 'done'].includes(s);
                 const hasGeneratedInspectionSlipDocx = !!latestInspection?.generated_docx_url;
-                const isResolved = isDeclined || complaintMarkedComplete || (inspectionCompleted && hasGeneratedInspectionSlipDocx);
                 const resolutionDate = isDeclined ? (declinedDate || reviewDate) : (inspectionCompletedAt || approvedDate || declinedDate || null);
                 const resolutionLabel = isDeclined
                   ? 'Case Closed'
-                  : complaintMarkedComplete || (inspectionCompleted && hasGeneratedInspectionSlipDocx)
+                  : complaintMarkedComplete || inspectionCompleted
                     ? 'Business Inspected'
                     : inspectionCompleted
                       ? 'Inspection Completed'
@@ -293,7 +253,7 @@ export default function TrackComplaint() {
                   (complaintMarkedComplete || missionOrderIsComplete) &&
                   hasGeneratedInspectionSlipDocx;
 
-                const effectiveIsResolved = isDeclined || complaintMarkedComplete || missionOrderIsComplete;
+                const effectiveIsResolved = isDeclined || complaintMarkedComplete || missionOrderIsComplete || inspectionCompleted;
 
                 // Utility to render date nicely
                 const fmt = (d) => formatDateTime(d);
@@ -402,7 +362,7 @@ export default function TrackComplaint() {
                           </div>
 
                           {/* Step 5 - Resolution */}
-                          <div className={`vtl-step ${effectiveIsResolved ? 'active' : 'inactive'}`}>
+                          <div className={`vtl-step ${effectiveIsResolved ? 'completed' : 'inactive'}`}>
                             <div className="vtl-marker">{effectiveIsResolved ? '✓' : 5}</div>
                             <div className="vtl-content">
                               <div className="vtl-title">Resolution</div>
@@ -411,6 +371,18 @@ export default function TrackComplaint() {
                                   ? 'Business has been inspected. Findings summary (no internal assessments).'
                                   : 'Summary of findings will appear after the inspection slip is downloaded.'}
                               </div>
+                              {effectiveIsResolved ? (
+                                <>
+                                  <div className="vtl-detail">
+                                    <span className="vtl-detail-label">Status:</span>{' '}
+                                    <span className="vtl-detail-value">{resolutionLabel}</span>
+                                  </div>
+                                  <div className="vtl-detail">
+                                    <span className="vtl-detail-label">Date:</span>{' '}
+                                    <span className="vtl-detail-value">{fmt(resolutionDate)}</span>
+                                  </div>
+                                </>
+                              ) : null}
                               {showFindingsSummary ? (
                                 <div style={{ marginTop: 12 }}>
                                   <div className="vtl-detail">
