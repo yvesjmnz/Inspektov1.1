@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
 import { supabase } from '../../../lib/supabase';
+import { pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import './Dashboard.css';
 
 function getMissionOrderIdFromQuery() {
@@ -259,20 +260,19 @@ export default function InspectorInspectionDetails() {
 
       if (cError) throw cError;
 
-      // Load latest inspection report for this inspector + mission order, if any.
+      // Load the single report that currently owns this mission order, if any.
       const { data: reportRows, error: reportError } = await supabase
         .from('inspection_reports')
-        .select('id, status, started_at, completed_at')
-        .eq('inspector_id', userId)
+        .select('id, inspector_id, status, started_at, completed_at, updated_at, created_at')
         .eq('mission_order_id', missionOrderId)
         .order('updated_at', { ascending: false })
-        .limit(1);
+        .limit(50);
 
       if (reportError) throw reportError;
 
       setMissionOrder(mo);
       setComplaint(c);
-      setInspectionReport(reportRows && reportRows.length ? reportRows[0] : null);
+      setInspectionReport(pickPreferredInspectionReport(reportRows || []));
     } catch (e) {
       setError(e?.message || 'Failed to load inspection details.');
       setMissionOrder(null);
@@ -297,6 +297,11 @@ export default function InspectorInspectionDetails() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'mission_orders', filter: `id=eq.${missionOrderId}` },
+        () => load()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'inspection_reports', filter: `mission_order_id=eq.${missionOrderId}` },
         () => load()
       )
       .subscribe();

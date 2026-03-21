@@ -5,6 +5,7 @@ import L from 'leaflet';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
 import XIconButton from '../../../components/XIconButton.jsx';
+import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import { supabase } from '../../../lib/supabase';
 import './InspectionSlipCreate.css';
 
@@ -128,13 +129,6 @@ function OverviewField({ label, children, fullWidth = false }) {
   );
 }
 
-function normalizeInspectionReportStatus(report) {
-  const s = String(report?.status || '').toLowerCase().trim();
-  if (s === 'completed' || s === 'complete') return 'completed';
-  if ((s === 'in progress' || s === 'in_progress') && report?.started_at) return 'in progress';
-  return 'pending inspection';
-}
-
 export default function InspectionSlipCreate() {
   const missionOrderId = useMemo(() => getMissionOrderIdFromQuery(), []);
   const inspectionReportIdFromQuery = useMemo(() => getInspectionReportIdFromQuery(), []);
@@ -146,13 +140,15 @@ export default function InspectionSlipCreate() {
   const [missionOrder, setMissionOrder] = useState(null);
   const [complaint, setComplaint] = useState(null);
   const [signedAttachmentUrl, setSignedAttachmentUrl] = useState('');
-  const [signedAttachmentMeta, setSignedAttachmentMeta] = useState({
+  const [_signedAttachmentMeta, setSignedAttachmentMeta] = useState({
     uploadedAt: null,
     uploadedBy: null,
   });
   const [assignedInspectors, setAssignedInspectors] = useState([]);
 
   const [inspectionReportId, setInspectionReportId] = useState(null);
+  const [inspectionOwnerId, setInspectionOwnerId] = useState(null);
+  const [inspectionOwnerName, setInspectionOwnerName] = useState('');
   const [currentInspectorId, setCurrentInspectorId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
@@ -613,6 +609,7 @@ export default function InspectionSlipCreate() {
         if (allAssignmentError) throw allAssignmentError;
 
         const inspectorIds = Array.from(new Set((allAssignmentRows || []).map((row) => row.inspector_id).filter(Boolean)));
+        let inspectorNameById = new Map();
         if (inspectorIds.length) {
           const { data: profiles, error: profilesError } = await supabase
             .from('profiles')
@@ -621,10 +618,10 @@ export default function InspectionSlipCreate() {
 
           if (profilesError) throw profilesError;
 
-          const nameById = new Map((profiles || []).map((profile) => [profile.id, profile.full_name]));
+          inspectorNameById = new Map((profiles || []).map((profile) => [profile.id, profile.full_name]));
           setAssignedInspectors(
             (allAssignmentRows || [])
-              .map((row) => nameById.get(row.inspector_id))
+              .map((row) => inspectorNameById.get(row.inspector_id))
               .filter(Boolean)
               .filter((value, index, arr) => arr.indexOf(value) === index)
           );
@@ -639,12 +636,14 @@ export default function InspectionSlipCreate() {
             .from('inspection_reports')
             .select('*')
             .eq('id', inspectionReportIdFromQuery)
-            .eq('inspector_id', userId)
+            .eq('mission_order_id', missionOrderId)
             .single();
 
           if (explicitErr) throw explicitErr;
 
           setInspectionReportId(explicitReport.id);
+          setInspectionOwnerId(explicitReport.inspector_id || null);
+          setInspectionOwnerName(inspectorNameById.get(explicitReport.inspector_id) || '');
 
           // Hydrate fields from the explicit report
           setAdditionalComments(explicitReport.inspection_comments || '');
@@ -738,57 +737,22 @@ export default function InspectionSlipCreate() {
           return;
         }
 
-        // Create or load inspection report draft for this mission order + inspector.
-        // IMPORTANT: always reuse an existing non-completed draft if it exists.
-        // This prevents duplicates where a new row is created on submit instead of updating the draft.
-        const { data: existingReport, error: reportErr } = await supabase
+        // Load the single report that currently owns this mission order, if any.
+        const { data: missionOrderReports, error: reportErr } = await supabase
           .from('inspection_reports')
           .select('*')
           .eq('mission_order_id', missionOrderId)
-          .eq('inspector_id', userId)
-          .neq('status', 'completed')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        // If there are multiple non-completed drafts (legacy bug), keep the latest one and
-        // clean up the older ones to avoid confusion and future duplicate updates.
-        const { data: allDrafts, error: allDraftsErr } = await supabase
-          .from('inspection_reports')
-          .select('id, created_at')
-          .eq('mission_order_id', missionOrderId)
-          .eq('inspector_id', userId)
-          .neq('status', 'completed')
-          .order('created_at', { ascending: false });
-
-        if (allDraftsErr) throw allDraftsErr;
-
-        const draftIds = (allDrafts || []).map((r) => r.id).filter(Boolean);
-        if (draftIds.length > 1) {
-          const keepId = draftIds[0];
-          const deleteIds = draftIds.slice(1);
-          // Best-effort cleanup; don't fail loading if delete is blocked by RLS.
-          await supabase.from('inspection_reports').delete().in('id', deleteIds);
-          if (existingReport?.id && existingReport.id !== keepId) {
-            // Ensure we continue with the kept draft if the query returned a different one.
-            // (Shouldn't happen due to ordering, but kept for safety.)
-            // eslint-disable-next-line no-param-reassign
-            existingReport.id = keepId;
-          }
-        }
+          .order('updated_at', { ascending: false })
+          .limit(50);
 
         if (reportErr) throw reportErr;
 
+        const existingReport = pickPreferredInspectionReport(missionOrderReports || []);
+
         if (existingReport?.id) {
-          // Safety: guarantee we are always pointing at the most recent non-completed draft.
-          // This avoids creating a second row later during save/submit flows.
-          if (allDrafts?.length) {
-            const latestId = allDrafts[0]?.id;
-            if (latestId && latestId !== existingReport.id) {
-              setInspectionReportId(latestId);
-            }
-          }
           setInspectionReportId(existingReport.id);
+          setInspectionOwnerId(existingReport.inspector_id || null);
+          setInspectionOwnerName(inspectorNameById.get(existingReport.inspector_id) || '');
 
           // Hydrate fields from draft
           setAdditionalComments(existingReport.inspection_comments || '');
@@ -874,6 +838,8 @@ export default function InspectionSlipCreate() {
           setInspectionStarted(existingWorkflowStatus === 'in progress' || existingWorkflowStatus === 'completed');
         } else {
           setInspectionReportId(null);
+          setInspectionOwnerId(null);
+          setInspectionOwnerName('');
           setIsCompleted(false);
           setCompletionKnown(false);
           setInspectionStarted(false);
@@ -932,6 +898,8 @@ export default function InspectionSlipCreate() {
         setMissionOrder(null);
         setComplaint(null);
         setInspectionReportId(null);
+        setInspectionOwnerId(null);
+        setInspectionOwnerName('');
         setError(e?.message || 'Failed to load mission order.');
       } finally {
         setLoading(false);
@@ -1204,17 +1172,6 @@ export default function InspectionSlipCreate() {
     }
   };
 
-  const formatStatus = (status) => {
-    if (!status) return 'Unknown';
-    const s = String(status || '').toLowerCase();
-    if (s === 'completed' || s === 'for_inspection' || s === 'for inspection') return 'For Inspection';
-    return String(status)
-      .replace(/_/g, ' ')
-      .trim()
-      .replace(/\s+/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-  };
-
   const statusBadgeStyle = (status) => {
     const s = String(status || '').toLowerCase();
     let bg = '#e2e8f0';
@@ -1259,6 +1216,11 @@ export default function InspectionSlipCreate() {
   const complaintViolationGroups = useMemo(() => groupComplaintCategoriesFromTags(complaint?.tags || []), [complaint?.tags]);
   const inspectionStatusValue = isCompleted ? 'completed' : inspectionStarted ? 'in progress' : 'pending inspection';
   const inspectionStatusLabel = isCompleted ? 'Completed' : inspectionStarted ? 'In Progress' : 'Pending Inspection';
+  const inspectionLocked =
+    !!inspectionReportId && !!currentInspectorId && !!inspectionOwnerId && inspectionOwnerId !== currentInspectorId;
+  const inspectionLockMessage = inspectionLocked
+    ? `This mission order already has an inspection slip started by ${inspectionOwnerName || 'another assigned inspector'}. Only one inspection slip is allowed per mission order.`
+    : '';
   const signedAttachmentIsPdf = /\.pdf(\?|#|$)/i.test(String(signedAttachmentUrl || ''));
 
   const INSPECTION_BUCKET = 'inspection';
@@ -1388,6 +1350,10 @@ export default function InspectionSlipCreate() {
       setError('This inspection report is already completed and can no longer be edited.');
       return;
     }
+    if (inspectionLocked) {
+      setError(inspectionLockMessage);
+      return;
+    }
     if (!inspectionReportId) {
       setError('Inspection report is not initialized yet. Please wait and try again.');
       return;
@@ -1491,6 +1457,10 @@ export default function InspectionSlipCreate() {
   const handleSubmitReport = async () => {
     if (isCompleted) {
       setError('This inspection report is already completed and can no longer be submitted.');
+      return;
+    }
+    if (inspectionLocked) {
+      setError(inspectionLockMessage);
       return;
     }
     if (!inspectionReportId) {
@@ -1638,6 +1608,12 @@ export default function InspectionSlipCreate() {
       return;
     }
 
+    if (inspectionLocked) {
+      setError(inspectionLockMessage);
+      setActiveTab('inspection_details');
+      return;
+    }
+
     if (inspectionStarted && inspectionReportId) {
       setActiveTab('inspection');
       return;
@@ -1676,51 +1652,14 @@ export default function InspectionSlipCreate() {
         throw new Error('You are not assigned to this mission order.');
       }
 
-      const { data: existingReport, error: existingErr } = await supabase
-        .from('inspection_reports')
-        .select('id, status, started_at, created_at')
-        .eq('mission_order_id', missionOrderId)
-        .eq('inspector_id', inspectorId)
-        .neq('status', 'completed')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: claimedReport, error: claimErr } = await supabase.rpc('claim_mission_order_inspection_report', {
+        p_mission_order_id: missionOrderId,
+      });
 
-      if (existingErr) throw existingErr;
+      if (claimErr) throw claimErr;
 
-      let activeReportId = existingReport?.id || null;
-      if (activeReportId) {
-        const existingStatus = String(existingReport?.status || '').toLowerCase().trim();
-        if (existingStatus !== 'in progress' && existingStatus !== 'in_progress') {
-          const { error: updateErr } = await supabase
-            .from('inspection_reports')
-            .update({
-              status: 'in progress',
-              started_at: existingReport?.started_at || new Date().toISOString(),
-            })
-            .eq('id', activeReportId);
-
-          if (updateErr) throw updateErr;
-        }
-      } else {
-        const { data: createdReport, error: createErr } = await supabase
-          .from('inspection_reports')
-          .insert([
-            {
-              mission_order_id: missionOrderId,
-              inspector_id: inspectorId,
-              status: 'in progress',
-              started_at: new Date().toISOString(),
-            },
-          ])
-          .select('id')
-          .single();
-
-        if (createErr) throw createErr;
-        activeReportId = createdReport.id;
-      }
-
-      setInspectionReportId(activeReportId);
+      setInspectionReportId(claimedReport?.id || null);
+      setInspectionOwnerId(claimedReport?.inspector_id || inspectorId);
       setCompletionKnown(true);
       setInspectionStarted(true);
       setActiveTab('inspection');
@@ -1920,23 +1859,12 @@ export default function InspectionSlipCreate() {
               <a className="mo-link" href="/dashboard/inspector">
                 Back
               </a>
-              {false && completionKnown && !isCompleted ? (
-                <button
-                  type="button"
-                  className="mo-btn mo-btn-primary"
-                  onClick={handleSubmitReport}
-                  disabled={saving || loading || !inspectionReportId}
-                  style={{ marginLeft: 8 }}
-                  title="Submit as Completed"
-                >
-                  {saving ? 'Submitting…' : 'Submit'}
-                </button>
-              ) : null}
             </div>
           </div>
 
           {toast ? <div className="mo-alert mo-alert-success">{toast}</div> : null}
           {error ? <div className="mo-alert mo-alert-error">{error}</div> : null}
+          {inspectionLockMessage ? <div className="mo-alert mo-alert-error">{inspectionLockMessage}</div> : null}
 
           {!missionOrderId ? (
             <div className="mo-meta">Open this page as /inspection-slip/create?missionOrderId=&lt;uuid&gt;</div>
@@ -1966,7 +1894,7 @@ export default function InspectionSlipCreate() {
                     >
                       Inspection Details
                     </button>
-                    {!isCompleted ? (
+                    {!isCompleted && !inspectionLocked ? (
                       <button
                         type="button"
                         role="tab"
@@ -3447,7 +3375,7 @@ export default function InspectionSlipCreate() {
                         type="button"
                         className="mo-btn mo-btn-primary"
                         onClick={handleSubmitReport}
-                        disabled={saving || loading || !inspectionReportId}
+                        disabled={saving || loading || !inspectionReportId || inspectionLocked}
                         title="Submit as Completed"
                         style={{
                           width: 'min(100%, 320px)',

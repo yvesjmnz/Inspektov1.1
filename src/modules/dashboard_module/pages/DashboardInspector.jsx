@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import NotificationBell from '../../../components/NotificationBell';
 import './Dashboard.css';
 
@@ -32,13 +33,6 @@ function statusBadgeClass(status) {
   if (s === 'completed' || s === 'complete') return 'status-badge status-success';
 
   return 'status-badge';
-}
-
-function resolveInspectionWorkflowStatus(report) {
-  const s = String(report?.status || '').toLowerCase().trim();
-  if (s === 'completed' || s === 'complete') return 'completed';
-  if ((s === 'in progress' || s === 'in_progress') && report?.started_at) return 'in progress';
-  return 'pending inspection';
 }
 
 export default function DashboardInspector() {
@@ -184,8 +178,7 @@ export default function DashboardInspector() {
       // NOTE: There can be multiple reports per mission order (drafts, re-submits). We must choose deterministically.
       const { data: reportRows, error: reportErr } = await supabase
         .from('inspection_reports')
-        .select('id, mission_order_id, status, started_at, completed_at, updated_at, created_at')
-        .eq('inspector_id', userId)
+        .select('id, mission_order_id, inspector_id, status, started_at, completed_at, updated_at, created_at')
         .in('mission_order_id', visibleMissionOrderIds)
         .order('updated_at', { ascending: false })
         .limit(500);
@@ -198,46 +191,12 @@ export default function DashboardInspector() {
         if (!r?.mission_order_id) continue;
         const key = r.mission_order_id;
         const prev = reportByMissionOrderId.get(key);
-        const currentResolvedStatus = resolveInspectionWorkflowStatus(r);
-        if (!prev) {
-          reportByMissionOrderId.set(key, { ...r, resolvedStatus: currentResolvedStatus });
-          continue;
-        }
-
-        const prevResolvedStatus = prev.resolvedStatus || resolveInspectionWorkflowStatus(prev);
-        const prevCompleted = isCompletedStatus(prevResolvedStatus);
-        const curCompleted = isCompletedStatus(currentResolvedStatus);
-
-        const statusPriority = (s) => {
-          const v = statusLower(s);
-          if (v === 'completed' || v === 'complete') return 3;
-          if (v === 'in progress' || v === 'in_progress') return 2;
-          if (v === 'pending inspection' || v === 'pending_inspection' || v === 'pending') return 1;
-          return 0;
-        };
-
-        // If any report is completed, keep a completed one.
-        if (!prevCompleted && curCompleted) {
-          reportByMissionOrderId.set(key, { ...r, resolvedStatus: currentResolvedStatus });
-          continue;
-        }
-        if (prevCompleted && !curCompleted) {
-          continue;
-        }
-
-        if (statusPriority(currentResolvedStatus) > statusPriority(prevResolvedStatus)) {
-          reportByMissionOrderId.set(key, { ...r, resolvedStatus: currentResolvedStatus });
-          continue;
-        }
-        if (statusPriority(currentResolvedStatus) < statusPriority(prevResolvedStatus)) {
-          continue;
-        }
-
-        // Otherwise keep the latest by completed_at/updated_at/created_at.
-        const prevTime = new Date(prev.completed_at || prev.updated_at || prev.created_at || 0).getTime();
-        const curTime = new Date(r.completed_at || r.updated_at || r.created_at || 0).getTime();
-        if (curTime > prevTime) {
-          reportByMissionOrderId.set(key, { ...r, resolvedStatus: currentResolvedStatus });
+        const preferred = pickPreferredInspectionReport([prev, r].filter(Boolean));
+        if (preferred) {
+          reportByMissionOrderId.set(key, {
+            ...preferred,
+            resolvedStatus: normalizeInspectionReportStatus(preferred),
+          });
         }
       }
 
@@ -264,6 +223,8 @@ export default function DashboardInspector() {
             inspection_report_id: rep.id || null,
             inspection_status: rep.resolvedStatus || 'pending inspection',
             inspection_completed_at: rep.completed_at || null,
+            inspection_owner_id: rep.inspector_id || null,
+            inspection_owned_by_current_user: !!rep.inspector_id && rep.inspector_id === userId,
           };
         })
         .sort((a, b) => {
@@ -330,10 +291,10 @@ export default function DashboardInspector() {
         .subscribe();
 
       reportChannel = supabase
-        .channel(`inspector-inspection-reports-${userId}`)
+        .channel(`inspector-inspection-reports-global-${userId}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'inspection_reports', filter: `inspector_id=eq.${userId}` },
+          { event: '*', schema: 'public', table: 'inspection_reports' },
           () => loadAssigned()
         )
         .subscribe();
@@ -611,7 +572,7 @@ export default function DashboardInspector() {
                                 insp.getDate() === today.getDate();
 
                               const href =
-                                r.inspection_report_id
+                                r.inspection_report_id && r.inspection_owned_by_current_user
                                   ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
                                   : `/inspection-slip/create?missionOrderId=${r.mission_order_id}`;
 
