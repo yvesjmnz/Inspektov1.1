@@ -4,6 +4,7 @@ import { MapContainer, Marker, TileLayer } from 'react-leaflet';
 import L from 'leaflet';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
+import XIconButton from '../../../components/XIconButton.jsx';
 import { supabase } from '../../../lib/supabase';
 import './InspectionSlipCreate.css';
 
@@ -23,6 +24,22 @@ function formatDateHuman(value) {
   const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function formatPhotoTimestamp(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  const datePart = d.toLocaleDateString(undefined, {
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  const timePart = d.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `${datePart}, ${timePart}`;
 }
 
 const GUIDED_CATEGORY_LABELS = [
@@ -180,7 +197,8 @@ export default function InspectionSlipCreate() {
   const [autoFillMessage, setAutoFillMessage] = useState('');
 
   // Tabs: order required by UX
-  const [activeTab, setActiveTab] = useState('inspection_details'); // 'inspection_details' | 'inspection'
+  const [activeTab, setActiveTab] = useState('inspection_details'); // 'inspection_details' | 'inspection' | 'summary'
+  const [summaryUnlocked, setSummaryUnlocked] = useState(false);
 
   // Businesses can have multiple line(s) of business. We store it as an editable list.
   const [lineOfBusinessList, setLineOfBusinessList] = useState(['']);
@@ -350,7 +368,7 @@ export default function InspectionSlipCreate() {
 
       // Burn timestamp into the image (bottom-left)
       const ts = Date.now();
-      const tsText = new Date(ts).toLocaleString();
+      const tsText = formatPhotoTimestamp(ts);
       const pad = Math.max(12, Math.round(Math.min(w, h) * 0.018));
       const fontSize = Math.max(18, Math.round(Math.min(w, h) * 0.03));
 
@@ -1109,7 +1127,7 @@ export default function InspectionSlipCreate() {
     }
     // For Corporation (ownerType === 'corp'), do not autofill owner name
 
-    const bin = b.epermit_no || b.permit_number || '';
+    const bin = b.bin || b.permit_bin || b.business_bin || '';
 
     setBusinessDetails((prev) => ({
       ...prev,
@@ -1125,7 +1143,7 @@ export default function InspectionSlipCreate() {
     // Pull multi-line LOB + total_employees from businesses_additional based on BIN.
     // LOB should be autofilled for BOTH Sole Proprietor and Corporation.
     try {
-      const businessBin = String(b?.bin || '').trim();
+      const businessBin = String(b?.bin || bin || '').trim();
       if (!businessBin) return;
 
       const { data: addRows, error: addErr } = await supabase
@@ -1600,7 +1618,7 @@ export default function InspectionSlipCreate() {
       const { data, error: qError } = await supabase
         .from('businesses')
         .select('*')
-        .or(`epermit_no.ilike.%${q}%,business_name.ilike.%${q}%`)
+        .or(`bin.ilike.%${q}%,epermit_no.ilike.%${q}%,business_name.ilike.%${q}%`)
         .limit(5);
 
       if (qError) throw qError;
@@ -1902,7 +1920,7 @@ export default function InspectionSlipCreate() {
               <a className="mo-link" href="/dashboard/inspector">
                 Back
               </a>
-              {completionKnown && !isCompleted ? (
+              {false && completionKnown && !isCompleted ? (
                 <button
                   type="button"
                   className="mo-btn mo-btn-primary"
@@ -1957,6 +1975,17 @@ export default function InspectionSlipCreate() {
                         onClick={() => setActiveTab('inspection')}
                       >
                         Inspection
+                      </button>
+                    ) : null}
+                    {summaryUnlocked ? (
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'summary'}
+                        className={activeTab === 'summary' ? 'active' : ''}
+                        onClick={() => setActiveTab('summary')}
+                      >
+                        Summary
                       </button>
                     ) : null}
                   </div>
@@ -2332,14 +2361,22 @@ export default function InspectionSlipCreate() {
 
                     <div className="is-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
                       <div className="is-field" style={{ gridColumn: '1 / -1' }}>
-                        <label>Device Location</label>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                           <button
                             type="button"
-                            className="mo-btn mo-btn-primary is-btn-primary"
+                            className="mo-btn mo-btn-primary"
                             onClick={requestInspectorLocation}
                             disabled={locationBusy || isCompleted}
                             title="Capture current device location"
+                            style={{
+                              minHeight: 46,
+                              borderRadius: 12,
+                              background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                              color: '#ffffff',
+                              border: 'none',
+                              fontWeight: 900,
+                              boxShadow: '0 8px 18px rgba(15,23,42,0.12)',
+                            }}
                           >
                             {locationBusy ? 'Capturing…' : 'Capture Location'}
                           </button>
@@ -2448,9 +2485,18 @@ export default function InspectionSlipCreate() {
                       />
                       <button
                         type="button"
-                        className="mo-btn mo-btn-primary is-btn-primary"
+                            className="mo-btn mo-btn-primary"
                         onClick={handleCheckBusiness}
                         disabled={checkingBusiness}
+                        style={{
+                          minHeight: 46,
+                          borderRadius: 12,
+                          background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontWeight: 900,
+                          boxShadow: '0 8px 18px rgba(15,23,42,0.12)',
+                        }}
                       >
                         {checkingBusiness ? 'Checking…' : 'Check'}
                       </button>
@@ -2817,22 +2863,52 @@ export default function InspectionSlipCreate() {
                         {!cameraOpen ? (
                           <button
                             type="button"
-                            className="mo-btn mo-btn-secondary"
+                            className="mo-btn mo-btn-primary"
                             onClick={openCameraFlow}
                             disabled={cameraBusy}
                             title="Open Camera"
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              minHeight: 46,
+                              borderRadius: 12,
+                              background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                              color: '#ffffff',
+                              border: 'none',
+                              fontWeight: 900,
+                              boxShadow: '0 8px 18px rgba(15,23,42,0.12)',
+                            }}
                           >
-                            <img src="/ui_icons/camera.png" alt="Camera" style={{ width: 16, height: 16 }} />
+                            <img
+                              src="/ui_icons/camera.png"
+                              alt="Camera"
+                              style={{
+                                width: 18,
+                                height: 18,
+                                display: 'block',
+                                filter: 'brightness(0) invert(1)',
+                                flexShrink: 0,
+                              }}
+                            />
                             {cameraBusy ? 'Opening…' : 'Open Camera'}
                           </button>
                         ) : (
                           <button
                             type="button"
-                            className="mo-btn mo-btn-secondary"
+                            className="mo-btn mo-btn-primary"
                             onClick={closeCamera}
                             disabled={cameraBusy}
                             title="Close Camera"
+                            style={{
+                              minHeight: 46,
+                              borderRadius: 12,
+                              background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                              color: '#ffffff',
+                              border: 'none',
+                              fontWeight: 900,
+                              boxShadow: '0 8px 18px rgba(15,23,42,0.12)',
+                            }}
                           >
                             Close Camera
                           </button>
@@ -2852,7 +2928,6 @@ export default function InspectionSlipCreate() {
                     {cameraOpen ? (
                       <div
                         style={{
-                          border: '1px solid #e2e8f0',
                           borderRadius: 12,
                           overflow: 'hidden',
                           background: '#0b1220',
@@ -2866,27 +2941,15 @@ export default function InspectionSlipCreate() {
 
                             <button
                               type="button"
-                              onClick={switchCamera}
-                              disabled={cameraBusy}
-                              className="is-camera-switch"
-                              aria-label="Switch Camera"
-                              title="Switch Camera"
-                            >
-                              <img src="/ui_icons/switch-camera.png" alt="Switch" style={{ width: 18, height: 18 }} />
-                            </button>
-
-                            <button
-                              type="button"
                               onClick={captureFromCamera}
                               disabled={cameraBusy}
                               className="is-camera-shutter"
                               aria-label="Capture photo"
-                              title="Capture"
                             >
                               <img
                                 src="/ui_icons/camera.png"
                                 alt="Capture"
-                                style={{ width: 26, height: 26, filter: 'invert(1) brightness(2) contrast(100%)' }}
+                                style={{ width: 18, height: 18, display: 'block', filter: 'invert(1) brightness(2) contrast(100%)' }}
                               />
                             </button>
                           </div>
@@ -2924,11 +2987,25 @@ export default function InspectionSlipCreate() {
                               onClick={captureFromCamera}
                               disabled={cameraBusy}
                               className="mo-btn mo-btn-primary"
-                              style={{ width: 62, height: 62, borderRadius: 999, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 24px rgba(0,0,0,0.35)' }}
+                              style={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 999,
+                                padding: 0,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: '#2563eb',
+                                border: 'none',
+                                boxShadow: '0 6px 16px rgba(0,0,0,0.22)',
+                              }}
                               aria-label="Capture Photo"
-                              title="Capture Photo"
                             >
-                              <img src="/ui_icons/camera.png" alt="Capture" style={{ width: 26, height: 26, filter: 'invert(1) brightness(2) contrast(100%)' }} />
+                              <img
+                                src="/ui_icons/camera.png"
+                                alt="Capture"
+                                style={{ width: 18, height: 18, display: 'block', filter: 'invert(1) brightness(2) contrast(100%)' }}
+                              />
                             </button>
                           </div>
 
@@ -2982,34 +3059,23 @@ export default function InspectionSlipCreate() {
                                 lineHeight: '12px',
                                 textAlign: 'center',
                               }}
-                              title={p.ts ? new Date(p.ts).toLocaleString() : ''}
+                              title={p.ts ? formatPhotoTimestamp(p.ts) : ''}
                             >
-                              {p.ts ? new Date(p.ts).toLocaleString() : ''}
+                              {p.ts ? formatPhotoTimestamp(p.ts) : ''}
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={() => removeEvidencePhoto(idx)}
-                              aria-label="Remove evidence photo"
+                            <XIconButton
+                              size="sm"
+                              label="Remove evidence photo"
                               title="Remove"
+                              onClick={() => removeEvidencePhoto(idx)}
                               style={{
                                 position: 'absolute',
                                 top: 6,
                                 right: 6,
-                                width: 24,
-                                height: 24,
-                                borderRadius: 999,
-                                border: '1px solid rgba(255,255,255,0.7)',
-                                background: 'rgba(15,23,42,0.55)',
-                                color: '#fff',
-                                fontWeight: 900,
-                                lineHeight: '22px',
-                                textAlign: 'center',
-                                cursor: 'pointer',
+                                zIndex: 2,
                               }}
-                            >
-                              ×
-                            </button>
+                            />
                           </div>
                         ))}
                       </div>
@@ -3087,8 +3153,35 @@ export default function InspectionSlipCreate() {
                     </div>
                   </div>
 
+                  {!summaryUnlocked ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 2 }}>
+                      <button
+                        type="button"
+                        className="mo-btn mo-btn-primary"
+                        onClick={() => {
+                          setSummaryUnlocked(true);
+                          setActiveTab('summary');
+                        }}
+                        style={{
+                          width: 'min(100%, 280px)',
+                          minHeight: 52,
+                          borderRadius: 14,
+                          background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontWeight: 1000,
+                          fontSize: 15,
+                          justifyContent: 'center',
+                          boxShadow: '0 10px 24px rgba(15,23,42,0.16)',
+                        }}
+                      >
+                        View Summary
+                      </button>
+                    </div>
+                  ) : null}
+
                                   </>
-              ) : (
+              ) : activeTab === 'summary' ? (
                 <>
                   <div className="is-card">
                     <div className="is-section-head">
@@ -3278,9 +3371,9 @@ export default function InspectionSlipCreate() {
                                   lineHeight: '12px',
                                   textAlign: 'center',
                                 }}
-                                title={p.ts ? new Date(p.ts).toLocaleString() : ''}
+                                title={p.ts ? formatPhotoTimestamp(p.ts) : ''}
                               >
-                                {p.ts ? new Date(p.ts).toLocaleString() : ''}
+                                {p.ts ? formatPhotoTimestamp(p.ts) : ''}
                               </div>
                             </div>
                           ))}
@@ -3375,8 +3468,35 @@ export default function InspectionSlipCreate() {
                       </div>
                     </div>
                   </div>
+
+                  {completionKnown && !isCompleted ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 6 }}>
+                      <button
+                        type="button"
+                        className="mo-btn mo-btn-primary"
+                        onClick={handleSubmitReport}
+                        disabled={saving || loading || !inspectionReportId}
+                        title="Submit as Completed"
+                        style={{
+                          width: 'min(100%, 320px)',
+                          minHeight: 56,
+                          borderRadius: 16,
+                          background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontWeight: 1000,
+                          fontSize: 16,
+                          justifyContent: 'center',
+                          boxShadow: '0 12px 28px rgba(15,23,42,0.18)',
+                        }}
+                      >
+                        {saving ? 'Submitting…' : 'Submit Inspection'}
+                      </button>
+                    </div>
+                  ) : null}
+
                 </>
-              )}
+              ) : null}
             </div>
           )}
         </section>
