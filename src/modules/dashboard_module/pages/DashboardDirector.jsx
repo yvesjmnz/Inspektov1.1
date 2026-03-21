@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
 import { cancelInspection as cancelInspectionApi } from '../../../lib/api';
+import { pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import DirectorReports from './DirectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
 import HistorySearchBar from '../components/HistorySearchBar';
@@ -633,7 +634,18 @@ export default function DashboardDirector() {
       const { data: reportRows, error: reportErr } = await reportQuery;
       if (reportErr) throw reportErr;
 
-      const missionOrderIds = Array.from(new Set((reportRows || []).map((r) => r?.mission_order_id).filter(Boolean)));
+      const reportByMissionOrderId = new Map();
+      for (const report of reportRows || []) {
+        if (!report?.mission_order_id) continue;
+        const existing = reportByMissionOrderId.get(report.mission_order_id);
+        const preferred = pickPreferredInspectionReport([existing, report].filter(Boolean));
+        if (preferred) {
+          reportByMissionOrderId.set(report.mission_order_id, preferred);
+        }
+      }
+
+      const dedupedReportRows = Array.from(reportByMissionOrderId.values());
+      const missionOrderIds = Array.from(new Set(dedupedReportRows.map((r) => r?.mission_order_id).filter(Boolean)));
 
       const { data: moRows = [], error: moErr } = missionOrderIds.length
         ? await supabase
@@ -689,7 +701,7 @@ export default function DashboardDirector() {
         inspectorNamesByMissionOrderId.set(a.mission_order_id, arr);
       });
 
-      const merged = (reportRows || []).map((r) => {
+      const merged = dedupedReportRows.map((r) => {
         const mo = moById.get(r.mission_order_id) || {};
         const c = complaintById.get(mo.complaint_id) || {};
         return {

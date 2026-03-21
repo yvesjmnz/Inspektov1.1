@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
+import { pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import HeadInspectorReports from './HeadInspectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
 import HistorySearchBar from '../components/HistorySearchBar';
@@ -917,7 +918,18 @@ export default function DashboardHeadInspector() {
 
       if (reportErr) throw reportErr;
 
-      const missionOrderIds = Array.from(new Set((reportRows || []).map((r) => r?.mission_order_id).filter(Boolean)));
+      const reportByMissionOrderId = new Map();
+      for (const report of reportRows || []) {
+        if (!report?.mission_order_id) continue;
+        const existing = reportByMissionOrderId.get(report.mission_order_id);
+        const preferred = pickPreferredInspectionReport([existing, report].filter(Boolean));
+        if (preferred) {
+          reportByMissionOrderId.set(report.mission_order_id, preferred);
+        }
+      }
+
+      const dedupedReportRows = Array.from(reportByMissionOrderId.values());
+      const missionOrderIds = Array.from(new Set(dedupedReportRows.map((r) => r?.mission_order_id).filter(Boolean)));
 
       // 2) Load mission orders to resolve complaint_id and inspection date
       const { data: moRows, error: moErr } = missionOrderIds.length
@@ -981,7 +993,7 @@ export default function DashboardHeadInspector() {
         inspectorNamesByMissionOrderId.set(a.mission_order_id, arr);
       });
 
-      const merged = (reportRows || []).map((r) => {
+      const merged = dedupedReportRows.map((r) => {
         const mo = moById.get(r.mission_order_id) || {};
         const c = complaintById.get(mo.complaint_id) || {};
         return {
