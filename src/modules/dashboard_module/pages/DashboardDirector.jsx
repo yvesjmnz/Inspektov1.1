@@ -395,9 +395,11 @@ export default function DashboardDirector() {
           'Approved',
           'Declined',
           'Rejected',
+          'Completed',
           'approved',
           'declined',
           'rejected',
+          'completed',
         ]);
         // Apply created_at date range for Complaint History if filters are set via range picker (explicit Apply)
         if (complaintHistoryAppliedRange?.start && complaintHistoryAppliedRange?.end) {
@@ -471,7 +473,7 @@ export default function DashboardDirector() {
       const complaintQuery = supabase
         .from('complaints')
         .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
-        .in('status', ['approved', 'Approved']);
+        .in('status', ['approved', 'Approved', 'completed', 'Completed']);
 
       const appliedComplaintQuery = (() => {
         if (!missionOrderHistoryAppliedRange?.start || !missionOrderHistoryAppliedRange?.end) return complaintQuery;
@@ -735,7 +737,7 @@ export default function DashboardDirector() {
       const complaintQuery = supabase
         .from('complaints')
         .select('id, business_name, business_address, reporter_email, approved_at, created_at')
-        .in('status', ['approved', 'Approved']);
+        .in('status', ['approved', 'Approved', 'completed', 'Completed']);
 
       if (missionOrderHistoryAppliedRange?.start && missionOrderHistoryAppliedRange?.end) {
         const start = new Date(missionOrderHistoryAppliedRange.start);
@@ -850,7 +852,7 @@ export default function DashboardDirector() {
       const complaintQuery = supabase
         .from('complaints')
         .select('id, business_name, business_address, reporter_email, approved_at, created_at')
-        .in('status', ['approved', 'Approved']);
+        .in('status', ['approved', 'Approved', 'completed', 'Completed']);
 
       if (missionOrderHistoryAppliedRange?.start && missionOrderHistoryAppliedRange?.end) {
         const start = new Date(missionOrderHistoryAppliedRange.start);

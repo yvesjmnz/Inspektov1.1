@@ -298,7 +298,7 @@ export default function DashboardHeadInspector() {
       let complaintQuery = supabase
         .from('complaints')
         .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
-        .in('status', ['approved', 'Approved']);
+        .in('status', ['approved', 'Approved', 'completed', 'Completed']);
 
       // Apply date range to the most relevant timestamp for this dashboard (approval date is primary)
       if (appliedRange?.start && appliedRange?.end) {

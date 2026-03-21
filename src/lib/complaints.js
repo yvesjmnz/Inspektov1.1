@@ -130,7 +130,7 @@ export async function getComplaintTracking(complaintId) {
 
 export async function uploadImage(file, bucket = 'complaint-images') {
   const fileName = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${file.name}`;
-  const { data, error } = await supabase.storage
+  const { error } = await supabase.storage
     .from(bucket)
     .upload(fileName, file);
 

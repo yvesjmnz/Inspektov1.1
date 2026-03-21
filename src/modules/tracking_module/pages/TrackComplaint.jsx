@@ -1,16 +1,17 @@
 import { useMemo, useState } from 'react';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
-import { getComplaintById, getComplaintTracking } from '../../../lib/complaints';
+import { getComplaintTracking } from '../../../lib/complaints';
 import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import './TrackComplaint.css';
+
+const COMPLIANCE_OPTIONS = ['Full Compliance', 'Partial Compliance', 'Non-Compliance'];
 
 function formatDateTime(date) {
   if (!date) return '—';
   const d = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(d.getTime())) return '—';
 
-  // Month day, yyyy (word format) + time (no milliseconds)
   const datePart = d.toLocaleDateString(undefined, {
     month: 'long',
     day: 'numeric',
@@ -26,27 +27,6 @@ function formatDateTime(date) {
   return `${datePart} | ${timePart}`;
 }
 
-function formatDurationBetweenLegacy(start, end = new Date()) {
-  if (!start || !end) return 'â€”';
-
-  const startDate = start instanceof Date ? start : new Date(start);
-  const endDate = end instanceof Date ? end : new Date(end);
-  const ms = endDate.getTime() - startDate.getTime();
-
-  if (!Number.isFinite(ms) || ms < 0) return 'â€”';
-
-  const totalMinutes = Math.floor(ms / 60000);
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
-
-  const parts = [];
-  if (days) parts.push(`${days}d`);
-  if (hours) parts.push(`${hours}h`);
-  parts.push(`${minutes}m`);
-  return parts.join(' ');
-}
-
 function formatDurationBetween(start, end) {
   if (!start || !end) return '—';
 
@@ -68,68 +48,60 @@ function formatDurationBetween(start, end) {
   return parts.join(' ');
 }
 
-function pickCompletedInspectionWithRemarks(reports) {
-  const candidates = (reports || []).filter((report) => {
-    const status = normalizeInspectionReportStatus(report);
-    return status === 'completed' && String(report?.inspection_comments || '').trim();
-  });
+function parseInspectionComments(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return {
+      complianceStatus: '',
+      remarks: '',
+    };
+  }
 
+  const legacyMatch = raw.match(
+    /^Compliance Status:\s*(Full Compliance|Partial Compliance|Non-Compliance)\s*(?:\r?\n){1,2}([\s\S]*)$/i
+  );
+
+  if (legacyMatch) {
+    return {
+      complianceStatus:
+        COMPLIANCE_OPTIONS.find((option) => option.toLowerCase() === String(legacyMatch[1] || '').toLowerCase()) || '',
+      remarks: String(legacyMatch[2] || '').trim(),
+    };
+  }
+
+  const tagMatch = raw.match(/^\[(Full Compliance|Partial Compliance|Non-Compliance)\]\s*/i);
+  if (!tagMatch) {
+    return {
+      complianceStatus: '',
+      remarks: raw,
+    };
+  }
+
+  return {
+    complianceStatus:
+      COMPLIANCE_OPTIONS.find((option) => option.toLowerCase() === String(tagMatch[1] || '').toLowerCase()) || '',
+    remarks: raw.replace(tagMatch[0], '').trim(),
+  };
+}
+
+function pickLatestInspectionRecord(reports, predicate = () => true) {
+  const candidates = (reports || []).filter(predicate);
   if (!candidates.length) return null;
-  return pickPreferredInspectionReport(candidates);
+
+  return [...candidates].sort((a, b) => {
+    const aTime = new Date(a?.updated_at || a?.completed_at || a?.created_at || 0).getTime();
+    const bTime = new Date(b?.updated_at || b?.completed_at || b?.created_at || 0).getTime();
+    return bTime - aTime;
+  })[0];
 }
 
-function formatDurationBetweenLegacy(start, end = new Date()) {
-  if (!start || !end) return 'â€”';
-
-  const startDate = start instanceof Date ? start : new Date(start);
-  const endDate = end instanceof Date ? end : new Date(end);
-  const ms = endDate.getTime() - startDate.getTime();
-
-  if (!Number.isFinite(ms) || ms < 0) return 'â€”';
-
-  const totalMinutes = Math.floor(ms / 60000);
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
-
-  const parts = [];
-  if (days) parts.push(`${days}d`);
-  if (hours) parts.push(`${hours}h`);
-  parts.push(`${minutes}m`);
-  return parts.join(' ');
+function formatComplaintStatusLabel(status) {
+  const s = String(status || '').toLowerCase().trim();
+  if (!s) return 'Pending';
+  if (s === 'on_hold') return 'On Hold';
+  if (s === 'submitted') return 'Submitted';
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
-
-function formatDurationBetween(start, end) {
-  if (!start || !end) return '—';
-
-  const startDate = start instanceof Date ? start : new Date(start);
-  const endDate = end instanceof Date ? end : new Date(end);
-  const ms = endDate.getTime() - startDate.getTime();
-
-  if (!Number.isFinite(ms) || ms < 0) return '—';
-
-  const totalMinutes = Math.floor(ms / 60000);
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
-
-  const parts = [];
-  if (days) parts.push(`${days}d`);
-  if (hours) parts.push(`${hours}h`);
-  parts.push(`${minutes}m`);
-  return parts.join(' ');
-}
-
-function pickCompletedInspectionWithRemarks(reports) {
-  const candidates = (reports || []).filter((report) => {
-    const status = normalizeInspectionReportStatus(report);
-    return status === 'completed' && String(report?.inspection_comments || '').trim();
-  });
-
-  if (!candidates.length) return null;
-  return pickPreferredInspectionReport(candidates);
-}
-
 
 export default function TrackComplaint() {
   const [complaintId, setComplaintId] = useState('');
@@ -245,43 +217,75 @@ export default function TrackComplaint() {
                   </div>
                 </div>
               </div>
-              {/* Vertical Complaint Progress */}
+
               {(() => {
                 const s = String(complaint.status || '').toLowerCase();
-                // Related entities
                 const missionOrders = related.missionOrders || [];
                 const inspections = related.inspections || [];
 
-                // Helper dates
                 const receivedDate = complaint.created_at ? new Date(complaint.created_at) : null;
                 const reviewDate = complaint.updated_at ? new Date(complaint.updated_at) : null;
                 const approvedDate = complaint.approved_at ? new Date(complaint.approved_at) : null;
                 const declinedDate = complaint.declined_at ? new Date(complaint.declined_at) : null;
 
-                // Decision state
-                const isDecided = ['approved', 'declined', 'rejected'].includes(s);
+                const isDecided = ['approved', 'declined', 'rejected', 'completed', 'cancelled'].includes(s);
                 const isDeclined = ['declined', 'rejected', 'invalid'].includes(s);
-                const decisionLabel = s === 'approved' ? 'Approved' : isDeclined ? 'Declined' : 'Pending';
-                const decisionDate = isDecided ? (approvedDate || declinedDate || reviewDate) : null;
+                const reviewCompleteStatuses = ['approved', 'declined', 'rejected', 'invalid', 'completed', 'cancelled'];
+                const reviewActiveStatuses = ['submitted', 'pending', 'new', 'on_hold'];
+                const reviewCompleted = reviewCompleteStatuses.includes(s);
+                const reviewStatusLabel = formatComplaintStatusLabel(s || 'pending');
+                const reviewStatusClass =
+                  s === 'approved' || s === 'completed'
+                    ? 'status-approved'
+                    : isDeclined || s === 'cancelled'
+                      ? 'status-declined'
+                      : s === 'on_hold'
+                        ? 'status-inprogress'
+                        : '';
+                const reviewDescription =
+                  s === 'completed'
+                    ? 'Complaint review is complete and the case has moved forward.'
+                    : s === 'approved'
+                      ? 'Director approved your complaint for further action.'
+                      : isDeclined
+                        ? 'Director finished reviewing your complaint.'
+                        : s === 'cancelled'
+                          ? 'This complaint review has been cancelled.'
+                          : s === 'on_hold'
+                            ? 'Complaint review is temporarily on hold.'
+                            : 'Director is reviewing your complaint.';
+                const reviewDateValue = reviewCompleted
+                  ? (approvedDate || declinedDate || reviewDate)
+                  : reviewActiveStatuses.includes(s)
+                    ? (reviewDate || receivedDate)
+                    : reviewDate;
 
-                // Inspection step is driven by inspection_reports presence and status
                 const hasAnyInspection = inspections.length > 0;
                 const latestInspection = hasAnyInspection ? pickPreferredInspectionReport(inspections) : null;
-                const inspectionStatus = latestInspection ? String(latestInspection.status || '').toLowerCase() : '';
-                const inspectionCompleted = inspectionStatus === 'completed' || inspectionStatus === 'complete';
-                const inspectionInProgress = ['in_progress', 'in progress', 'ongoing', 'processing'].includes(inspectionStatus);
+                const latestCompletedInspection = pickLatestInspectionRecord(
+                  inspections,
+                  (report) => normalizeInspectionReportStatus(report) === 'completed'
+                );
+                const latestRemarksInspection = pickLatestInspectionRecord(
+                  inspections,
+                  (report) => String(report?.inspection_comments || '').trim().length > 0
+                );
+                const resolutionInspection = latestCompletedInspection || latestRemarksInspection || latestInspection;
+                const remarksInfo = parseInspectionComments(
+                  latestRemarksInspection?.inspection_comments || resolutionInspection?.inspection_comments
+                );
+                const normalizedInspectionStatus = normalizeInspectionReportStatus(latestInspection);
+                const inspectionCompleted = normalizedInspectionStatus === 'completed';
+                const inspectionInProgress = normalizedInspectionStatus === 'in progress';
                 const inspectionStartedAt = latestInspection?.started_at || latestInspection?.created_at
                   ? new Date(latestInspection?.started_at || latestInspection?.created_at)
                   : null;
                 const inspectionCompletedAt = latestInspection?.completed_at ? new Date(latestInspection.completed_at) : null;
 
-                // Document Processing (MO) timestamps
                 const hasMo = missionOrders.length > 0;
-                // UX requirement: Document Processing resolution time starts when the complaint was received,
-                // not when the draft mission order was created.
                 const moStartAt = receivedDate;
                 const moPreapprovedAt = (() => {
-                  const times = (missionOrders || [])
+                  const times = missionOrders
                     .map((m) => m?.director_preapproved_at)
                     .filter(Boolean)
                     .map((t) => new Date(t));
@@ -291,52 +295,9 @@ export default function TrackComplaint() {
                 const moComplete = Boolean(moPreapprovedAt);
                 const moInProgress = !isDeclined && (hasMo || (isDecided && s === 'approved')) && !moComplete;
                 const moStatusLabel = isDeclined ? 'Not applicable' : (moComplete ? 'Complete' : (moInProgress ? 'In-Progress' : '—'));
-
-                const moResolutionTime = (() => {
-                  if (!moComplete || !moStartAt || !moPreapprovedAt) return '—';
-                  const ms = moPreapprovedAt.getTime() - moStartAt.getTime();
-                  if (!Number.isFinite(ms) || ms < 0) return '—';
-
-                  const totalMinutes = Math.floor(ms / 60000);
-                  const days = Math.floor(totalMinutes / (60 * 24));
-                  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-                  const minutes = totalMinutes % 60;
-
-                  const parts = [];
-                  if (days) parts.push(`${days}d`);
-                  if (hours) parts.push(`${hours}h`);
-                  parts.push(`${minutes}m`);
-                  return parts.join(' ');
-                })();
-
-                const inspectionStatusLabel = inspectionCompleted
-                  ? 'Complete'
-                  : inspectionInProgress
-                    ? 'In Progress'
-                    : hasAnyInspection || moComplete
-                      ? 'Pending Inspection'
-                      : 'â€”';
-
-                const inspectionStatusClass = inspectionCompleted
-                  ? 'status-complete'
-                  : inspectionInProgress
-                    ? 'status-inprogress'
-                    : hasAnyInspection || moComplete
-                      ? 'status-pending-inspection'
-                    : '';
-
-                const inspectionResolutionTime = inspectionInProgress
-                  ? formatDurationBetween(inspectionStartedAt, new Date())
-                  : inspectionCompleted
-                    ? formatDurationBetween(inspectionStartedAt, inspectionCompletedAt)
-                    : 'â€”';
-
-                const inspectionResolutionTimeDisplay = inspectionCompleted
-                  ? formatDurationBetween(inspectionStartedAt, inspectionCompletedAt)
-                  : '';
+                const moResolutionTime = moComplete ? formatDurationBetween(moStartAt, moPreapprovedAt) : '—';
 
                 const inspectionStepReached = hasAnyInspection || moComplete;
-
                 const inspectionStatusText = inspectionCompleted
                   ? 'Complete'
                   : inspectionInProgress
@@ -344,56 +305,50 @@ export default function TrackComplaint() {
                     : inspectionStepReached
                       ? 'Pending Inspection'
                       : '—';
-
+                const inspectionStatusClass = inspectionCompleted
+                  ? 'status-complete'
+                  : inspectionInProgress
+                    ? 'status-inprogress'
+                    : inspectionStepReached
+                      ? 'status-pending-inspection'
+                      : '';
                 const inspectionResolutionTimeText = inspectionCompleted
                   ? formatDurationBetween(inspectionStartedAt, inspectionCompletedAt)
                   : '—';
 
-                // Resolution step rules:
-                // - If declined: resolution is case closed at decision date.
-                // - Else if inspection completed: resolution by inspection completion.
-                // - Else terminal complaint states also considered resolved.
                 const complaintMarkedComplete = ['resolved', 'closed', 'completed', 'done'].includes(s);
-                const hasGeneratedInspectionSlipDocx = !!latestInspection?.generated_docx_url;
-                const resolutionDate = isDeclined ? (declinedDate || reviewDate) : (inspectionCompletedAt || approvedDate || declinedDate || null);
-                const resolutionLabel = isDeclined
-                  ? 'Case Closed'
-                  : complaintMarkedComplete || inspectionCompleted
-                    ? 'Business Inspected'
-                    : inspectionCompleted
-                      ? 'Inspection Completed'
-                      : (s === 'approved' ? 'Approved' : 'Pending');
-
-                const formatFindingStatus = (value) => {
-                  const raw = String(value ?? '').trim().toLowerCase();
-                  if (!raw) return '—';
-                  if (raw === 'compliant') return 'Compliant';
-                  if (raw === 'non_compliant') return 'Non-Compliant';
-                  if (raw === 'na' || raw === 'n/a') return 'N/A';
-                  return raw.replace(/_/g, ' ').replace(/\s+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-                };
-
-                const cctvCountNum = Number(latestInspection?.cctv_count);
-                const cctvCountDisplay =
-                  Number.isFinite(cctvCountNum) && cctvCountNum > 0
-                    ? `${cctvCountNum} CCTV${cctvCountNum === 1 ? '' : 's'}`
-                    : null;
-
-                const inspectionRemarks = String(resolutionInspection?.inspection_comments || '').trim();
-
-                // Resolution can now show the inspection remarks as soon as the inspection is completed.
-                // We still also treat completed mission orders as resolved for downstream tracking state.
-                const missionOrderIsComplete = (missionOrders || []).some((m) => {
+                const missionOrderIsComplete = missionOrders.some((m) => {
                   const ms = String(m?.status || '').toLowerCase();
                   return ms === 'complete' || ms === 'completed' || ms === 'done';
                 });
 
-                const showFindingsSummary = inspectionCompleted;
+                const effectiveIsResolved =
+                  isDeclined ||
+                  complaintMarkedComplete ||
+                  missionOrderIsComplete ||
+                  Boolean(latestCompletedInspection);
+                const resolutionDate = isDeclined
+                  ? (declinedDate || reviewDate)
+                  : latestCompletedInspection?.completed_at
+                    ? new Date(latestCompletedInspection.completed_at)
+                    : resolutionInspection?.updated_at
+                      ? new Date(resolutionInspection.updated_at)
+                      : (approvedDate || null);
+                const resolutionLabel = isDeclined
+                  ? 'Case Closed'
+                  : latestCompletedInspection
+                    ? 'Inspection Completed'
+                    : effectiveIsResolved
+                      ? 'Business Inspected'
+                    : (s === 'approved' ? 'Approved' : 'Pending');
+                const inspectionRemarks =
+                  remarksInfo.remarks ||
+                  String(latestRemarksInspection?.inspection_comments || resolutionInspection?.inspection_comments || '').trim();
+                const showResolutionSummary =
+                  Boolean(resolutionInspection) ||
+                  !!remarksInfo.complianceStatus ||
+                  !!inspectionRemarks;
 
-                const effectiveIsResolved = isDeclined || inspectionCompleted;
-                const resolutionStepCompleted = isDeclined || inspectionCompleted;
-
-                // Utility to render date nicely
                 const fmt = (d) => formatDateTime(d);
 
                 return (
@@ -403,8 +358,7 @@ export default function TrackComplaint() {
                       <span className="progress-card-title">COMPLAINT PROGRESS</span>
                     </div>
                     <div className="vtl">
-                      {/* Step 1 - Complaint Received */}
-                      <div className={`vtl-step completed`}>
+                      <div className="vtl-step completed">
                         <div className="vtl-marker">✓</div>
                         <div className="vtl-content">
                           <div className="vtl-title">Complaint Received</div>
@@ -413,16 +367,13 @@ export default function TrackComplaint() {
                         </div>
                       </div>
 
-                      {/* Step 2 - Under Review */}
-                      <div className={`vtl-step ${isDecided ? 'completed' : 'active'}`}>
-                        <div className="vtl-marker">{isDecided ? '✓' : 2}</div>
+                      <div className={`vtl-step ${reviewCompleted ? 'completed' : 'active'}`}>
+                        <div className="vtl-marker">{reviewCompleted ? '✓' : 2}</div>
                         <div className="vtl-content">
                           <div className="vtl-title">Under Review</div>
-                          <div className="vtl-desc">Director is reviewing your complaint</div>
-                          {isDecided ? (
-                            <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${s === 'approved' ? 'status-approved' : (s === 'declined' || s === 'rejected') ? 'status-declined' : ''}`}>{decisionLabel}</span></div>
-                          ) : null}
-                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(isDecided ? decisionDate : reviewDate)}</span></div>
+                          <div className="vtl-desc">{reviewDescription}</div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${reviewStatusClass}`}>{reviewStatusLabel}</span></div>
+                          <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(reviewDateValue)}</span></div>
                         </div>
                       </div>
 
@@ -471,7 +422,6 @@ export default function TrackComplaint() {
                         </div>
                       ) : (
                         <>
-                          {/* Step 3 - Document Processing */}
                           <div className={`vtl-step ${moComplete ? 'completed' : (moInProgress ? 'active' : 'inactive')}`}>
                             <div className="vtl-marker">{moComplete ? '✓' : 3}</div>
                             <div className="vtl-content">
@@ -485,7 +435,6 @@ export default function TrackComplaint() {
                             </div>
                           </div>
 
-                          {/* Step 4 - Inspection (MO Workflow + Inspection Workflow) */}
                           <div className={`vtl-step ${inspectionCompleted ? 'completed' : ((inspectionInProgress || moComplete) ? 'active' : 'inactive')}`}>
                             <div className="vtl-marker">{inspectionCompleted ? '✓' : 4}</div>
                             <div className="vtl-content">
@@ -499,14 +448,12 @@ export default function TrackComplaint() {
                             </div>
                           </div>
 
-                          {/* Step 5 - Resolution */}
-                          <div className={`vtl-step ${resolutionStepCompleted ? 'completed' : 'inactive'}`}>
                           <div className={`vtl-step ${effectiveIsResolved ? 'completed' : 'inactive'}`}>
                             <div className="vtl-marker">{effectiveIsResolved ? '✓' : 5}</div>
                             <div className="vtl-content">
                               <div className="vtl-title">Resolution</div>
                               <div className="vtl-desc">
-                                {showFindingsSummary
+                                {showResolutionSummary
                                   ? 'Inspection completed. Summary from the inspector remarks is shown below.'
                                   : 'Summary of findings will appear after the inspection is completed.'}
                               </div>
@@ -522,10 +469,29 @@ export default function TrackComplaint() {
                                   </div>
                                 </>
                               ) : null}
-                              {showFindingsSummary ? (
+                              {showResolutionSummary ? (
                                 <div style={{ marginTop: 6 }}>
                                   <div style={{ marginTop: 2 }}>
                                     <div className="vtl-desc" style={{ fontWeight: 800, margin: 0 }}>Inspector remarks</div>
+                                    {remarksInfo.complianceStatus ? (
+                                      <div style={{ marginTop: 8 }}>
+                                        <span
+                                          style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            padding: '6px 10px',
+                                            borderRadius: 999,
+                                            background: '#e0f2fe',
+                                            color: '#075985',
+                                            fontSize: 12,
+                                            fontWeight: 900,
+                                            letterSpacing: 0.2,
+                                          }}
+                                        >
+                                          {remarksInfo.complianceStatus}
+                                        </span>
+                                      </div>
+                                    ) : null}
                                     <div
                                       style={{
                                         marginTop: 8,
@@ -553,10 +519,7 @@ export default function TrackComplaint() {
                 );
               })()}
 
-              {/* Director Decision (industry-standard: clear outcome + timestamp + reason for decline) */}
               <div className="complaint-summary">
-                {/* Complaint Summary - 2-Column Grid Layout */}
-                {/* Row 1: Business (Left) + Address (Right) */}
                 <div className="summary-row-2col">
                   <div className="summary-card">
                     <div className="summary-item-header">
@@ -574,7 +537,6 @@ export default function TrackComplaint() {
                   </div>
                 </div>
 
-                {/* Row 2: Complaint Description (Full Width) */}
                 <div className="summary-row-full">
                   <div className="summary-card summary-card-with-footer">
                     <div>
@@ -586,12 +548,12 @@ export default function TrackComplaint() {
                         {complaint.complaint_description || '—'}
                       </span>
                     </div>
-                                      </div>
+                  </div>
                 </div>
               </div>
 
               <div className="track-result-actions">
-                <button 
+                <button
                   className="btn btn-primary"
                   onClick={() => {
                     setComplaint(null);
