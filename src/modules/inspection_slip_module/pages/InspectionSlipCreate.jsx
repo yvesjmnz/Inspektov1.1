@@ -183,6 +183,29 @@ function groupComplaintCategoriesFromTags(tags) {
   return result;
 }
 
+function pickInspectionStarterReport(reports) {
+  const startedReports = (reports || []).filter((report) => {
+    if (!report?.id) return false;
+    if (report?.started_at) return true;
+    const status = normalizeInspectionReportStatus(report);
+    return status === 'in progress' || status === 'completed';
+  });
+
+  if (!startedReports.length) {
+    return null;
+  }
+
+  return [...startedReports].sort((a, b) => {
+    const aStarted = new Date(a?.started_at || a?.created_at || 0).getTime();
+    const bStarted = new Date(b?.started_at || b?.created_at || 0).getTime();
+    if (aStarted !== bStarted) return aStarted - bStarted;
+
+    const aTouched = new Date(a?.updated_at || a?.completed_at || a?.created_at || 0).getTime();
+    const bTouched = new Date(b?.updated_at || b?.completed_at || b?.created_at || 0).getTime();
+    return bTouched - aTouched;
+  })[0];
+}
+
 function OverviewField({ label, children, fullWidth = false }) {
   return (
     <div
@@ -705,8 +728,6 @@ export default function InspectionSlipCreate() {
           if (explicitErr) throw explicitErr;
 
           setInspectionReportId(explicitReport.id);
-          setInspectionOwnerId(explicitReport.inspector_id || null);
-          setInspectionOwnerName(inspectorNameById.get(explicitReport.inspector_id) || '');
 
           // Hydrate fields from the explicit report
           {
@@ -790,6 +811,11 @@ export default function InspectionSlipCreate() {
           }
 
           const explicitWorkflowStatus = normalizeInspectionReportStatus(explicitReport);
+          const explicitStarted =
+            explicitWorkflowStatus === 'in progress' || explicitWorkflowStatus === 'completed' || !!explicitReport.started_at;
+
+          setInspectionOwnerId(explicitStarted ? (explicitReport.inspector_id || null) : null);
+          setInspectionOwnerName(explicitStarted ? (inspectorNameById.get(explicitReport.inspector_id) || '') : '');
 
           // Completed reports are view-only
           if (explicitWorkflowStatus === 'completed') {
@@ -820,11 +846,12 @@ export default function InspectionSlipCreate() {
         if (reportErr) throw reportErr;
 
         const existingReport = pickPreferredInspectionReport(missionOrderReports || []);
+        const starterReport = pickInspectionStarterReport(missionOrderReports || []);
 
         if (existingReport?.id) {
           setInspectionReportId(existingReport.id);
-          setInspectionOwnerId(existingReport.inspector_id || null);
-          setInspectionOwnerName(inspectorNameById.get(existingReport.inspector_id) || '');
+          setInspectionOwnerId(starterReport?.inspector_id || null);
+          setInspectionOwnerName(inspectorNameById.get(starterReport?.inspector_id) || '');
 
           // Hydrate fields from draft
           {
@@ -1334,7 +1361,11 @@ export default function InspectionSlipCreate() {
   const inspectionStatusValue = isCompleted ? 'completed' : inspectionStarted ? 'in progress' : 'pending inspection';
   const inspectionStatusLabel = isCompleted ? 'Completed' : inspectionStarted ? 'In Progress' : 'Pending Inspection';
   const inspectionLocked =
-    !!inspectionReportId && !!currentInspectorId && !!inspectionOwnerId && inspectionOwnerId !== currentInspectorId;
+    (inspectionStarted || isCompleted) &&
+    !!inspectionReportId &&
+    !!currentInspectorId &&
+    !!inspectionOwnerId &&
+    inspectionOwnerId !== currentInspectorId;
   const inspectionLockMessage = inspectionLocked
     ? `This mission order already has an inspection slip started by ${inspectionOwnerName || 'another assigned inspector'}. Only one inspection slip is allowed per mission order.`
     : '';
@@ -1815,7 +1846,8 @@ export default function InspectionSlipCreate() {
       if (claimErr) throw claimErr;
 
       setInspectionReportId(claimedReport?.id || null);
-      setInspectionOwnerId(claimedReport?.inspector_id || inspectorId);
+      setInspectionOwnerId(inspectorId);
+      setInspectionOwnerName((prev) => prev || 'You');
       setCompletionKnown(true);
       setInspectionStarted(true);
       setActiveTab('inspection');

@@ -95,6 +95,17 @@ function pickLatestInspectionRecord(reports, predicate = () => true) {
   })[0];
 }
 
+function pickLatestMissionOrderRecord(records, predicate = () => true) {
+  const candidates = (records || []).filter(predicate);
+  if (!candidates.length) return null;
+
+  return [...candidates].sort((a, b) => {
+    const aTime = new Date(a?.updated_at || a?.submitted_at || a?.created_at || 0).getTime();
+    const bTime = new Date(b?.updated_at || b?.submitted_at || b?.created_at || 0).getTime();
+    return bTime - aTime;
+  })[0];
+}
+
 function formatComplaintStatusLabel(status) {
   const s = String(status || '').toLowerCase().trim();
   if (!s) return 'Pending';
@@ -228,7 +239,6 @@ export default function TrackComplaint() {
                 const approvedDate = complaint.approved_at ? new Date(complaint.approved_at) : null;
                 const declinedDate = complaint.declined_at ? new Date(complaint.declined_at) : null;
 
-                const isDecided = ['approved', 'declined', 'rejected', 'completed', 'cancelled'].includes(s);
                 const isDeclined = ['declined', 'rejected', 'invalid'].includes(s);
                 const reviewCompleteStatuses = ['approved', 'declined', 'rejected', 'invalid', 'completed', 'cancelled'];
                 const reviewActiveStatuses = ['submitted', 'pending', 'new', 'on_hold'];
@@ -260,8 +270,11 @@ export default function TrackComplaint() {
                     ? (reviewDate || receivedDate)
                     : reviewDate;
 
+                const latestMissionOrder = pickLatestMissionOrderRecord(missionOrders);
+                const latestMissionOrderStatus = String(latestMissionOrder?.status || '').toLowerCase().trim();
                 const hasAnyInspection = inspections.length > 0;
                 const latestInspection = hasAnyInspection ? pickPreferredInspectionReport(inspections) : null;
+                const latestInspectionRecord = pickLatestInspectionRecord(inspections);
                 const latestCompletedInspection = pickLatestInspectionRecord(
                   inspections,
                   (report) => normalizeInspectionReportStatus(report) === 'completed'
@@ -270,34 +283,40 @@ export default function TrackComplaint() {
                   inspections,
                   (report) => String(report?.inspection_comments || '').trim().length > 0
                 );
-                const resolutionInspection = latestCompletedInspection || latestRemarksInspection || latestInspection;
+                const resolutionInspection = latestCompletedInspection || latestRemarksInspection || latestInspectionRecord || latestInspection;
                 const remarksInfo = parseInspectionComments(
                   latestRemarksInspection?.inspection_comments || resolutionInspection?.inspection_comments
                 );
-                const normalizedInspectionStatus = normalizeInspectionReportStatus(latestInspection);
-                const inspectionCompleted = normalizedInspectionStatus === 'completed';
-                const inspectionInProgress = normalizedInspectionStatus === 'in progress';
-                const inspectionStartedAt = latestInspection?.started_at || latestInspection?.created_at
-                  ? new Date(latestInspection?.started_at || latestInspection?.created_at)
+                const normalizedInspectionStatus = normalizeInspectionReportStatus(latestInspectionRecord || latestInspection);
+                const inspectionCompleted = Boolean(latestCompletedInspection) || normalizedInspectionStatus === 'completed';
+                const inspectionInProgress = !inspectionCompleted && Boolean(latestInspectionRecord);
+                const inspectionStartedAt = latestInspectionRecord?.started_at || latestInspectionRecord?.created_at
+                  ? new Date(latestInspectionRecord?.started_at || latestInspectionRecord?.created_at)
                   : null;
-                const inspectionCompletedAt = latestInspection?.completed_at ? new Date(latestInspection.completed_at) : null;
+                const inspectionProgressAt = latestInspectionRecord?.updated_at || latestInspectionRecord?.started_at || latestInspectionRecord?.created_at
+                  ? new Date(latestInspectionRecord?.updated_at || latestInspectionRecord?.started_at || latestInspectionRecord?.created_at)
+                  : null;
+                const inspectionCompletedAt = latestCompletedInspection?.completed_at || latestInspectionRecord?.completed_at
+                  ? new Date(latestCompletedInspection?.completed_at || latestInspectionRecord?.completed_at)
+                  : null;
+                const inspectionDateValue = inspectionCompletedAt || inspectionProgressAt;
 
-                const hasMo = missionOrders.length > 0;
+                const hasMo = Boolean(latestMissionOrder);
                 const moStartAt = receivedDate;
-                const moPreapprovedAt = (() => {
-                  const times = missionOrders
-                    .map((m) => m?.director_preapproved_at)
-                    .filter(Boolean)
-                    .map((t) => new Date(t));
-                  return times.length ? times.sort((a, b) => a - b)[0] : null;
-                })();
+                const moPreapprovedAt = latestMissionOrder?.director_preapproved_at
+                  ? new Date(latestMissionOrder.director_preapproved_at)
+                  : null;
 
-                const moComplete = Boolean(moPreapprovedAt);
-                const moInProgress = !isDeclined && (hasMo || (isDecided && s === 'approved')) && !moComplete;
+                const moTouchedAt = latestMissionOrder?.updated_at || latestMissionOrder?.submitted_at || latestMissionOrder?.created_at
+                  ? new Date(latestMissionOrder?.updated_at || latestMissionOrder?.submitted_at || latestMissionOrder?.created_at)
+                  : null;
+                const moComplete = Boolean(moPreapprovedAt) || ['complete', 'completed', 'done'].includes(latestMissionOrderStatus);
+                const moInProgress = !isDeclined && hasMo && !moComplete;
                 const moStatusLabel = isDeclined ? 'Not applicable' : (moComplete ? 'Complete' : (moInProgress ? 'In-Progress' : '—'));
-                const moResolutionTime = moComplete ? formatDurationBetween(moStartAt, moPreapprovedAt) : '—';
-
-                const inspectionStepReached = hasAnyInspection || moComplete;
+                const moStatusClass = moComplete ? 'status-complete' : (moInProgress ? 'status-inprogress' : '');
+                const moDateValue = moPreapprovedAt || moTouchedAt;
+                const moResolutionTime = hasMo && moStartAt && moDateValue ? formatDurationBetween(moStartAt, moDateValue) : '—';
+                const inspectionStepReached = hasAnyInspection || hasMo;
                 const inspectionStatusText = inspectionCompleted
                   ? 'Complete'
                   : inspectionInProgress
@@ -312,9 +331,13 @@ export default function TrackComplaint() {
                     : inspectionStepReached
                       ? 'status-pending-inspection'
                       : '';
-                const inspectionResolutionTimeText = inspectionCompleted
-                  ? formatDurationBetween(inspectionStartedAt, inspectionCompletedAt)
-                  : '—';
+                const inspectionResolutionTimeText =
+                  inspectionStartedAt && (inspectionCompletedAt || (inspectionInProgress ? inspectionProgressAt : null))
+                    ? formatDurationBetween(
+                        inspectionStartedAt,
+                        inspectionCompletedAt || inspectionProgressAt
+                      )
+                    : '—';
 
                 const complaintMarkedComplete = ['resolved', 'closed', 'completed', 'done'].includes(s);
                 const missionOrderIsComplete = missionOrders.some((m) => {
@@ -422,20 +445,20 @@ export default function TrackComplaint() {
                         </div>
                       ) : (
                         <>
-                          <div className={`vtl-step ${moComplete ? 'completed' : (moInProgress ? 'active' : 'inactive')}`}>
+                          <div className={`vtl-step ${hasMo ? (moComplete ? 'completed' : 'active') : 'inactive'}`}>
                             <div className="vtl-marker">{moComplete ? '✓' : 3}</div>
                             <div className="vtl-content">
                               <div className="vtl-title">Document Processing</div>
                               <div className="vtl-desc">Preparing documents needed for inspection</div>
                               <>
-                                <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${moComplete ? 'status-complete' : (moInProgress ? 'status-inprogress' : '')}`}>{moStatusLabel}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${moStatusClass}`}>{moStatusLabel}</span></div>
                                 <div className="vtl-detail"><span className="vtl-detail-label">Resolution Time:</span> <span className="vtl-detail-value">{moResolutionTime}</span></div>
-                                <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{moComplete ? fmt(moPreapprovedAt) : '—'}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(moDateValue)}</span></div>
                               </>
                             </div>
                           </div>
 
-                          <div className={`vtl-step ${inspectionCompleted ? 'completed' : ((inspectionInProgress || moComplete) ? 'active' : 'inactive')}`}>
+                          <div className={`vtl-step ${inspectionCompleted ? 'completed' : (inspectionStepReached ? 'active' : 'inactive')}`}>
                             <div className="vtl-marker">{inspectionCompleted ? '✓' : 4}</div>
                             <div className="vtl-content">
                               <div className="vtl-title">Inspection</div>
@@ -443,7 +466,7 @@ export default function TrackComplaint() {
                               <>
                                 <div className="vtl-detail"><span className="vtl-detail-label">Status:</span> <span className={`vtl-detail-value ${inspectionStatusClass}`}>{inspectionStatusText}</span></div>
                                 <div className="vtl-detail"><span className="vtl-detail-label">Resolution Time:</span> <span className="vtl-detail-value">{inspectionResolutionTimeText}</span></div>
-                                <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(inspectionCompletedAt)}</span></div>
+                                <div className="vtl-detail"><span className="vtl-detail-label">Date:</span> <span className="vtl-detail-value">{fmt(inspectionDateValue)}</span></div>
                               </>
                             </div>
                           </div>
