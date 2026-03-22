@@ -2427,6 +2427,8 @@ export default function MissionOrderEditor() {
                               return String(a.full_name || '').localeCompare(String(b.full_name || ''));
                             }));
 
+                        const topRecommendedId = enrichedInspectors.find((x) => !x.isBlocked)?.id || null;
+
                         return (
                           <div ref={inspectorDropdownRef} className="mo-multi-select-dropdown" role="listbox">
                             {smartInspectorsLoading || inspectorMonthlyLimitLoading ? (
@@ -2435,12 +2437,13 @@ export default function MissionOrderEditor() {
 
                             {enrichedInspectors.slice(0, 12).map((ins) => {
                               const label = ins.full_name || ins.id;
+                              const isTopRecommended = !ins.isBlocked && ins.id === topRecommendedId;
                               const isOptionDisabled = inspectorMonthlyLimitLoading || ins.isBlocked;
                               const tip = inspectorMonthlyLimitLoading
                                 ? 'Checking monthly assignment limit...'
                                 : ins.isBlocked
                                   ? (ins.reason || 'Monthly limit reached for this business or barangay.')
-                                  : ins.isTop
+                                  : isTopRecommended
                                     ? 'Top Recommended based on workload + idle time.'
                                     : '';
 
@@ -2450,8 +2453,6 @@ export default function MissionOrderEditor() {
                               if (ins.limitSummary) metaParts.push(ins.limitSummary);
                               const meta = metaParts.join(' | ');
 
-                              const isRecommended = !ins.isBlocked && typeof ins.rank === 'number' && ins.rank <= 3;
-
                               return (
                                 <button
                                   key={ins.id}
@@ -2459,7 +2460,7 @@ export default function MissionOrderEditor() {
                                   className={[
                                     'mo-multi-select-option',
                                     isOptionDisabled ? 'mo-multi-select-option--disabled' : '',
-                                    ins.isTop ? 'mo-multi-select-option--top' : '',
+                                    isTopRecommended ? 'mo-multi-select-option--top' : '',
                                   ]
                                     .filter(Boolean)
                                     .join(' ')}
@@ -2471,8 +2472,7 @@ export default function MissionOrderEditor() {
                                   <div className="mo-multi-select-option-row">
                                     <div className="mo-multi-select-option-name">
                                       {label}
-                                      {ins.isTop ? <span className="mo-multi-select-badge">Most Recommended</span> : null}
-                                      {!ins.isTop && isRecommended ? <span className="mo-multi-select-badge">Recommended</span> : null}
+                                      {isTopRecommended ? <span className="mo-multi-select-badge">Most Recommended</span> : null}
                                       {inspectorMonthlyLimitLoading ? <span className="mo-multi-select-badge mo-multi-select-badge--muted">Checking availability</span> : null}
                                       {!inspectorMonthlyLimitLoading && ins.isBlocked ? <span className="mo-multi-select-badge mo-multi-select-badge--muted">Monthly limit reached</span> : null}
                                     </div>

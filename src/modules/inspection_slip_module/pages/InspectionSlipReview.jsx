@@ -4,6 +4,7 @@ import DashboardSidebar from '../../../components/DashboardSidebar';
 import '../../dashboard_module/pages/Dashboard.css';
 import './InspectionSlipCreate.css';
 import { generateInspectionSlipDocx } from '../lib/docx_template';
+import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 
 function getInspectionReportIdFromQuery() {
   const params = new URLSearchParams(window.location.search);
@@ -115,12 +116,6 @@ function formatChecklistStatus(value) {
   if (value === 'compliant') return 'Compliant';
   if (value === 'non_compliant') return 'Non-Compliant';
   return 'N/A';
-}
-
-function checklistPillClass(value) {
-  if (value === 'compliant') return 'is-summary-pill is-summary-pill-success';
-  if (value === 'non_compliant') return 'is-summary-pill is-summary-pill-danger';
-  return 'is-summary-pill is-summary-pill-muted';
 }
 
 const GUIDED_CATEGORY_LABELS = [
@@ -261,6 +256,7 @@ export default function InspectionSlipReview() {
   const [activePhotoUrl, setActivePhotoUrl] = useState('');
   const [hasInspectionData, setHasInspectionData] = useState(false);
   const [assignedInspectors, setAssignedInspectors] = useState([]);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const [navCollapsed, setNavCollapsed] = useState(false);
   const signageSqm = inspectionReport?.signage_sqm != null ? String(inspectionReport.signage_sqm) : '';
@@ -276,8 +272,38 @@ export default function InspectionSlipReview() {
       setError('');
       setToast('');
       setLoading(true);
+      setHasInspectionData(false);
       setInspectionReport(null);
       setAssignedInspectors([]);
+      setSignedAttachmentUrl('');
+      setSignedAttachmentMeta({
+        uploadedAt: null,
+        uploadedBy: null,
+      });
+      setOwnerDetails({
+        lastName: '',
+        firstName: '',
+        middleName: '',
+        businessName: '',
+      });
+      setBusinessDetails({
+        bin: '',
+        address: '',
+        estimatedAreaSqm: '',
+        numberOfEmployees: '',
+        landline: '',
+        cellphone: '',
+        email: '',
+      });
+      setLineOfBusinessList(['']);
+      setChecklist({
+        business_permit: 'na',
+        with_cctv: 'na',
+        signage_2sqm: 'na',
+      });
+      setCctvCount('');
+      setAdditionalComments('');
+      setEvidencePhotos([]);
 
       try {
         // Two entry modes:
@@ -292,27 +318,16 @@ export default function InspectionSlipReview() {
 
         let missionOrderId = missionOrderIdFromQuery || null;
         let loadedReportInspectorId = null;
+        let resolvedHasInspectionData = false;
 
-        if (inspectionReportId) {
-          const { data: report, error: reportErr } = await supabase
-            .from('inspection_reports')
-            .select('*')
-            .eq('id', inspectionReportId)
-            .single();
-
-          if (reportErr) throw reportErr;
-
-          if (!report) {
-            setError('Inspection report not found.');
-            return;
-          }
+        const applyInspectionReportState = async (report) => {
+          if (!report) return;
 
           missionOrderId = report.mission_order_id || missionOrderId;
           loadedReportInspectorId = report.inspector_id || null;
-          setHasInspectionData(true);
-          setInspectionReport(report);
+          resolvedHasInspectionData = true;
 
-          // Hydrate from inspection report (mirror InspectionSlipCreate explicitReport logic)
+          setInspectionReport(report);
           setAdditionalComments(report.inspection_comments || '');
 
           if (Array.isArray(report.lines_of_business) && report.lines_of_business.length) {
@@ -367,10 +382,36 @@ export default function InspectionSlipReview() {
             }
             setEvidencePhotos(mapped.filter((x) => x.url));
           }
-        } else {
-          // No inspection report yet; this is a pending inspection view.
-          setHasInspectionData(false);
-          setInspectionReport(null);
+        };
+
+        if (inspectionReportId) {
+          const { data: report, error: reportErr } = await supabase
+            .from('inspection_reports')
+            .select('*')
+            .eq('id', inspectionReportId)
+            .single();
+
+          if (reportErr) throw reportErr;
+
+          if (!report) {
+            setError('Inspection report not found.');
+            return;
+          }
+
+          await applyInspectionReportState(report);
+        } else if (missionOrderId) {
+          const { data: reportRows, error: reportErr } = await supabase
+            .from('inspection_reports')
+            .select('*')
+            .eq('mission_order_id', missionOrderId)
+            .order('updated_at', { ascending: false });
+
+          if (reportErr) throw reportErr;
+
+          const preferredReport = pickPreferredInspectionReport(reportRows || []);
+          if (preferredReport) {
+            await applyInspectionReportState(preferredReport);
+          }
         }
 
         if (missionOrderId) {
@@ -394,7 +435,7 @@ export default function InspectionSlipReview() {
               setComplaint(c);
 
               // If we don't have inspection data yet, at least seed basic business info for Summary.
-              if (!hasInspectionData) {
+              if (!resolvedHasInspectionData) {
                 setOwnerDetails((prev) => ({
                   ...prev,
                   businessName: c.business_name || prev.businessName,
@@ -453,19 +494,40 @@ export default function InspectionSlipReview() {
 
           setAssignedInspectors(inspectorList);
         }
+        setHasInspectionData(resolvedHasInspectionData);
       } catch (e) {
         setError(e?.message || 'Failed to load inspection slip.');
         setMissionOrder(null);
         setComplaint(null);
         setInspectionReport(null);
         setAssignedInspectors([]);
+        setHasInspectionData(false);
       } finally {
         setLoading(false);
       }
     };
 
     load();
-  }, [inspectionReportId, missionOrderIdFromQuery, hasInspectionData]);
+  }, [inspectionReportId, missionOrderIdFromQuery, refreshTick]);
+
+  useEffect(() => {
+    if (!inspectionReportId && !missionOrderIdFromQuery) return undefined;
+
+    const filter = inspectionReportId
+      ? `id=eq.${inspectionReportId}`
+      : `mission_order_id=eq.${missionOrderIdFromQuery}`;
+
+    const channel = supabase
+      .channel(`inspection-slip-review:${inspectionReportId || missionOrderIdFromQuery}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inspection_reports', filter }, () => {
+        setRefreshTick((value) => value + 1);
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [inspectionReportId, missionOrderIdFromQuery]);
 
   const handleGenerateInspectionSlipDocx = async () => {
     if (!inspectionReportId) {
@@ -615,6 +677,7 @@ export default function InspectionSlipReview() {
 
         bin: freshReport?.bin,
         business_address: freshReport?.business_address,
+        estimated_area_sqm: freshReport?.estimated_area_sqm ?? businessDetails.estimatedAreaSqm ?? null,
         number_of_employees: freshReport?.no_of_employees ?? businessDetails.numberOfEmployees ?? null,
         landline_no: freshReport?.landline_no,
         email_address: freshReport?.email_address,
@@ -625,6 +688,7 @@ export default function InspectionSlipReview() {
         cctv_status: freshReport?.cctv_status,
         signage_status: freshReport?.signage_status,
         cctv_count: freshReport?.cctv_count,
+        signage_sqm: freshReport?.signage_sqm,
 
         inspector_signature_url,
         owner_signature_url,
@@ -694,7 +758,6 @@ export default function InspectionSlipReview() {
 
       setInspectionReport(after);
       setDocxPreviewError(false);
-      setToast('Inspection slip DOCX generated/regenerated.');
     } catch (e) {
       setError(e?.message || 'Failed to generate inspection slip DOCX.');
     } finally {
@@ -702,11 +765,32 @@ export default function InspectionSlipReview() {
     }
   };
 
-  const inspectionStatusLower = String(inspectionReport?.status || '').toLowerCase();
+  const inspectionStatusValue = hasInspectionData ? normalizeInspectionReportStatus(inspectionReport) : 'pending inspection';
+  const inspectionStatusLower = String(inspectionStatusValue || '').toLowerCase();
   const isInspectionCompleted = hasInspectionData && inspectionStatusLower === 'completed';
   const hasGeneratedInspectionSlipDocx = !!inspectionReport?.generated_docx_url;
   const canGenerateInspectionSlipDocx =
     isInspectionCompleted;
+  const docxPrimaryButtonStyle = {
+    background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
+    color: '#ffffff',
+    border: '1px solid rgba(255,255,255,0.14)',
+    boxShadow: '0 12px 28px rgba(15, 23, 42, 0.18)',
+    whiteSpace: 'nowrap',
+    padding: '10px 12px',
+    minWidth: 0,
+    fontSize: 13,
+  };
+  const docxSecondaryButtonStyle = {
+    background: '#ffffff',
+    color: '#0b2249',
+    border: '1px solid #c7d7f2',
+    boxShadow: '0 8px 18px rgba(15, 23, 42, 0.08)',
+    whiteSpace: 'nowrap',
+    padding: '10px 12px',
+    minWidth: 0,
+    fontSize: 13,
+  };
 
   const officeViewerUrl = useMemo(() => {
     const baseUrl = inspectionReport?.generated_docx_url || '';
@@ -744,7 +828,6 @@ export default function InspectionSlipReview() {
   const displayBusinessName = complaint?.business_name || ownerDetails.businessName || missionOrder?.business_name || '--';
   const displayBusinessAddress = complaint?.business_address || businessDetails.address || missionOrder?.business_address || '--';
   const complaintViolationGroups = useMemo(() => groupComplaintCategoriesFromTags(complaint?.tags || []), [complaint?.tags]);
-  const inspectionStatusValue = hasInspectionData ? inspectionReport?.status || 'pending inspection' : 'pending inspection';
   const inspectionStatusLabel = formatStatus(inspectionStatusValue);
   const signedAttachmentUploadedLabel = signedAttachmentMeta.uploadedAt
     ? `Uploaded ${new Date(signedAttachmentMeta.uploadedAt).toLocaleString(undefined, {
@@ -785,11 +868,9 @@ export default function InspectionSlipReview() {
         if (moErr) console.warn('Failed to mark mission order complete:', moErr);
       }
 
-      setToast('Inspection slip DOCX downloaded and tracking marked complete.');
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn('Failed to update tracking completion on download:', e);
-      setToast('Inspection slip downloaded.');
     } finally {
       setDownloadingDocx(false);
     }
@@ -887,12 +968,6 @@ export default function InspectionSlipReview() {
               </div>
 
               {error ? <div className="dash-alert dash-alert-error" style={{ marginTop: 12 }}>{error}</div> : null}
-              {toast ? (
-                <div className="dash-alert" style={{ marginTop: 12, color: '#166534', fontWeight: 900 }}>
-                  {toast}
-                </div>
-              ) : null}
-
               {loading ? (
                 <div style={{ marginTop: 16, color: '#475569', fontWeight: 700 }}>Loading inspection slip…</div>
               ) : !missionOrder && !inspectionReportId && !missionOrderIdFromQuery ? (
@@ -1223,17 +1298,26 @@ export default function InspectionSlipReview() {
                       <div
                         className="is-section-head"
                         style={{
-                          background: '#172b57',
+                          background: 'linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%)',
                           color: '#ffffff',
                           margin: '-18px -18px 0',
-                          padding: '18px 18px 22px',
+                          padding: '20px 18px',
                           borderRadius: '18px 18px 0 0',
+                          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
                         }}
                       >
                         <div>
-                          <p className="is-section-title" style={{ color: '#ffffff' }}>Summary</p>
-                          <p className="is-section-sub" style={{ color: 'rgba(255, 255, 255, 0.82)' }}>
-                            Review key details below.
+                          <p
+                            className="is-section-title"
+                            style={{
+                              color: '#ffffff',
+                              fontSize: 18,
+                              fontWeight: 1000,
+                              letterSpacing: '0.01em',
+                              margin: 0,
+                            }}
+                          >
+                            Inspection Summary
                           </p>
                         </div>
                       </div>
@@ -1352,28 +1436,34 @@ export default function InspectionSlipReview() {
                               {[
                                 { key: 'business_permit', label: 'Business Permit (Presented)' },
                                 { key: 'with_cctv', label: 'With CCTV' },
-                                { key: 'signage_2sqm', label: '2sqm Signage' },
+                                { key: 'signage_2sqm', label: 'Signage' },
                               ].map((item) => {
                                 const v = checklist[item.key];
                                 const text = formatChecklistStatus(v);
-                                const extraPills = [];
+                                const detailItems = [];
 
                                 if (item.key === 'with_cctv' && v === 'compliant' && cctvCount) {
-                                  extraPills.push(`${cctvCount} CCTV${String(cctvCount) === '1' ? '' : 's'}`);
+                                  detailItems.push(`${cctvCount} CCTV${String(cctvCount) === '1' ? '' : 's'}`);
                                 }
 
                                 if (item.key === 'signage_2sqm' && v === 'compliant' && signageSqm) {
-                                  extraPills.push(`${signageSqm} sqm`);
+                                  detailItems.push(`${signageSqm} sqm`);
                                 }
 
                                 return (
-                                  <div key={item.key} className="is-summary-pill-row">
+                                  <div key={item.key} className="is-summary-check-row">
                                     <div className="is-check-title">{item.label}</div>
-                                    <div className="is-summary-pill-wrap">
-                                      <span className={checklistPillClass(v)}>{text}</span>
-                                      {extraPills.map((pill) => (
-                                        <span key={pill} className="is-summary-pill is-summary-pill-info">{pill}</span>
-                                      ))}
+                                    <div className="is-summary-check-values">
+                                      <div className="is-summary-check-field">
+                                        <span className="is-summary-check-label">Status</span>
+                                        <span className={`is-summary-check-value is-summary-check-value--${v || 'na'}`}>{text}</span>
+                                      </div>
+                                      {detailItems.length ? (
+                                        <div className="is-summary-check-field">
+                                          <span className="is-summary-check-label">Details</span>
+                                          <span className="is-summary-check-value">{detailItems.join(', ')}</span>
+                                        </div>
+                                      ) : null}
                                     </div>
                                   </div>
                                 );
@@ -1431,43 +1521,42 @@ export default function InspectionSlipReview() {
                               className="is-section-head"
                               style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}
                             >
-                              <div>
+                              <div style={{ minWidth: 0, flex: '1 1 auto' }}>
                                 <p className="is-section-title">Inspection Slip DOCX</p>
                                 <p className="is-section-sub">Generate / regenerate after inspection completion.</p>
                               </div>
 
                               {hasGeneratedInspectionSlipDocx ? (
-                                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
-                                  <span style={{ fontWeight: 900, color: '#166534' }}>Generated</span>
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'flex-end', marginLeft: 'auto', flex: '0 0 auto' }}>
                                   <button
                                     type="button"
-                                    className="mo-btn mo-btn-primary"
+                                    className="mo-btn"
                                     onClick={handleDownloadInspectionSlipDocx}
                                     disabled={downloadingDocx}
-                                    style={{ textDecoration: 'none' }}
+                                    style={{ ...docxSecondaryButtonStyle, textDecoration: 'none' }}
                                   >
-                                    {downloadingDocx ? 'Preparing...' : 'Download DOCX'}
+                                    {downloadingDocx ? 'Preparing...' : 'Download'}
                                   </button>
-                                  {canGenerateInspectionSlipDocx ? (
-                                    <button
-                                      type="button"
-                                      className="mo-btn mo-btn-primary"
-                                      onClick={handleGenerateInspectionSlipDocx}
-                                      disabled={generatingDocx}
-                                    >
-                                      {generatingDocx ? 'Generating...' : 'Regenerate DOCX'}
-                                    </button>
-                                  ) : null}
-                                </div>
-                              ) : canGenerateInspectionSlipDocx ? (
-                                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
                                   <button
                                     type="button"
                                     className="mo-btn mo-btn-primary"
                                     onClick={handleGenerateInspectionSlipDocx}
                                     disabled={generatingDocx}
+                                    style={docxPrimaryButtonStyle}
                                   >
-                                    {generatingDocx ? 'Generating...' : 'Generate DOCX'}
+                                    {generatingDocx ? 'Generating...' : 'Regenerate'}
+                                  </button>
+                                </div>
+                              ) : canGenerateInspectionSlipDocx ? (
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'flex-end', marginLeft: 'auto', flex: '0 0 auto' }}>
+                                  <button
+                                    type="button"
+                                    className="mo-btn mo-btn-primary"
+                                    onClick={handleGenerateInspectionSlipDocx}
+                                    disabled={generatingDocx}
+                                    style={docxPrimaryButtonStyle}
+                                  >
+                                    {generatingDocx ? 'Generating...' : 'Generate'}
                                   </button>
                                 </div>
                               ) : null}

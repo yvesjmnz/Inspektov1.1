@@ -6,6 +6,8 @@ import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '
 import './TrackComplaint.css';
 
 const COMPLIANCE_OPTIONS = ['Full Compliance', 'Partial Compliance', 'Non-Compliance'];
+const MISSION_ORDER_INSPECTION_READY_STATUSES = new Set(['for inspection', 'for_inspection', 'complete', 'completed', 'done']);
+const MISSION_ORDER_COMPLETE_STATUSES = new Set(['complete', 'completed', 'done']);
 
 function formatDateTime(date) {
   if (!date) return '—';
@@ -274,7 +276,7 @@ export default function TrackComplaint() {
                 const latestMissionOrderStatus = String(latestMissionOrder?.status || '').toLowerCase().trim();
                 const hasAnyInspection = inspections.length > 0;
                 const latestInspection = hasAnyInspection ? pickPreferredInspectionReport(inspections) : null;
-                const latestInspectionRecord = pickLatestInspectionRecord(inspections);
+                const latestInspectionRecord = latestInspection;
                 const latestCompletedInspection = pickLatestInspectionRecord(
                   inspections,
                   (report) => normalizeInspectionReportStatus(report) === 'completed'
@@ -288,16 +290,19 @@ export default function TrackComplaint() {
                   latestRemarksInspection?.inspection_comments || resolutionInspection?.inspection_comments
                 );
                 const normalizedInspectionStatus = normalizeInspectionReportStatus(latestInspectionRecord || latestInspection);
-                const inspectionCompleted = Boolean(latestCompletedInspection) || normalizedInspectionStatus === 'completed';
+                const inspectionUnlockedByMissionOrder = MISSION_ORDER_INSPECTION_READY_STATUSES.has(latestMissionOrderStatus);
+                const inspectionCompleted =
+                  Boolean(latestCompletedInspection) ||
+                  normalizedInspectionStatus === 'completed';
                 const inspectionInProgress = !inspectionCompleted && Boolean(latestInspectionRecord);
-                const inspectionStartedAt = latestInspectionRecord?.started_at || latestInspectionRecord?.created_at
-                  ? new Date(latestInspectionRecord?.started_at || latestInspectionRecord?.created_at)
+                const inspectionStartedAt = latestInspectionRecord?.started_at
+                  ? new Date(latestInspectionRecord.started_at)
                   : null;
-                const inspectionProgressAt = latestInspectionRecord?.updated_at || latestInspectionRecord?.started_at || latestInspectionRecord?.created_at
-                  ? new Date(latestInspectionRecord?.updated_at || latestInspectionRecord?.started_at || latestInspectionRecord?.created_at)
+                const inspectionProgressAt = latestInspectionRecord?.updated_at || latestInspectionRecord?.started_at
+                  ? new Date(latestInspectionRecord?.updated_at || latestInspectionRecord?.started_at)
                   : null;
-                const inspectionCompletedAt = latestCompletedInspection?.completed_at || latestInspectionRecord?.completed_at
-                  ? new Date(latestCompletedInspection?.completed_at || latestInspectionRecord?.completed_at)
+                const inspectionCompletedAt = latestInspectionRecord?.completed_at
+                  ? new Date(latestInspectionRecord.completed_at)
                   : null;
                 const inspectionDateValue = inspectionCompletedAt || inspectionProgressAt;
 
@@ -310,13 +315,13 @@ export default function TrackComplaint() {
                 const moTouchedAt = latestMissionOrder?.updated_at || latestMissionOrder?.submitted_at || latestMissionOrder?.created_at
                   ? new Date(latestMissionOrder?.updated_at || latestMissionOrder?.submitted_at || latestMissionOrder?.created_at)
                   : null;
-                const moComplete = Boolean(moPreapprovedAt) || ['complete', 'completed', 'done'].includes(latestMissionOrderStatus);
+                const moComplete = Boolean(moPreapprovedAt) || MISSION_ORDER_COMPLETE_STATUSES.has(latestMissionOrderStatus);
                 const moInProgress = !isDeclined && hasMo && !moComplete;
                 const moStatusLabel = isDeclined ? 'Not applicable' : (moComplete ? 'Complete' : (moInProgress ? 'In-Progress' : '—'));
                 const moStatusClass = moComplete ? 'status-complete' : (moInProgress ? 'status-inprogress' : '');
                 const moDateValue = moPreapprovedAt || moTouchedAt;
                 const moResolutionTime = hasMo && moStartAt && moDateValue ? formatDurationBetween(moStartAt, moDateValue) : '—';
-                const inspectionStepReached = hasAnyInspection || hasMo;
+                const inspectionStepReached = hasAnyInspection || inspectionUnlockedByMissionOrder;
                 const inspectionStatusText = inspectionCompleted
                   ? 'Complete'
                   : inspectionInProgress
@@ -340,30 +345,10 @@ export default function TrackComplaint() {
                     : '—';
 
                 const complaintMarkedComplete = ['resolved', 'closed', 'completed', 'done'].includes(s);
-                const missionOrderIsComplete = missionOrders.some((m) => {
-                  const ms = String(m?.status || '').toLowerCase();
-                  return ms === 'complete' || ms === 'completed' || ms === 'done';
-                });
-
                 const effectiveIsResolved =
                   isDeclined ||
                   complaintMarkedComplete ||
-                  missionOrderIsComplete ||
-                  Boolean(latestCompletedInspection);
-                const resolutionDate = isDeclined
-                  ? (declinedDate || reviewDate)
-                  : latestCompletedInspection?.completed_at
-                    ? new Date(latestCompletedInspection.completed_at)
-                    : resolutionInspection?.updated_at
-                      ? new Date(resolutionInspection.updated_at)
-                      : (approvedDate || null);
-                const resolutionLabel = isDeclined
-                  ? 'Case Closed'
-                  : latestCompletedInspection
-                    ? 'Inspection Completed'
-                    : effectiveIsResolved
-                      ? 'Business Inspected'
-                    : (s === 'approved' ? 'Approved' : 'Pending');
+                  normalizedInspectionStatus === 'completed';
                 const inspectionRemarks =
                   remarksInfo.remarks ||
                   String(latestRemarksInspection?.inspection_comments || resolutionInspection?.inspection_comments || '').trim();
@@ -480,56 +465,27 @@ export default function TrackComplaint() {
                                   ? 'Inspection completed. Summary from the inspector remarks is shown below.'
                                   : 'Summary of findings will appear after the inspection is completed.'}
                               </div>
-                              {effectiveIsResolved ? (
-                                <>
-                                  <div className="vtl-detail">
-                                    <span className="vtl-detail-label">Status:</span>{' '}
-                                    <span className="vtl-detail-value">{resolutionLabel}</span>
-                                  </div>
-                                  <div className="vtl-detail">
-                                    <span className="vtl-detail-label">Date:</span>{' '}
-                                    <span className="vtl-detail-value">{fmt(resolutionDate)}</span>
-                                  </div>
-                                </>
-                              ) : null}
                               {showResolutionSummary ? (
-                                <div style={{ marginTop: 6 }}>
-                                  <div style={{ marginTop: 2 }}>
-                                    <div className="vtl-desc" style={{ fontWeight: 800, margin: 0 }}>Inspector remarks</div>
+                                <div style={{ marginTop: 4 }}>
+                                  <div
+                                    style={{
+                                      padding: 12,
+                                      background: '#f8fafc',
+                                      border: '1px solid #e2e8f0',
+                                      borderRadius: 12,
+                                      color: '#0f172a',
+                                      fontSize: 14,
+                                      lineHeight: 1.6,
+                                      whiteSpace: 'pre-wrap',
+                                    }}
+                                  >
                                     {remarksInfo.complianceStatus ? (
-                                      <div style={{ marginTop: 8 }}>
-                                        <span
-                                          style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            padding: '6px 10px',
-                                            borderRadius: 999,
-                                            background: '#e0f2fe',
-                                            color: '#075985',
-                                            fontSize: 12,
-                                            fontWeight: 900,
-                                            letterSpacing: 0.2,
-                                          }}
-                                        >
-                                          {remarksInfo.complianceStatus}
-                                        </span>
+                                      <div style={{ marginBottom: inspectionRemarks ? 8 : 0, whiteSpace: 'normal' }}>
+                                        <span style={{ color: '#64748b', fontWeight: 700 }}>Compliance Status:</span>{' '}
+                                        <span style={{ fontWeight: 800 }}>{remarksInfo.complianceStatus}</span>
                                       </div>
                                     ) : null}
-                                    <div
-                                      style={{
-                                        marginTop: 8,
-                                        padding: 12,
-                                        background: '#f8fafc',
-                                        border: '1px solid #e2e8f0',
-                                        borderRadius: 12,
-                                        color: '#0f172a',
-                                        fontSize: 14,
-                                        lineHeight: 1.6,
-                                        whiteSpace: 'pre-wrap',
-                                      }}
-                                    >
-                                      {inspectionRemarks || 'No remarks were provided in the inspection slip.'}
-                                    </div>
+                                    <div>{inspectionRemarks || 'No remarks were provided in the inspection slip.'}</div>
                                   </div>
                                 </div>
                               ) : null}

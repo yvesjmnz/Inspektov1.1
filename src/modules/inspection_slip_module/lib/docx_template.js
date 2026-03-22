@@ -65,7 +65,7 @@ function base64ToArrayBuffer(b64) {
   return bytes.buffer;
 }
 
-function buildFindingsLines({ business_permit_status, cctv_status, signage_status, cctv_count }) {
+function buildFindingsLines({ business_permit_status, cctv_status, signage_status, cctv_count, signage_sqm }) {
   const toFindingText = (label, status) => {
     const s = safeText(status);
     if (!s) return `${label}: N/A`;
@@ -75,7 +75,7 @@ function buildFindingsLines({ business_permit_status, cctv_status, signage_statu
   const lines = [
     toFindingText('Business Permit (Presented)', business_permit_status),
     toFindingText('With CCTV', cctv_status),
-    toFindingText('2sqm Signage', signage_status),
+    toFindingText('Signage', signage_status),
   ];
 
   const cctvCountNum = Number(cctv_count);
@@ -83,7 +83,30 @@ function buildFindingsLines({ business_permit_status, cctv_status, signage_statu
     lines.splice(1, 1, `With CCTV: ${safeText(cctv_status) || 'N/A'} (${cctvCountNum} CCTV${cctvCountNum === 1 ? '' : 's'})`);
   }
 
+  const signageSqmNum = Number(signage_sqm);
+  if (Number.isFinite(signageSqmNum) && signageSqmNum > 0) {
+    lines.splice(2, 1, `Signage: ${safeText(signage_status) || 'N/A'} (${signageSqmNum} sqm)`);
+  }
+
   return lines.join('\n');
+}
+
+function ensureEstimatedAreaPlaceholder(zip) {
+  const entry = zip.file('word/document.xml');
+  if (!entry) return;
+
+  const xml = entry.asText();
+  const paragraphPattern = /(<w:p\b[^>]*>[\s\S]*?<w:t>ESTIMATED AREA \(IN SQM\):<\/w:t>[\s\S]*?)(<\/w:p>)/;
+  const match = xml.match(paragraphPattern);
+  if (!match) return;
+
+  const paragraphXml = match[1];
+  if (paragraphXml.includes('{estimated_area_sqm}')) return;
+
+  const injectedParagraph =
+    `${paragraphXml}<w:r><w:rPr><w:b/><w:bCs/><w:sz w:val="24"/></w:rPr><w:t>{estimated_area_sqm}</w:t></w:r>`;
+
+  zip.file('word/document.xml', xml.replace(paragraphPattern, `${injectedParagraph}$2`));
 }
 
 export async function generateInspectionSlipDocx({
@@ -95,6 +118,7 @@ export async function generateInspectionSlipDocx({
   inspection_report_id,
   bin,
   business_address,
+  estimated_area_sqm,
   number_of_employees,
   landline_no,
   email_address,
@@ -104,6 +128,7 @@ export async function generateInspectionSlipDocx({
   cctv_status,
   signage_status,
   cctv_count,
+  signage_sqm,
   // Optional signatures (image placeholders)
   inspector_signature_url,
   owner_signature_url,
@@ -112,6 +137,7 @@ export async function generateInspectionSlipDocx({
 
   const templateBuf = await fetchAsArrayBuffer(templateUrl);
   const zip = new PizZip(templateBuf);
+  ensureEstimatedAreaPlaceholder(zip);
 
   // Image placeholders (if present in template).
   const imageModuleName = 'open-xml-templating/docxtemplater-image-module';
@@ -197,10 +223,12 @@ export async function generateInspectionSlipDocx({
     cctv_status,
     signage_status,
     cctv_count,
+    signage_sqm,
   });
 
   const owner = safeText(owner_name) || '—';
   const truncatedBusinessAddress = truncateAddressAtNcr(business_address);
+  const estimatedAreaDisplay = estimated_area_sqm == null || String(estimated_area_sqm).trim() === '' ? '—' : String(estimated_area_sqm).trim();
   const employeesDisplay = number_of_employees == null || String(number_of_employees).trim() === '' ? '—' : String(number_of_employees).trim();
 
   const docData = {
@@ -228,6 +256,19 @@ export async function generateInspectionSlipDocx({
     no_of_employees: employeesDisplay,
     employees: employeesDisplay,
     employee_count: employeesDisplay,
+    estimated_area_sqm: estimatedAreaDisplay,
+    estimated_area: estimatedAreaDisplay,
+    area_in_sqm: estimatedAreaDisplay,
+    estimated_area_in_sqm: estimatedAreaDisplay,
+    estimated_area_insqm: estimatedAreaDisplay,
+    estimated_area_sq_m: estimatedAreaDisplay,
+    area_sqm: estimatedAreaDisplay,
+    sqm_area: estimatedAreaDisplay,
+    estimatedarea: estimatedAreaDisplay,
+    estimatedareasqm: estimatedAreaDisplay,
+    estimatedareainsqm: estimatedAreaDisplay,
+    'estimated_area_(in_sqm)': estimatedAreaDisplay,
+    'estimated_area_(sqm)': estimatedAreaDisplay,
     email_address: safeText(email_address) || '—',
     email: safeText(email_address) || '—',
 
