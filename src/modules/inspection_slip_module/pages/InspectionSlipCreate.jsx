@@ -230,6 +230,19 @@ function OverviewField({ label, children, fullWidth = false }) {
 export default function InspectionSlipCreate() {
   const missionOrderId = useMemo(() => getMissionOrderIdFromQuery(), []);
   const inspectionReportIdFromQuery = useMemo(() => getInspectionReportIdFromQuery(), []);
+  const backHref = useMemo(() => {
+    const inspectionSource = (() => {
+      try {
+        return sessionStorage.getItem('inspectionSource');
+      } catch {
+        return null;
+      }
+    })();
+
+    return inspectionSource === 'inspection-history'
+      ? '/dashboard/inspector?tab=history'
+      : '/dashboard/inspector?tab=assigned';
+  }, []);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -820,6 +833,7 @@ export default function InspectionSlipCreate() {
           // Completed reports are view-only
           if (explicitWorkflowStatus === 'completed') {
             setIsCompleted(true);
+            setSummaryUnlocked(true);
             setActiveTab('inspection_details');
           } else {
             setIsCompleted(false);
@@ -935,6 +949,7 @@ export default function InspectionSlipCreate() {
 
           if (existingWorkflowStatus === 'completed') {
             setIsCompleted(true);
+            setSummaryUnlocked(true);
             setToast(
               'This inspection report is already completed. Editing is disabled, but you can still view the details.'
             );
@@ -1361,7 +1376,8 @@ export default function InspectionSlipCreate() {
   const inspectionStatusValue = isCompleted ? 'completed' : inspectionStarted ? 'in progress' : 'pending inspection';
   const inspectionStatusLabel = isCompleted ? 'Completed' : inspectionStarted ? 'In Progress' : 'Pending Inspection';
   const inspectionLocked =
-    (inspectionStarted || isCompleted) &&
+    !isCompleted &&
+    inspectionStarted &&
     !!inspectionReportId &&
     !!currentInspectorId &&
     !!inspectionOwnerId &&
@@ -1478,19 +1494,21 @@ export default function InspectionSlipCreate() {
   // We also need to paint them onto the canvases because the UI uses <canvas>.
   useEffect(() => {
     if (!completionKnown) return;
+    if (activeTab !== 'summary') return;
     if (inspectorSignature && !inspectorSignature.startsWith('data:image')) {
       paintSignatureToCanvas('inspector', inspectorSignature);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [completionKnown, inspectorSignature]);
+  }, [completionKnown, inspectorSignature, activeTab]);
 
   useEffect(() => {
     if (!completionKnown) return;
+    if (activeTab !== 'summary') return;
     if (ownerSignature && !ownerSignature.startsWith('data:image')) {
       paintSignatureToCanvas('owner', ownerSignature);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [completionKnown, ownerSignature]);
+  }, [completionKnown, ownerSignature, activeTab]);
 
   const handleSaveReport = async () => {
     if (isCompleted) {
@@ -2044,7 +2062,7 @@ export default function InspectionSlipCreate() {
             </div>
 
             <div className="mo-actions">
-              <a className="mo-link" href="/dashboard/inspector">
+              <a className="mo-link" href={backHref}>
                 Back
               </a>
             </div>
@@ -2101,7 +2119,7 @@ export default function InspectionSlipCreate() {
                         className={activeTab === 'summary' ? 'active' : ''}
                         onClick={() => setActiveTab('summary')}
                       >
-                        Summary
+                        Inspection Summary
                       </button>
                     ) : null}
                   </div>
@@ -3289,7 +3307,7 @@ export default function InspectionSlipCreate() {
                   <div className="is-card">
                     <div className="is-section-head">
                       <div>
-                        <p className="is-section-title">Summary</p>
+                        <p className="is-section-title">Inspection Summary</p>
                       </div>
                     </div>
 

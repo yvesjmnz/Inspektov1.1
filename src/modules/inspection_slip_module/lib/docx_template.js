@@ -65,7 +65,14 @@ function base64ToArrayBuffer(b64) {
   return bytes.buffer;
 }
 
-function buildFindingsLines({ business_permit_status, cctv_status, signage_status, cctv_count, signage_sqm }) {
+function buildFindingsLines({
+  business_permit_status,
+  cctv_status,
+  signage_status,
+  cctv_count,
+  signage_sqm,
+  inspection_remarks,
+}) {
   const toFindingText = (label, status) => {
     const s = safeText(status);
     if (!s) return `${label}: N/A`;
@@ -86,6 +93,11 @@ function buildFindingsLines({ business_permit_status, cctv_status, signage_statu
   const signageSqmNum = Number(signage_sqm);
   if (Number.isFinite(signageSqmNum) && signageSqmNum > 0) {
     lines.splice(2, 1, `Signage: ${safeText(signage_status) || 'N/A'} (${signageSqmNum} sqm)`);
+  }
+
+  const remarks = safeText(inspection_remarks);
+  if (remarks) {
+    lines.push('', `Remarks: ${remarks}`);
   }
 
   return lines.join('\n');
@@ -129,6 +141,7 @@ export async function generateInspectionSlipDocx({
   signage_status,
   cctv_count,
   signage_sqm,
+  inspection_remarks,
   // Optional signatures (image placeholders)
   inspector_signature_url,
   owner_signature_url,
@@ -186,8 +199,8 @@ export async function generateInspectionSlipDocx({
       return null;
     },
     getSize: () => {
-      // Approx size for signature image.
-      return [220, 90];
+      // Keep signatures compact so the generated inspection slip stays on one page more reliably.
+      return [140, 50];
     },
   });
 
@@ -224,6 +237,7 @@ export async function generateInspectionSlipDocx({
     signage_status,
     cctv_count,
     signage_sqm,
+    inspection_remarks,
   });
 
   const owner = safeText(owner_name) || '—';
@@ -288,6 +302,10 @@ export async function generateInspectionSlipDocx({
     signage_2sqm: safeText(signage_status) || 'N/A',
     findings_lines,
     findings: findings_lines,
+    inspection_remarks: safeText(inspection_remarks) || '—',
+    remarks: safeText(inspection_remarks) || '—',
+    additional_observations: safeText(inspection_remarks) || '—',
+    findings_remarks: safeText(inspection_remarks) || '—',
 
     // Optional image placeholders (if template uses them)
     inspector_signature: inspectorSignatureBase64,

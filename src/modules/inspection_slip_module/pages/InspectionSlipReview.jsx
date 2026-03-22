@@ -684,15 +684,16 @@ export default function InspectionSlipReview() {
 
         inspector_names: inspectorNames,
 
-        business_permit_status: freshReport?.business_permit_status,
-        cctv_status: freshReport?.cctv_status,
-        signage_status: freshReport?.signage_status,
-        cctv_count: freshReport?.cctv_count,
-        signage_sqm: freshReport?.signage_sqm,
+          business_permit_status: freshReport?.business_permit_status,
+          cctv_status: freshReport?.cctv_status,
+          signage_status: freshReport?.signage_status,
+          cctv_count: freshReport?.cctv_count,
+          signage_sqm: freshReport?.signage_sqm,
+          inspection_remarks: freshReport?.inspection_comments ?? additionalComments,
 
-        inspector_signature_url,
-        owner_signature_url,
-      });
+          inspector_signature_url,
+          owner_signature_url,
+        });
 
       const objectPath = `inspection-reports/${freshReport.id}/INSPECTION-SLIP.docx`;
 

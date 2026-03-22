@@ -146,6 +146,7 @@ export default function DashboardInspector() {
 
       if (visibleMissionOrderIds.length === 0) {
         setAssigned([]);
+        setHistory([]);
         return;
       }
 
@@ -164,6 +165,42 @@ export default function DashboardInspector() {
       if (complaintError) throw complaintError;
 
       const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
+
+      const { data: allAssignmentRows, error: allAssignmentError } = await supabase
+        .from('mission_order_assignments')
+        .select('mission_order_id, inspector_id, assigned_at')
+        .in('mission_order_id', visibleMissionOrderIds)
+        .order('assigned_at', { ascending: true });
+
+      if (allAssignmentError) throw allAssignmentError;
+
+      const assignedInspectorIds = Array.from(
+        new Set((allAssignmentRows || []).map((row) => row?.inspector_id).filter(Boolean))
+      );
+
+      const { data: assignedInspectorProfiles, error: assignedInspectorProfilesError } = assignedInspectorIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', assignedInspectorIds)
+        : { data: [], error: null };
+
+      if (assignedInspectorProfilesError) throw assignedInspectorProfilesError;
+
+      const inspectorNameById = new Map(
+        (assignedInspectorProfiles || []).map((profile) => [profile.id, profile.full_name])
+      );
+      const inspectorNamesByMissionOrderId = new Map();
+      for (const row of allAssignmentRows || []) {
+        const currentMissionOrderId = row?.mission_order_id;
+        const inspectorName = inspectorNameById.get(row?.inspector_id);
+        if (!currentMissionOrderId || !inspectorName) continue;
+        if (!inspectorNamesByMissionOrderId.has(currentMissionOrderId)) {
+          inspectorNamesByMissionOrderId.set(currentMissionOrderId, []);
+        }
+        const names = inspectorNamesByMissionOrderId.get(currentMissionOrderId);
+        if (!names.includes(inspectorName)) names.push(inspectorName);
+      }
 
       // Helpers must be defined BEFORE we use them.
       const statusLower = (s) => String(s || '').toLowerCase().trim();
@@ -223,6 +260,7 @@ export default function DashboardInspector() {
             inspection_report_id: rep.id || null,
             inspection_status: rep.resolvedStatus || 'pending inspection',
             inspection_completed_at: rep.completed_at || null,
+            inspector_names: inspectorNamesByMissionOrderId.get(id) || [],
             inspection_owner_id: rep.inspector_id || null,
             inspection_owned_by_current_user: !!rep.inspector_id && rep.inspector_id === userId,
           };
@@ -395,7 +433,14 @@ export default function DashboardInspector() {
                 <button
                   type="button"
                   className={`dash-nav-item ${tab === 'assigned' ? 'active' : ''}`}
-                  onClick={() => setTab('assigned')}
+                  onClick={() => {
+                    try {
+                      sessionStorage.setItem('inspectionSource', 'inspection');
+                    } catch {
+                      // ignore
+                    }
+                    setTab('assigned');
+                  }}
                 >
                   <span
                     className="dash-nav-ico"
@@ -424,7 +469,14 @@ export default function DashboardInspector() {
                 <button
                   type="button"
                   className={`dash-nav-item ${tab === 'history' ? 'active' : ''}`}
-                  onClick={() => setTab('history')}
+                  onClick={() => {
+                    try {
+                      sessionStorage.setItem('inspectionSource', 'inspection-history');
+                    } catch {
+                      // ignore
+                    }
+                    setTab('history');
+                  }}
                 >
                   <span
                     className="dash-nav-ico"
@@ -623,6 +675,11 @@ export default function DashboardInspector() {
                                   }
                                   onClick={() => {
                                     if (!isRowEnabled) return;
+                                    try {
+                                      sessionStorage.setItem('inspectionSource', 'inspection');
+                                    } catch {
+                                      // ignore
+                                    }
                                     window.location.assign(href);
                                   }}
                                   onMouseEnter={(e) => {
@@ -719,19 +776,44 @@ export default function DashboardInspector() {
 
                           {/* Table for this day */}
                           <div style={{ overflowX: 'auto' }}>
-                            <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                               <thead>
                                 <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
                                   <th style={{ width: 170, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION STATUS</th>
-                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>BUSINESS & ADDRESS</th>
-                                  <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION DATE</th>
-                                  <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>COMPLETED DATE</th>
-                                  <th style={{ width: 190, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION SLIP</th>
+                                  <th style={{ width: '100%', padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>BUSINESS & ADDRESS</th>
+                                  <th style={{ width: 210, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTION DATE</th>
+                                  <th style={{ width: 220, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>INSPECTORS</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {dayGroup.items.map((r) => (
-                                  <tr key={`hist-${r.mission_order_id}`} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                  <tr
+                                    key={`hist-${r.mission_order_id}`}
+                                    style={{
+                                      borderBottom: '1px solid #e2e8f0',
+                                      cursor: 'pointer',
+                                      transition: 'background-color 0.2s ease',
+                                    }}
+                                    title="View inspection summary"
+                                    onClick={() => {
+                                      try {
+                                        sessionStorage.setItem('inspectionSource', 'inspection-history');
+                                      } catch {
+                                        // ignore
+                                      }
+                                      window.location.assign(
+                                        r.inspection_report_id
+                                          ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
+                                          : `/inspection-slip/create?missionOrderId=${r.mission_order_id}`
+                                      );
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.background = '#f8fafc';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.background = '#ffffff';
+                                    }}
+                                  >
                                     <td style={{ padding: '12px' }}>
                                       <span className={statusBadgeClass(r.inspection_status)} style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
                                         {formatStatus(r.inspection_status)}
@@ -744,21 +826,22 @@ export default function DashboardInspector() {
                                     <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
                                       {r.date_of_inspection ? new Date(r.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
                                     </td>
-                                    <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
-                                      {r.inspection_completed_at ? new Date(r.inspection_completed_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
-                                    </td>
                                     <td style={{ padding: '12px' }}>
-                                      <a
-                                        className="dash-btn"
-                                        // Open the existing completed report (read-only) instead of creating a new draft.
-                                        href={
-                                          r.inspection_report_id
-                                            ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
-                                            : `/inspection-slip/create?missionOrderId=${r.mission_order_id}`
-                                        }
-                                      >
-                                        View
-                                      </a>
+                                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8, minHeight: 30, fontSize: 12 }}>
+                                        {(r.inspector_names || []).length === 0 ? (
+                                          <span style={{ color: '#64748b', fontWeight: 700 }}>â€”</span>
+                                        ) : (
+                                          (r.inspector_names || []).map((name, idx) => (
+                                            <span
+                                              key={`${r.mission_order_id || r.inspection_report_id}-${idx}`}
+                                              style={{ padding: '4px 8px', borderRadius: 999, fontWeight: 700, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 11 }}
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              {name}
+                                            </span>
+                                          ))
+                                        )}
+                                      </div>
                                     </td>
                                   </tr>
                                 ))}
@@ -778,3 +861,6 @@ export default function DashboardInspector() {
     </div>
   );
 }
+
+
+
