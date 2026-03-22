@@ -7,6 +7,7 @@ import { pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import DirectorReports from './DirectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
 import HistorySearchBar from '../components/HistorySearchBar';
+import MiniRefreshButton from '../components/MiniRefreshButton';
 import './Dashboard.css';
 
 // Complaint category grouping (Director view) from tags like "Violation: <Sub>"
@@ -95,6 +96,20 @@ function statusBadgeClass(status) {
   if (['submitted', 'pending', 'new'].includes(s)) return 'status-badge status-warning';
   if (['on hold', 'on_hold', 'hold'].includes(s)) return 'status-badge status-info';
   return 'status-badge';
+}
+
+function getComplaintDecisionStatus(complaint) {
+  const status = String(complaint?.status || '').toLowerCase().trim();
+
+  if (complaint?.declined_at || ['declined', 'rejected', 'invalid'].includes(status)) {
+    return 'declined';
+  }
+
+  if (complaint?.approved_at || ['approved', 'completed'].includes(status)) {
+    return 'approved';
+  }
+
+  return status;
 }
 
 // Head Inspector-style status formatting (use these for the Mission Order History view so labels and colors match)
@@ -1165,6 +1180,9 @@ export default function DashboardDirector() {
     return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
   }, [filteredMissionOrders]);
 
+  const usesMissionOrderRefresh = tab === 'mission-orders' || tab === 'mission-orders-history' || tab === 'inspection' || tab === 'inspection-history';
+  const showHeaderRefresh = tab !== 'reports';
+
   // Group complaints by day for Review Complaints
   const complaintsByDay = useMemo(() => {
     // Group by day for both queue and history tabs
@@ -1289,12 +1307,13 @@ export default function DashboardDirector() {
     for (const c of list) {
       const approverLabel = c.approved_by ? String(c.approved_by) : '';
       const declinerLabel = c.declined_by ? String(c.declined_by) : '';
+      const exportStatus = tab === 'history' ? getComplaintDecisionStatus(c) : c.status || '';
       const row = [
         c.id,
         c.business_name || '',
         c.business_address || '',
         c.reporter_email || '',
-        c.status || '',
+        exportStatus,
         c.authenticity_level ?? '',
         c.created_at || '',
         c.approved_at || '',
@@ -1327,7 +1346,7 @@ export default function DashboardDirector() {
   };
 
   const handleRefresh = () => {
-    if (tab === 'mission-orders') {
+    if (usesMissionOrderRefresh) {
       loadMissionOrders();
     } else {
       loadComplaints();
@@ -1374,15 +1393,16 @@ export default function DashboardDirector() {
     }
     const total = filteredComplaints.length;
     const sLower = (s) => String(s || '').toLowerCase();
-    const approved = filteredComplaints.filter((c) => sLower(c.status) === 'approved').length;
-    const declined = filteredComplaints.filter((c) => sLower(c.status) === 'declined').length;
+    const approved = filteredComplaints.filter((c) => getComplaintDecisionStatus(c) === 'approved').length;
+    const declined = filteredComplaints.filter((c) => getComplaintDecisionStatus(c) === 'declined').length;
     const pending = filteredComplaints.filter((c) => ['submitted', 'pending', 'new'].includes(sLower(c.status))).length;
 
     // Average decision time in hours (from created_at to approved_at/declined_at if present)
     const decisionDurations = filteredComplaints
       .map((c) => {
         const created = c.created_at ? new Date(c.created_at).getTime() : null;
-        const decidedAt = sLower(c.status) === 'approved' ? c.approved_at : sLower(c.status) === 'declined' ? c.declined_at : null;
+        const decisionStatus = getComplaintDecisionStatus(c);
+        const decidedAt = decisionStatus === 'approved' ? c.approved_at : decisionStatus === 'declined' ? c.declined_at : null;
         const decided = decidedAt ? new Date(decidedAt).getTime() : null;
         if (!created || !decided) return null;
         return (decided - created) / 36e5; // hours
@@ -1788,7 +1808,17 @@ export default function DashboardDirector() {
             <div className="dash-card">
           <div className="dash-header">
             <div>
-              <h2 className="dash-title">{pageMeta.title}</h2>
+              <div className="dash-title-row">
+                <h2 className="dash-title">{pageMeta.title}</h2>
+                {showHeaderRefresh ? (
+                  <MiniRefreshButton
+                    onClick={handleRefresh}
+                    disabled={loading}
+                    ariaLabel={`Refresh ${pageMeta.title}`}
+                    title={`Refresh ${pageMeta.title}`}
+                  />
+                ) : null}
+              </div>
               <p className="dash-subtitle">{pageMeta.subtitle}</p>
             </div>
             <div className="dash-actions">
@@ -2479,13 +2509,13 @@ export default function DashboardDirector() {
                             {/* Approved */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#22c55e' }}>
                               <span>Approved</span>
-                              <span>{dayGroup.items.filter(c => String(c.status || '').toLowerCase() === 'approved').length}</span>
+                              <span>{dayGroup.items.filter((c) => getComplaintDecisionStatus(c) === 'approved').length}</span>
                             </div>
                             <span>|</span>
                             {/* Declined */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#ef4444' }}>
                               <span>Declined</span>
-                              <span>{dayGroup.items.filter(c => String(c.status || '').toLowerCase() === 'declined').length}</span>
+                              <span>{dayGroup.items.filter((c) => getComplaintDecisionStatus(c) === 'declined').length}</span>
                             </div>
                           </div>
                         ) : (
@@ -2569,7 +2599,7 @@ export default function DashboardDirector() {
                                   ) : tab === 'history' ? (
                                     <>
                                       <td style={{ padding: '12px' }}>
-                                        <span className={statusBadgeClass(c.status)}>{formatStatus(c.status)}</span>
+                                        <span className={statusBadgeClass(getComplaintDecisionStatus(c))}>{formatStatus(getComplaintDecisionStatus(c))}</span>
                                       </td>
                                       <td style={{ padding: '12px' }}>
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
@@ -2641,7 +2671,7 @@ export default function DashboardDirector() {
             <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, boxShadow: '0 2px 10px rgba(2,6,23,0.06)', padding: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ fontSize: 18, fontWeight: 900, color: '#0f172a' }}>{auditComplaint.business_name || '—'}</div>
-                <span className={statusBadgeClass(auditComplaint.status)}>{formatStatus(auditComplaint.status)}</span>
+                <span className={statusBadgeClass(getComplaintDecisionStatus(auditComplaint))}>{formatStatus(getComplaintDecisionStatus(auditComplaint))}</span>
               </div>
               <div style={{ color: '#334155', marginTop: 8, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                 <span aria-hidden>📍</span>
@@ -2666,7 +2696,7 @@ export default function DashboardDirector() {
                 <div style={{ fontWeight: 900, color: '#0f172a' }}>Decision</div>
               </div>
               {(() => {
-                const s = String(auditComplaint.status || '').toLowerCase();
+                const s = getComplaintDecisionStatus(auditComplaint);
                 const created = auditComplaint.created_at ? new Date(auditComplaint.created_at) : null;
                 if (s === 'approved') {
                   const decided = auditComplaint.approved_at ? new Date(auditComplaint.approved_at) : null;

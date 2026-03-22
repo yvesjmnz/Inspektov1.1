@@ -144,6 +144,17 @@
   color: #0f172a;
 }
 
+.dash-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dash-title-row .dash-title {
+  margin: 0;
+}
+
 .dash-subtitle {
   margin: 0 0 18px;
   color: #475569;
@@ -405,6 +416,43 @@
 .dash-tile li { margin: 6px 0; }
 
 .dash-actions { margin-top: 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+.dash-mini-refresh-btn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(90deg, #1e3a8a 0%, #0b2249 100%);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+  flex-shrink: 0;
+}
+
+.dash-mini-refresh-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.22);
+}
+
+.dash-mini-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.dash-mini-refresh-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+}
 
 .dash-link { color: #2563eb; font-weight: 800; text-decoration: none; }
 .dash-link:hover { text-decoration: underline; }

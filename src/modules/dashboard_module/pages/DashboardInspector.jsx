@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import NotificationBell from '../../../components/NotificationBell';
+import MiniRefreshButton from '../components/MiniRefreshButton';
 import './Dashboard.css';
 
 function formatStatus(status) {
@@ -389,6 +390,10 @@ export default function DashboardInspector() {
     return { groups, sortedKeys };
   }, [filteredHistory, tab]);
 
+  const handleRefresh = () => {
+    loadAssigned();
+  };
+
   return (
     <div className="dash-container">
       <main className="dash-main">
@@ -549,7 +554,15 @@ export default function DashboardInspector() {
             <div className="dash-card">
               <div className="dash-header">
                 <div>
-                  <h2 className="dash-title">Inspector Dashboard</h2>
+                  <div className="dash-title-row">
+                    <h2 className="dash-title">Inspector Dashboard</h2>
+                    <MiniRefreshButton
+                      onClick={handleRefresh}
+                      disabled={loading}
+                      ariaLabel={tab === 'history' ? 'Refresh inspection history' : 'Refresh assigned inspections'}
+                      title={tab === 'history' ? 'Refresh inspection history' : 'Refresh assigned inspections'}
+                    />
+                  </div>
                   <p className="dash-subtitle">
                     {userLabel ? `Welcome ${userLabel}!` : 'Welcome!'} View your assigned inspections and open full
                     inspection details.

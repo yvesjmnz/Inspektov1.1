@@ -6,6 +6,7 @@ import { pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import HeadInspectorReports from './HeadInspectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
 import HistorySearchBar from '../components/HistorySearchBar';
+import MiniRefreshButton from '../components/MiniRefreshButton';
 import './Dashboard.css';
 import { getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
 
@@ -1086,6 +1087,17 @@ export default function DashboardHeadInspector() {
     return { groups, sortedKeys };
   }, [filteredInspectionHistory, tab]);
 
+  const showHeaderRefresh = tab !== 'reports';
+
+  const handleRefresh = () => {
+    if (tab === 'inspection-history') {
+      loadInspectionHistory();
+      return;
+    }
+
+    loadApprovedComplaints();
+  };
+
   return (
     <div className="dash-container">
       <main className="dash-main">
@@ -1218,7 +1230,17 @@ export default function DashboardHeadInspector() {
             <div className="dash-card">
               <div className="dash-header">
                 <div>
-                  <h2 className="dash-title">{pageMeta.title}</h2>
+                  <div className="dash-title-row">
+                    <h2 className="dash-title">{pageMeta.title}</h2>
+                    {showHeaderRefresh ? (
+                      <MiniRefreshButton
+                        onClick={handleRefresh}
+                        disabled={loading}
+                        ariaLabel={`Refresh ${pageMeta.title}`}
+                        title={`Refresh ${pageMeta.title}`}
+                      />
+                    ) : null}
+                  </div>
                   <p className="dash-subtitle">{pageMeta.subtitle}</p>
                 </div>
                 <div className="dash-actions">
