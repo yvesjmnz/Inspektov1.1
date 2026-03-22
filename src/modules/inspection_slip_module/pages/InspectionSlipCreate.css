@@ -358,6 +358,88 @@
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
 }
 
+.is-violation-findings-card{
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dbe5f3;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 14px;
+}
+
+.is-violation-findings-head{
+  display: grid;
+  gap: 4px;
+}
+
+.is-violation-findings-title{
+  font-size: 12px;
+  font-weight: 900;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.is-violation-findings-sub{
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.is-violation-findings-list{
+  display: grid;
+  gap: 10px;
+}
+
+.is-violation-findings-row{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid #dbe5f3;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.is-violation-findings-copy{
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.is-violation-findings-name{
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.5;
+}
+
+.is-violation-findings-meta{
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.is-violation-findings-actions{
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px){
+  .is-violation-findings-row{
+    grid-template-columns: 1fr;
+  }
+
+  .is-violation-findings-actions{
+    justify-content: flex-start;
+  }
+}
+
 .is-summary-check-row{
   display: grid;
   grid-template-columns: minmax(220px, 1.2fr) minmax(260px, 0.8fr);

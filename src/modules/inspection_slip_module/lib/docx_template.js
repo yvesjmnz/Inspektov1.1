@@ -6,6 +6,17 @@ function safeText(v) {
   return String(v ?? '').trim();
 }
 
+function formatChecklistStatus(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+
+  if (normalized === 'compliant') return 'Compliant';
+  if (normalized === 'non_compliant') return 'Non-Compliant';
+  return 'N/A';
+}
+
 function truncateAddressAtNcr(value) {
   const s = String(value ?? '').trim();
   if (!s) return '';
@@ -65,6 +76,80 @@ function base64ToArrayBuffer(b64) {
   return bytes.buffer;
 }
 
+async function cropSignatureBase64(base64) {
+  const buffer = base64ToArrayBuffer(base64);
+  if (!buffer) return base64;
+
+  const blob = new Blob([buffer], { type: 'image/png' });
+  const objectUrl = URL.createObjectURL(blob);
+
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Failed to load signature image.'));
+      img.src = objectUrl;
+    });
+
+    const sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = image.width;
+    sourceCanvas.height = image.height;
+    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+    if (!sourceCtx) return base64;
+
+    sourceCtx.drawImage(image, 0, 0);
+    const { data, width, height } = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        const alpha = data[idx + 3];
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const isVisibleStroke = alpha > 16 && !(r > 245 && g > 245 && b > 245);
+
+        if (!isVisibleStroke) continue;
+
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+
+    if (maxX < minX || maxY < minY) return base64;
+
+    const padding = 6;
+    const cropX = Math.max(0, minX - padding);
+    const cropY = Math.max(0, minY - padding);
+    const cropW = Math.min(width - cropX, maxX - minX + 1 + padding * 2);
+    const cropH = Math.min(height - cropY, maxY - minY + 1 + padding * 2);
+
+    const targetCanvas = document.createElement('canvas');
+    targetCanvas.width = cropW;
+    targetCanvas.height = cropH;
+    const targetCtx = targetCanvas.getContext('2d');
+    if (!targetCtx) return base64;
+
+    targetCtx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    const croppedBlob = await new Promise((resolve) => targetCanvas.toBlob(resolve, 'image/png'));
+    if (!croppedBlob) return base64;
+
+    return arrayBufferToBase64(await croppedBlob.arrayBuffer());
+  } catch {
+    return base64;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function buildFindingsLines({
   business_permit_status,
   cctv_status,
@@ -74,9 +159,7 @@ function buildFindingsLines({
   inspection_remarks,
 }) {
   const toFindingText = (label, status) => {
-    const s = safeText(status);
-    if (!s) return `${label}: N/A`;
-    return `${label}: ${s}`;
+    return `${label}: ${formatChecklistStatus(status)}`;
   };
 
   const lines = [
@@ -87,12 +170,12 @@ function buildFindingsLines({
 
   const cctvCountNum = Number(cctv_count);
   if (Number.isFinite(cctvCountNum) && cctvCountNum > 0) {
-    lines.splice(1, 1, `With CCTV: ${safeText(cctv_status) || 'N/A'} (${cctvCountNum} CCTV${cctvCountNum === 1 ? '' : 's'})`);
+    lines.splice(1, 1, `With CCTV: ${formatChecklistStatus(cctv_status)} (${cctvCountNum} CCTV${cctvCountNum === 1 ? '' : 's'})`);
   }
 
   const signageSqmNum = Number(signage_sqm);
   if (Number.isFinite(signageSqmNum) && signageSqmNum > 0) {
-    lines.splice(2, 1, `Signage: ${safeText(signage_status) || 'N/A'} (${signageSqmNum} sqm)`);
+    lines.splice(2, 1, `Signage: ${formatChecklistStatus(signage_status)} (${signageSqmNum} sqm)`);
   }
 
   const remarks = safeText(inspection_remarks);
@@ -119,6 +202,85 @@ function ensureEstimatedAreaPlaceholder(zip) {
     `${paragraphXml}<w:r><w:rPr><w:b/><w:bCs/><w:sz w:val="24"/></w:rPr><w:t>{estimated_area_sqm}</w:t></w:r>`;
 
   zip.file('word/document.xml', xml.replace(paragraphPattern, `${injectedParagraph}$2`));
+}
+
+function moveBinAndAddressToLeftCell(zip) {
+  const entry = zip.file('word/document.xml');
+  if (!entry) return;
+
+  const xml = entry.asText();
+  const rowPattern = /<w:tr\b[\s\S]*?NAME OF OWNER:[\s\S]*?BIN:[\s\S]*?EMAIL ADDRESS:[\s\S]*?<\/w:tr>/;
+  const rowMatch = xml.match(rowPattern);
+  if (!rowMatch) return;
+
+  const rowXml = rowMatch[0];
+  const cellMatches = rowXml.match(/<w:tc\b[\s\S]*?<\/w:tc>/g);
+  if (!Array.isArray(cellMatches) || cellMatches.length < 2) return;
+
+  const leftCellXml = cellMatches.find((cellXml) => cellXml.includes('NAME OF OWNER:'));
+  const rightCellXml = cellMatches.find((cellXml) => cellXml.includes('BIN:'));
+  if (!leftCellXml || !rightCellXml) return;
+
+  const extractParagraphByLabel = (cellXml, label) => {
+    const paragraphMatches = cellXml.match(/<w:p\b[\s\S]*?<\/w:p>/g) || [];
+    return paragraphMatches.find((paragraphXml) => paragraphXml.includes(label)) || null;
+  };
+
+  const businessNameParagraphXml = extractParagraphByLabel(leftCellXml, 'BUSINESS NAME:');
+  const binParagraphXml = extractParagraphByLabel(rightCellXml, 'BIN:');
+  const addressParagraphXml = extractParagraphByLabel(rightCellXml, 'ADDRESS:');
+
+  if (!businessNameParagraphXml || !binParagraphXml || !addressParagraphXml) return;
+
+  const movedParagraphsXml = `${binParagraphXml}${addressParagraphXml}`;
+  const nextLeftCellXml = leftCellXml.replace(businessNameParagraphXml, `${businessNameParagraphXml}${movedParagraphsXml}`);
+  const nextRightCellXml = rightCellXml
+    .replace(binParagraphXml, '')
+    .replace(addressParagraphXml, '');
+  const nextRowXml = rowXml.replace(leftCellXml, nextLeftCellXml).replace(rightCellXml, nextRightCellXml);
+
+  zip.file('word/document.xml', xml.replace(rowXml, nextRowXml));
+}
+
+function applyFontSizeToRuns(xmlFragment, halfPointValue) {
+  const sizeTag = `<w:sz w:val="${halfPointValue}"/><w:szCs w:val="${halfPointValue}"/>`;
+
+  return String(xmlFragment || '').replace(/<w:r\b([^>]*)>([\s\S]*?)<\/w:r>/g, (runXml, attrs, inner) => {
+    if (/<w:rPr>[\s\S]*?<\/w:rPr>/.test(runXml)) {
+      return runXml.replace(/<w:rPr>([\s\S]*?)<\/w:rPr>/, (_match, props) => {
+        const cleanedProps = String(props || '')
+          .replace(/<w:sz\b[^>]*\/>/g, '')
+          .replace(/<w:szCs\b[^>]*\/>/g, '');
+        return `<w:rPr>${cleanedProps}${sizeTag}</w:rPr>`;
+      });
+    }
+
+    return `<w:r${attrs || ''}><w:rPr>${sizeTag}</w:rPr>${inner}</w:r>`;
+  });
+}
+
+function shrinkFindingsSection(zip, halfPointValue = 20) {
+  const entry = zip.file('word/document.xml');
+  if (!entry) return;
+
+  const xml = entry.asText();
+  const startAnchor = 'Business Permit (Presented):';
+  const endAnchor = 'BUSINESS OWNER/REPRESENTATIVE:';
+  const startAnchorIndex = xml.indexOf(startAnchor);
+  const endAnchorIndex = xml.indexOf(endAnchor);
+
+  if (startAnchorIndex === -1 || endAnchorIndex === -1 || endAnchorIndex <= startAnchorIndex) return;
+
+  const middleStart = xml.lastIndexOf('<w:p', startAnchorIndex);
+  const middleEnd = xml.lastIndexOf('<w:p', endAnchorIndex);
+  if (!Number.isFinite(middleStart) || !Number.isFinite(middleEnd) || middleEnd <= middleStart) return;
+
+  const before = xml.slice(0, middleStart);
+  const middle = xml.slice(middleStart, middleEnd);
+  const after = xml.slice(middleEnd);
+  const resizedMiddle = applyFontSizeToRuns(middle, halfPointValue);
+
+  zip.file('word/document.xml', `${before}${resizedMiddle}${after}`);
 }
 
 export async function generateInspectionSlipDocx({
@@ -200,7 +362,7 @@ export async function generateInspectionSlipDocx({
     },
     getSize: () => {
       // Keep signatures compact so the generated inspection slip stays on one page more reliably.
-      return [140, 50];
+      return [118, 28];
     },
   });
 
@@ -215,7 +377,7 @@ export async function generateInspectionSlipDocx({
   if (inspector_signature_url) {
     try {
       const buf = await fetchAsArrayBuffer(inspector_signature_url);
-      inspectorSignatureBase64 = arrayBufferToBase64(buf);
+      inspectorSignatureBase64 = await cropSignatureBase64(arrayBufferToBase64(buf));
     } catch {
       inspectorSignatureBase64 = null;
     }
@@ -225,7 +387,7 @@ export async function generateInspectionSlipDocx({
   if (owner_signature_url) {
     try {
       const buf = await fetchAsArrayBuffer(owner_signature_url);
-      ownerSignatureBase64 = arrayBufferToBase64(buf);
+      ownerSignatureBase64 = await cropSignatureBase64(arrayBufferToBase64(buf));
     } catch {
       ownerSignatureBase64 = null;
     }
@@ -239,6 +401,9 @@ export async function generateInspectionSlipDocx({
     signage_sqm,
     inspection_remarks,
   });
+  const businessPermitDisplay = formatChecklistStatus(business_permit_status);
+  const cctvStatusDisplay = formatChecklistStatus(cctv_status);
+  const signageStatusDisplay = formatChecklistStatus(signage_status);
 
   const owner = safeText(owner_name) || '—';
   const truncatedBusinessAddress = truncateAddressAtNcr(business_address);
@@ -291,15 +456,15 @@ export async function generateInspectionSlipDocx({
     inspectors: safeText(inspector_names) || '—',
 
     // Findings
-    business_permit_status: safeText(business_permit_status) || 'N/A',
-    cctv_status: safeText(cctv_status) || 'N/A',
-    signage_status: safeText(signage_status) || 'N/A',
+    business_permit_status: businessPermitDisplay,
+    cctv_status: cctvStatusDisplay,
+    signage_status: signageStatusDisplay,
     cctv_count: Number(cctv_count) || 0,
 
     // Aliases (in case the template uses shorter placeholder names)
-    business_permit: safeText(business_permit_status) || 'N/A',
-    with_cctv: safeText(cctv_status) || 'N/A',
-    signage_2sqm: safeText(signage_status) || 'N/A',
+    business_permit: businessPermitDisplay,
+    with_cctv: cctvStatusDisplay,
+    signage_2sqm: signageStatusDisplay,
     findings_lines,
     findings: findings_lines,
     inspection_remarks: safeText(inspection_remarks) || '—',
@@ -324,6 +489,9 @@ export async function generateInspectionSlipDocx({
     console.error('Inspection-slip DOCX render failed:', e);
     throw new Error('Failed to render inspection slip DOCX. Check template placeholders.');
   }
+
+  moveBinAndAddressToLeftCell(doc.getZip());
+  shrinkFindingsSection(doc.getZip(), 20);
 
   return doc.getZip().generate({
     type: 'blob',

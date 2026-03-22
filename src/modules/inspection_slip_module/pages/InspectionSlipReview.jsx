@@ -695,7 +695,8 @@ export default function InspectionSlipReview() {
           owner_signature_url,
         });
 
-      const objectPath = `inspection-reports/${freshReport.id}/INSPECTION-SLIP.docx`;
+      const generatedAt = new Date().toISOString().replace(/[:.]/g, '-');
+      const objectPath = `inspection-reports/${freshReport.id}/INSPECTION-SLIP-${generatedAt}.docx`;
 
       // Persist the generated slip: overwrite so we can regenerate any number of times.
       const { error: uploadErr } = await supabase.storage

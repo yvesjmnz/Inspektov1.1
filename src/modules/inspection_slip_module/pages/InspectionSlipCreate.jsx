@@ -7,6 +7,7 @@ import Footer from '../../../components/Footer';
 import XIconButton from '../../../components/XIconButton.jsx';
 import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import { supabase } from '../../../lib/supabase';
+import { getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
 import './InspectionSlipCreate.css';
 
 function getMissionOrderIdFromQuery() {
@@ -77,6 +78,11 @@ const GUIDED_SUBCAT_BY_CATEGORY = new Map([
 ]);
 
 const COMPLIANCE_OPTIONS = ['Full Compliance', 'Partial Compliance', 'Non-Compliance'];
+const ORDINANCE_BLOCK_HEADING = 'City Ordinances Violated:';
+const VIOLATION_FINDING_OPTIONS = [
+  { key: 'confirmed', label: 'Confirmed', text: 'Violation Confirmed' },
+  { key: 'no_violation', label: 'No Violation Found', text: 'No Violation Found' },
+];
 
 function parseInspectionComments(value) {
   const raw = String(value || '');
@@ -131,7 +137,92 @@ function upsertComplianceTag(status, remarks) {
   const tag = formatComplianceTag(status);
   const withoutExistingTag = stripComplianceTag(remarks);
   const body = withoutExistingTag.trimStart();
-  return `${tag}${body ? ` ${body}` : ' '}`;
+  return `${tag}${body ? `\n${body}` : '\n'}`;
+}
+
+function formatOrdinanceLabel(ordinance) {
+  const code = String(ordinance?.code_number || '').trim();
+  const title = String(ordinance?.title || '').trim();
+  if (code && title) return `Ordinance No. ${code} (${title})`;
+  if (code) return `Ordinance No. ${code}`;
+  return title;
+}
+
+function formatViolationFindingLine(ordinanceLabel, status) {
+  const statusText = VIOLATION_FINDING_OPTIONS.find((option) => option.key === status)?.text;
+  if (!ordinanceLabel || !statusText) return '';
+  return `${ordinanceLabel} : ${statusText}`;
+}
+
+function getViolationFindingStatus(remarks, ordinanceLabel) {
+  if (!ordinanceLabel) return '';
+
+  const body = stripComplianceTag(remarks).replace(/\r/g, '');
+  const lines = body
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const option of VIOLATION_FINDING_OPTIONS) {
+    if (lines.includes(formatViolationFindingLine(ordinanceLabel, option.key))) {
+      return option.key;
+    }
+  }
+
+  return '';
+}
+
+function rebuildRemarksWithViolationFindings(remarks, ordinanceLabels, findingsByLabel) {
+  const parsed = parseInspectionComments(remarks);
+  const body = stripComplianceTag(remarks).replace(/\r/g, '');
+  const managedPrefixes = new Set((ordinanceLabels || []).filter(Boolean).map((label) => `${label} : `));
+
+  const freeformLines = body
+    .split('\n')
+    .filter((line) => {
+      const trimmed = String(line || '').trim();
+      if (!trimmed) return false;
+      if (trimmed.toLowerCase() === ORDINANCE_BLOCK_HEADING.toLowerCase()) return false;
+      return !Array.from(managedPrefixes).some((prefix) => trimmed.startsWith(prefix));
+    });
+
+  const managedLines = (ordinanceLabels || [])
+    .map((label) => formatViolationFindingLine(label, findingsByLabel?.[label]))
+    .filter(Boolean);
+
+  const freeformBlock = freeformLines.join('\n').trim();
+  const ordinanceBlock = managedLines.length ? `${ORDINANCE_BLOCK_HEADING}\n${managedLines.join('\n')}` : '';
+  const nextBody = freeformBlock
+    ? [freeformBlock, ordinanceBlock].filter(Boolean).join('\n\n').trim()
+    : ordinanceBlock;
+
+  if (!parsed.complianceStatus) return nextBody;
+  if (!nextBody) return `${formatComplianceTag(parsed.complianceStatus)}\n\n`;
+  if (!freeformBlock && ordinanceBlock) {
+    return `${formatComplianceTag(parsed.complianceStatus)}\n\n\n${ordinanceBlock}`;
+  }
+  return `${formatComplianceTag(parsed.complianceStatus)}\n\n${nextBody}`;
+}
+
+function hasFreeformCommentText(remarks, ordinanceLabels) {
+  const body = stripComplianceTag(remarks).replace(/\r/g, '');
+  const managedPrefixes = new Set((ordinanceLabels || []).filter(Boolean).map((label) => `${label} : `));
+
+  return body
+    .split('\n')
+    .some((line) => {
+      const trimmed = String(line || '').trim();
+      if (!trimmed) return false;
+      if (trimmed.toLowerCase() === ORDINANCE_BLOCK_HEADING.toLowerCase()) return false;
+      return !Array.from(managedPrefixes).some((prefix) => trimmed.startsWith(prefix));
+    });
+}
+
+function getCommentInsertionIndex(text) {
+  const value = String(text || '');
+  const headingIndex = value.indexOf(ORDINANCE_BLOCK_HEADING);
+  if (headingIndex === -1) return value.length;
+  return Math.max(0, headingIndex - 2);
 }
 
 function deriveComplianceStatusFromChecklist(checklist) {
@@ -339,6 +430,7 @@ export default function InspectionSlipCreate() {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const cameraStartSeqRef = useRef(0);
+  const commentsTextareaRef = useRef(null);
 
   const stopCamera = () => {
     try {
@@ -1373,6 +1465,30 @@ export default function InspectionSlipCreate() {
   const displayBusinessName = complaint?.business_name || ownerDetails.businessName || '—';
   const displayBusinessAddress = previewAddress || businessDetails.address || '—';
   const complaintViolationGroups = useMemo(() => groupComplaintCategoriesFromTags(complaint?.tags || []), [complaint?.tags]);
+  const inspectionViolationFindings = useMemo(() => {
+    const items = [];
+    const seen = new Set();
+
+    for (const group of complaintViolationGroups) {
+      for (const sub of group?.subs || []) {
+        for (const ordinance of getOrdinancesForSubcategory(sub)) {
+          const ordinanceLabel = formatOrdinanceLabel(ordinance);
+          if (!ordinanceLabel) continue;
+          const key = `${ordinance?.code_number || ordinanceLabel}|${sub}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          items.push({
+            key,
+            ordinanceLabel,
+            subcategory: sub,
+            category: group.category,
+          });
+        }
+      }
+    }
+
+    return items;
+  }, [complaintViolationGroups]);
   const inspectionStatusValue = isCompleted ? 'completed' : inspectionStarted ? 'in progress' : 'pending inspection';
   const inspectionStatusLabel = isCompleted ? 'Completed' : inspectionStarted ? 'In Progress' : 'Pending Inspection';
   const inspectionLocked =
@@ -1386,6 +1502,29 @@ export default function InspectionSlipCreate() {
     ? `This mission order already has an inspection slip started by ${inspectionOwnerName || 'another assigned inspector'}. Only one inspection slip is allowed per mission order.`
     : '';
   const signedAttachmentIsPdf = /\.pdf(\?|#|$)/i.test(String(signedAttachmentUrl || ''));
+  const applyViolationFinding = (ordinanceLabel, nextStatus) => {
+    const ordinanceLabels = inspectionViolationFindings.map((item) => item.ordinanceLabel);
+    const shouldRestoreCommentCursor = !hasFreeformCommentText(additionalComments, ordinanceLabels);
+    const currentStatuses = Object.fromEntries(
+      ordinanceLabels.map((label) => [label, getViolationFindingStatus(additionalComments, label)])
+    );
+
+    currentStatuses[ordinanceLabel] = currentStatuses[ordinanceLabel] === nextStatus ? '' : nextStatus;
+
+    const rebuiltComments = rebuildRemarksWithViolationFindings(additionalComments, ordinanceLabels, currentStatuses);
+    const nextComments = rebuiltComments.slice(0, COMMENTS_MAX);
+    setAdditionalComments(nextComments);
+
+    if (shouldRestoreCommentCursor) {
+      requestAnimationFrame(() => {
+        const textarea = commentsTextareaRef.current;
+        if (!textarea) return;
+        const insertionIndex = getCommentInsertionIndex(nextComments);
+        textarea.focus();
+        textarea.setSelectionRange(insertionIndex, insertionIndex);
+      });
+    }
+  };
 
   const INSPECTION_BUCKET = 'inspection';
 
@@ -3193,11 +3332,8 @@ export default function InspectionSlipCreate() {
                       </div>
                     ) : null}
 
-                    <div style={{ display: 'grid', gap: 10 }}>
-                      <div style={{ display: 'grid', gap: 8 }}>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
-                          Compliance Status <span style={{ color: '#b91c1c' }}>*</span>
-                        </div>
+                      <div style={{ display: 'grid', gap: 10 }}>
+                        <div style={{ display: 'grid', gap: 8 }}>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="group" aria-label="Compliance status">
                           {COMPLIANCE_OPTIONS.map((option) => (
                           <button
@@ -3224,6 +3360,51 @@ export default function InspectionSlipCreate() {
                         </div>
                       </div>
 
+                      {inspectionViolationFindings.length ? (
+                        <div className="is-violation-findings-card">
+                          <div className="is-violation-findings-head">
+                            <div className="is-violation-findings-title">Reported Violations</div>
+                          </div>
+
+                          <div className="is-violation-findings-list">
+                            {inspectionViolationFindings.map((item) => {
+                              const selectedStatus = getViolationFindingStatus(additionalComments, item.ordinanceLabel);
+
+                              return (
+                                <div key={item.key} className="is-violation-findings-row">
+                                  <div className="is-violation-findings-copy">
+                                    <div className="is-violation-findings-name">{item.ordinanceLabel}</div>
+                                    <div className="is-violation-findings-meta">{item.subcategory}</div>
+                                  </div>
+
+                                  <div className="is-violation-findings-actions" role="group" aria-label={`Violation finding for ${item.ordinanceLabel}`}>
+                                    {VIOLATION_FINDING_OPTIONS.map((option) => (
+                                      <button
+                                        key={option.key}
+                                        type="button"
+                                        className={selectedStatus === option.key ? 'mo-btn mo-btn-primary mo-btn--sm' : 'mo-btn mo-btn-secondary mo-btn--sm'}
+                                        onClick={() => applyViolationFinding(item.ordinanceLabel, option.key)}
+                                        aria-pressed={selectedStatus === option.key}
+                                        style={{
+                                          borderRadius: 999,
+                                          padding: '8px 14px',
+                                          fontWeight: 800,
+                                          fontSize: 12,
+                                          lineHeight: '16px',
+                                          whiteSpace: 'nowrap',
+                                        }}
+                                      >
+                                        {option.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+
                       <div
                         style={{
                           position: 'relative',
@@ -3234,12 +3415,13 @@ export default function InspectionSlipCreate() {
                         }}
                       >
                         <textarea
+                          ref={commentsTextareaRef}
                           value={additionalComments}
                           onChange={(e) => {
                             const next = String(e.target.value || '').slice(0, COMMENTS_MAX);
                             setAdditionalComments(next);
                           }}
-                          rows={5}
+                          rows={7}
                           placeholder="Type any specific findings or recommendations here…"
                           style={{
                             width: '100%',
@@ -3248,9 +3430,13 @@ export default function InspectionSlipCreate() {
                             padding: 12,
                             background: '#fff',
                             color: '#0f172a',
-                            fontWeight: 700,
+                            fontFamily: 'inherit',
+                            fontSize: 14,
+                            fontWeight: 400,
+                            lineHeight: 1.6,
                             outline: 'none',
                             resize: 'vertical',
+                            minHeight: 168,
                           }}
                         />
 
