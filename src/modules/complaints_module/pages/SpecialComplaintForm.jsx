@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { submitComplaint, getBusinesses, uploadImage, resolveBusinessJurisdiction } from '../../../lib/complaints';
+import { getNearbyBusinesses } from '../../../lib/complaints/nearbyBusinesses';
 import { requestEmailVerification } from '../../../lib/api';
 import { supabase } from '../../../lib/supabase';
 import Header from '../../../components/Header.jsx';
+import Footer from '../../../components/Footer.jsx';
 import Stepper from '../../../components/Stepper.jsx';
 import ErrorToast from '../../../components/ErrorToast.jsx';
+import LandingPage from '../../../LandingPage.jsx';
 import '../../../components/Stepper.css';
 import './ComplaintForm.css';
 
@@ -14,6 +17,39 @@ const EMPTY_MANUAL_JURISDICTION = {
   resolvedLocality: '',
   withinManilaCity: null,
   errorMessage: '',
+};
+
+const GUIDED_CATEGORIES = [
+  { key: 'cat1', label: 'Business Permit & Licensing Issues' },
+  { key: 'cat2', label: 'Alcohol & Tobacco Violations' },
+  { key: 'cat3', label: 'Sanitation & Environmental Violations' },
+  { key: 'cat4', label: 'Health, Hygiene, & Nutrition' },
+  { key: 'cat5', label: 'Public Security Compliance' },
+];
+
+const GUIDED_SUBCATS = {
+  cat1: [
+    { key: 'cat1-1', label: 'Operating Without a Valid Business Permit' },
+    { key: 'cat1-2', label: 'Missing Commerical Space Clearance' },
+    { key: 'cat1-3', label: 'Unregistered or Untaxed Employees' },
+  ],
+  cat2: [
+    { key: 'cat2-1', label: 'Selling Alcohol Near Schools' },
+    { key: 'cat2-2', label: 'Selling Alcohol to Minors' },
+    { key: 'cat2-3', label: 'Selling Cigarettes to Minors' },
+  ],
+  cat3: [
+    { key: 'cat3-1', label: 'Improper Waste Disposal or Segregation' },
+    { key: 'cat3-2', label: 'Illegal Disposing of Cooking Oil' },
+    { key: 'cat3-3', label: 'Unpaid Garbage Tax' },
+  ],
+  cat4: [
+    { key: 'cat4-1', label: 'Poor Food-Handler Hygiene' },
+    { key: 'cat4-2', label: 'Missing Menu Nutrition Labels' },
+  ],
+  cat5: [
+    { key: 'cat5-1', label: 'CCTV System Non-Compliance' },
+  ],
 };
 
 function buildOutsideJurisdictionMessage(baseMessage, result) {
@@ -43,12 +79,16 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     complaint_description: '',
     reporter_email: verifiedEmail || '',
     tags: [],
+    reporter_lat: null,
+    reporter_lng: null,
   });
 
   const [businessNotInDb, setBusinessNotInDb] = useState(false);
 
   const [businesses, setBusinesses] = useState([]);
   const [showBusinessList, setShowBusinessList] = useState(false);
+  const [nearbyOnly, setNearbyOnly] = useState(false);
+  const [nearbyBusinessesCache, setNearbyBusinessesCache] = useState([]);
 
   // Step 2: evidence images (required: at least 1, max 5)
   const [evidenceImages, setEvidenceImages] = useState([]);
@@ -70,6 +110,8 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
   const [firstSearchDone, setFirstSearchDone] = useState(false);
   const [nameSearchQuery, setNameSearchQuery] = useState('');
   const [manualJurisdictionCheck, setManualJurisdictionCheck] = useState(EMPTY_MANUAL_JURISDICTION);
+  const businessSearchQueryRef = useRef('');
+  const nameSearchQueryRef = useRef('');
 
   const OUTSIDE_JURISDICTION_MESSAGE =
     'Location Outside Jurisdiction: This business address falls outside the City of Manila. Digital inspections are currently restricted to Manila City limits.';
@@ -82,6 +124,9 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
   const [modalSubmitted, setModalSubmitted] = useState(false);
   const [modalRedirecting, setModalRedirecting] = useState(false);
   const turnstileRef = useRef(null);
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [expandedGuided, setExpandedGuided] = useState({});
+  const [selectedSubcats, setSelectedSubcats] = useState({});
 
   const additionalImageInputRef = useRef(null);
 
@@ -243,16 +288,61 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
 
   const descLen = useMemo(() => String(formData.complaint_description || '').length, [formData.complaint_description]);
 
-  const handleBusinessSearch = async (query) => {
-    setSearchQuery(query);
-    setError(null);
+  const toggleCategory = (key, checked) => {
+    if (checked) {
+      setSelectedCategories((prev) => Array.from(new Set([...(prev || []), key])));
+      setExpandedGuided((prev) => ({ ...(prev || {}), [key]: true }));
+    } else {
+      setSelectedCategories((prev) => (prev || []).filter((k) => k !== key));
+      setExpandedGuided((prev) => ({ ...(prev || {}), [key]: false }));
+      setSelectedSubcats((prev) => {
+        const copy = { ...(prev || {}) };
+        delete copy[key];
+        return copy;
+      });
+    }
+  };
 
-    if (query.length > 2) {
+  const toggleSubcat = (catKey, subKey, checked) => {
+    setSelectedSubcats((prev) => {
+      const cur = (prev && prev[catKey]) || [];
+      const next = checked ? Array.from(new Set([...cur, subKey])) : cur.filter((k) => k !== subKey);
+      return { ...(prev || {}), [catKey]: next };
+    });
+  };
+
+  const handleBusinessSearch = async (query) => {
+    const q = String(query || '');
+    setSearchQuery(q);
+    setError(null);
+    businessSearchQueryRef.current = q;
+
+    if (q.length <= 2) {
+      setBusinesses([]);
+      setShowBusinessList(false);
+      return;
+    }
+
+    if (nearbyOnly) {
+      const needle = q.toLowerCase();
+      const filtered = (nearbyBusinessesCache || []).filter((b) => {
+        const name = String(b.business_name || '').toLowerCase();
+        const addr = String(b.business_address || '').toLowerCase();
+        return name.includes(needle) || addr.includes(needle);
+      });
+      setBusinesses(filtered);
+      setShowBusinessList(true);
+      return;
+    }
+
+    if (q.length > 2) {
       try {
-        const results = await getBusinesses(query);
+        const results = await getBusinesses(q);
+        if (businessSearchQueryRef.current !== q) return;
         setBusinesses(results);
         setShowBusinessList(true);
       } catch (err) {
+        if (businessSearchQueryRef.current !== q) return;
         showError(err?.message || String(err));
       }
     } else {
@@ -261,16 +351,49 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     }
   };
 
-  const handleNameSearch = async (query) => {
-    setNameSearchQuery(query);
+  const clearBusinessSearch = () => {
     setError(null);
+    setSearchQuery('');
+    businessSearchQueryRef.current = '';
+    setBusinesses([]);
+    setShowBusinessList(false);
+  };
 
-    if (query.length > 2) {
+  const clearNameSearch = () => {
+    clearSelectedBusiness();
+    setError(null);
+    setNameSearchQuery('');
+    nameSearchQueryRef.current = '';
+    setBusinesses([]);
+    setShowBusinessList(false);
+  };
+
+  const handleNameSearch = async (query) => {
+    const q = String(query || '');
+
+    if (formData.business_pk) {
+      setFormData((prev) => ({
+        ...prev,
+        business_pk: null,
+        business_name: '',
+        business_address: '',
+      }));
+      setBusinesses([]);
+      setShowBusinessList(false);
+    }
+
+    setNameSearchQuery(q);
+    setError(null);
+    nameSearchQueryRef.current = q;
+
+    if (q.length > 2) {
       try {
-        const results = await getBusinesses(query);
+        const results = await getBusinesses(q);
+        if (nameSearchQueryRef.current !== q) return;
         setBusinesses(results);
         setShowBusinessList(true);
       } catch (err) {
+        if (nameSearchQueryRef.current !== q) return;
         showError(err?.message || String(err));
       }
     } else {
@@ -308,6 +431,8 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     setShowBusinessList(false);
     setSearchQuery('');
     setNameSearchQuery('');
+    businessSearchQueryRef.current = '';
+    nameSearchQueryRef.current = '';
     setFirstSearchDone(false);
     setManualJurisdictionCheck(EMPTY_MANUAL_JURISDICTION);
 
@@ -368,6 +493,73 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
 
   const removeEvidenceImage = (index) => {
     setEvidenceImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const requestDeviceLocation = () => {
+    setError(null);
+    setLoading(true);
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+
+          setFormData((prev) => ({
+            ...prev,
+            reporter_lat: lat,
+            reporter_lng: lng,
+          }));
+
+          setLoading(false);
+          resolve({ lat, lng });
+        },
+        (err) => {
+          const message =
+            err.code === err.PERMISSION_DENIED
+              ? 'Location permission was denied. Please enable it in your browser settings.'
+              : err.code === err.POSITION_UNAVAILABLE
+                ? 'Location is unavailable. Please try again.'
+                : 'Location request timed out. Please try again.';
+
+          showError(message);
+          setLoading(false);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      );
+    });
+  };
+
+  const findNearbyBusinesses = async () => {
+    setError(null);
+    setLoading(true);
+
+    try {
+      const coords = await requestDeviceLocation();
+      if (coords?.lat == null || coords?.lng == null) {
+        showError('Unable to get your location. Please enable location services.');
+        setLoading(false);
+        return;
+      }
+
+      const nearby = await getNearbyBusinesses(coords.lat, coords.lng, 200);
+
+      if (nearby.length === 0) {
+        showError('No businesses found within 200m of your location.');
+        setLoading(false);
+        return;
+      }
+
+      setNearbyBusinessesCache(nearby);
+      setBusinesses(nearby);
+      setShowBusinessList(true);
+      setError(null);
+    } catch (err) {
+      showError(err?.message || 'Failed to find nearby businesses.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const validateManualBusinessJurisdiction = async () => {
@@ -447,6 +639,18 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     }
 
     if (step === 3) {
+      if ((selectedCategories || []).length === 0) {
+        showError('Please select at least one violation category.');
+        return;
+      }
+
+      const missingSubFor = (selectedCategories || []).find((catKey) => (selectedSubcats?.[catKey]?.length || 0) === 0);
+      if (missingSubFor) {
+        const catLabel = GUIDED_CATEGORIES.find((c) => c.key === missingSubFor)?.label || 'the selected category';
+        showError(`Please select at least one specific violation under "${catLabel}".`);
+        return;
+      }
+
       if (descLen < 20) {
         showError('Description is too short (minimum 20 characters).');
         return;
@@ -494,6 +698,14 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     }
 
     try {
+      const selectedSubLabels = Object.entries(selectedSubcats || {}).flatMap(([catKey, subKeys]) => {
+        const arr = GUIDED_SUBCATS[catKey] || [];
+        const byKey = new Map(arr.map((s) => [s.key, s.label]));
+        return (subKeys || []).map((k) => byKey.get(k)).filter(Boolean);
+      });
+      const violationTags = selectedSubLabels.map((label) => `Violation: ${label}`);
+      const mergedTags = Array.from(new Set([...(formData.tags || []), ...violationTags]));
+
       const complaintPayload = {
         business_name: formData.business_name,
         business_address: formData.business_address,
@@ -501,7 +713,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
         reporter_email: formData.reporter_email,
         // store all images as URLs in image_urls
         image_urls: evidenceImages.filter(Boolean),
-        tags: [...new Set([...(formData.tags || []), 'Immediate Inspection'])],
+        tags: [...new Set([...mergedTags, 'Special Complaint'])],
         status: 'Submitted',
         email_verified: !!verifiedEmail,
       };
@@ -529,88 +741,90 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     }
   };
 
-  // If verification modal is open, show it instead of the form
+  // If verification modal is open, show it on top of the landing page
   if (showVerificationModal) {
     return (
-      <div className="modal-overlay" onClick={handleVerificationModalOverlayClick} style={{ display: 'flex' }}>
-        <div className="modal-content" style={{ position: 'relative', zIndex: 1001 }}>
-          <div className="modal-header">
-            <h2 className="modal-title">Email Verification</h2>
-            <button className="modal-close-btn" onClick={handleCloseVerificationModal} aria-label="Close modal">
-              <img
-                src="/X icon.png"
-                alt="Close"
-                style={{ width: 14, height: 14, filter: 'brightness(0) invert(1)' }}
-              />
-            </button>
+      <>
+        <LandingPage onOpenVerificationModal={() => {}} />
+        <div className="modal-overlay" onClick={handleVerificationModalOverlayClick} style={{ display: 'flex' }}>
+          <div className="modal-content" style={{ position: 'relative', zIndex: 1001 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Email Verification</h2>
+              <button className="modal-close-btn" onClick={handleCloseVerificationModal} aria-label="Close modal">
+                <img
+                  src="/X icon.png"
+                  alt="Close"
+                  style={{ width: 14, height: 14, filter: 'brightness(0) invert(1)' }}
+                />
+              </button>
+            </div>
+            <div className="modal-divider"></div>
+
+            {modalRedirecting ? (
+              <div className="modal-body success">
+                <div className="success-icon">&#10003;</div>
+                <h3>Great! We Found Your Verification</h3>
+                <p className="success-email">Taking you to the special complaint form...</p>
+                <p className="info-text">
+                  We found a valid verification for <strong>{modalEmail}</strong>. You're all set to submit your complaint.
+                </p>
+              </div>
+            ) : modalSubmitted && modalSuccess ? (
+              <div className="modal-body success">
+                <div className="success-icon">&#10003;</div>
+                <h3>Verification Email Sent</h3>
+                <p className="success-email">We've sent a verification link to <strong>{modalEmail}</strong></p>
+                <p className="info-text">
+                  Please check your email and click the verification link to proceed with your complaint submission. The link expires in 30 minutes.
+                </p>
+              </div>
+            ) : (
+              <div className="modal-body">
+                <div
+                  id="cf-turnstile-widget-special"
+                  ref={turnstileRef}
+                  className="cf-turnstile"
+                ></div>
+
+                <form onSubmit={handleVerificationSubmit} className="verification-form">
+                  <div className="form-group">
+                    <label htmlFor="modal-email-special">Email Address</label>
+                    <input
+                      id="modal-email-special"
+                      type="email"
+                      value={modalEmail}
+                      onChange={(e) => setModalEmail(e.target.value)}
+                      placeholder="your.email@example.com"
+                      required
+                      disabled={modalLoading}
+                      className="form-input"
+                    />
+                  </div>
+
+                  {modalError && <div className="error-message">{modalError}</div>}
+
+                  <button
+                    type="submit"
+                    disabled={modalLoading || !modalEmail}
+                    className="btn btn-primary btn-large"
+                  >
+                    {modalLoading ? (
+                      <>
+                        <span className="spinner-small"></span>
+                        Sending...
+                      </>
+                    ) : (
+                      'Send Verification Link'
+                    )}
+                  </button>
+                </form>
+
+                <p className="modal-description">A secure verification link will be sent to your email. The link expires in 30 minutes.</p>
+              </div>
+            )}
           </div>
-          <div className="modal-divider"></div>
-
-          {modalRedirecting ? (
-            <div className="modal-body success">
-              <div className="success-icon">✓</div>
-              <h3>Great! We Found Your Verification</h3>
-              <p className="success-email">Taking you to the special complaint form...</p>
-              <p className="info-text">
-                We found a valid verification for <strong>{modalEmail}</strong>. You're all set to submit your complaint.
-              </p>
-            </div>
-          ) : modalSubmitted && modalSuccess ? (
-            <div className="modal-body success">
-              <div className="success-icon">✓</div>
-              <h3>Verification Email Sent</h3>
-              <p className="success-email">We've sent a verification link to <strong>{modalEmail}</strong></p>
-              <p className="info-text">
-                Please check your email and click the verification link to proceed with your complaint submission. The link expires in 30 minutes.
-              </p>
-            </div>
-          ) : (
-            <div className="modal-body">
-              {/* Cloudflare Turnstile CAPTCHA Widget - Always Visible */}
-              <div
-                id="cf-turnstile-widget-special"
-                ref={turnstileRef}
-                className="cf-turnstile"
-              ></div>
-
-              <form onSubmit={handleVerificationSubmit} className="verification-form">
-                <div className="form-group">
-                  <label htmlFor="modal-email-special">Email Address</label>
-                  <input
-                    id="modal-email-special"
-                    type="email"
-                    value={modalEmail}
-                    onChange={(e) => setModalEmail(e.target.value)}
-                    placeholder="your.email@example.com"
-                    required
-                    disabled={modalLoading}
-                    className="form-input"
-                  />
-                </div>
-
-                {modalError && <div className="error-message">{modalError}</div>}
-
-                <button
-                  type="submit"
-                  disabled={modalLoading || !modalEmail}
-                  className="btn btn-primary btn-large"
-                >
-                  {modalLoading ? (
-                    <>
-                      <span className="spinner-small"></span>
-                      Sending...
-                    </>
-                  ) : (
-                    'Send Verification Link'
-                  )}
-                </button>
-              </form>
-
-              <p className="modal-description">A secure verification link will be sent to your email. The link expires in 30 minutes.</p>
-            </div>
-          )}
         </div>
-      </div>
+      </>
     );
   }
 
@@ -677,16 +891,70 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
 
                 {!businessNotInDb && (!firstSearchDone || !formData.business_name) ? (
                   <>
-                    <input
-                      id="business_search"
-                      aria-label="Business Search"
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => handleBusinessSearch(e.target.value)}
-                      placeholder="Search business name or address..."
-                      className="form-input"
-                      autoComplete="off"
-                    />
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <input
+                          id="business_search"
+                          aria-label="Business Search"
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => handleBusinessSearch(e.target.value)}
+                          placeholder={nearbyOnly ? 'Search nearby businesses…' : 'Search business name or address...'}
+                          className="form-input"
+                          autoComplete="off"
+                        />
+                        {searchQuery ? (
+                          <button
+                            type="button"
+                            onClick={clearBusinessSearch}
+                            aria-label="Clear search"
+                            title="Clear"
+                            className="btn"
+                            style={{
+                              position: 'absolute',
+                              right: 10,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              width: 28,
+                              height: 28,
+                              borderRadius: 999,
+                              padding: 0,
+                              lineHeight: '28px',
+                              textAlign: 'center',
+                              background: '#f1f5f9',
+                              border: '1px solid #e2e8f0',
+                              color: '#0f172a',
+                              fontWeight: 900,
+                            }}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const next = !nearbyOnly;
+                          setNearbyOnly(next);
+                          clearBusinessSearch();
+
+                          if (next) {
+                            await findNearbyBusinesses();
+                            return;
+                          }
+
+                          setNearbyBusinessesCache([]);
+                        }}
+                        disabled={loading}
+                        className={`btn ${nearbyOnly ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ whiteSpace: 'nowrap' }}
+                        aria-pressed={nearbyOnly ? 'true' : 'false'}
+                        title={nearbyOnly ? 'Nearby filter is ON' : 'Nearby filter is OFF'}
+                      >
+                        📍 Nearby
+                      </button>
+                    </div>
 
                     {showBusinessList && businesses.length > 0 ? (
                       <div className="business-list">
@@ -708,15 +976,44 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                 {!businessNotInDb && firstSearchDone && formData.business_name ? (
                   <div className="form-group" style={{ marginTop: 8 }}>
                     <label htmlFor="business_name_search">Business Name</label>
-                    <input
-                      id="business_name_search"
-                      type="text"
-                      value={nameSearchQuery || formData.business_name}
-                      onChange={(e) => handleNameSearch(e.target.value)}
-                      className="form-input"
-                      placeholder="Search or change business name"
-                      autoComplete="off"
-                    />
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        id="business_name_search"
+                        type="text"
+                        value={nameSearchQuery}
+                        onChange={(e) => handleNameSearch(e.target.value)}
+                        className="form-input"
+                        placeholder={formData.business_name ? formData.business_name : 'Search or change business name'}
+                        autoComplete="off"
+                      />
+                      {nameSearchQuery ? (
+                        <button
+                          type="button"
+                          onClick={clearNameSearch}
+                          aria-label="Clear business name search"
+                          title="Clear"
+                          className="btn"
+                          style={{
+                            position: 'absolute',
+                            right: 10,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            width: 28,
+                            height: 28,
+                            borderRadius: 999,
+                            padding: 0,
+                            lineHeight: '28px',
+                            textAlign: 'center',
+                            background: '#f1f5f9',
+                            border: '1px solid #e2e8f0',
+                            color: '#0f172a',
+                            fontWeight: 900,
+                          }}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
 
                     {showBusinessList && businesses.length > 0 ? (
                       <div className="business-list">
@@ -754,7 +1051,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                 </div>
               ) : null}
 
-              {(businessNotInDb || formData.business_name) ? (
+              {(businessNotInDb || (firstSearchDone && formData.business_name)) ? (
                 <>
                   <div className="form-group">
                     <label htmlFor="business_address">Business Address</label>
@@ -769,6 +1066,8 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                       placeholder="Full business address"
                       className="form-input"
                       readOnly={!!formData.business_pk}
+                      disabled={!!formData.business_pk}
+                      aria-readonly={formData.business_pk ? 'true' : 'false'}
                       required
                     />
                     {null}
@@ -920,6 +1219,86 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
           {step === 3 ? (
             <>
               <div className="form-group">
+                <label style={{ marginBottom: 6, fontWeight: 800, color: '#0f172a' }}>Nature of Violation</label>
+
+                <div className="guided-cat-list" role="list" aria-label="Nature of Violation categories">
+                  {GUIDED_CATEGORIES.map((c) => {
+                    const isSelected = selectedCategories.includes(c.key);
+                    const isOpen = expandedGuided[c.key] === true;
+                    const subs = GUIDED_SUBCATS[c.key] || [];
+
+                    return (
+                      <div key={c.key} className={`guided-cat-row ${isSelected ? 'is-selected' : ''}`} role="listitem">
+                        <button
+                          type="button"
+                          className="guided-cat-row-btn"
+                          aria-expanded={isOpen ? 'true' : 'false'}
+                          onClick={() => {
+                            setExpandedGuided((prev) => ({ ...(prev || {}), [c.key]: !isOpen }));
+                          }}
+                        >
+                          <span className="guided-cat-row-left">
+                            <input
+                              className="guided-cat-row-checkbox"
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                const checked = e.target.checked;
+                                toggleCategory(c.key, checked);
+                                setExpandedGuided((prev) => ({ ...(prev || {}), [c.key]: checked ? true : false }));
+                              }}
+                              aria-label={`Select ${c.label}`}
+                            />
+                            <span className="guided-cat-row-label">{c.label}</span>
+                          </span>
+                          <span className="guided-cat-row-chevron">⌄</span>
+                        </button>
+
+                        <div
+                          className="guided-cat-menu"
+                          style={{
+                            maxHeight: isOpen ? 420 : 0,
+                            opacity: isOpen ? 1 : 0,
+                          }}
+                        >
+                          <div className="guided-cat-menu-inner">
+                            {subs.length === 0 ? (
+                              <div className="inline-note" style={{ marginTop: 0 }}>
+                                No specific violations configured.
+                              </div>
+                            ) : (
+                              subs.map((sc) => (
+                                <label key={sc.key} className="guided-menu-item">
+                                  <input
+                                    type="checkbox"
+                                    checked={(selectedSubcats[c.key] || []).includes(sc.key)}
+                                    onChange={(e) => {
+                                      const checked = e.target.checked;
+                                      if (checked && !selectedCategories.includes(c.key)) {
+                                        toggleCategory(c.key, true);
+                                      }
+                                      toggleSubcat(c.key, sc.key, checked);
+                                      setExpandedGuided((prev) => ({ ...(prev || {}), [c.key]: true }));
+                                    }}
+                                  />
+                                  <span>{sc.label}</span>
+                                </label>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="inline-note" style={{ marginTop: 6 }}>
+                  Tap a category to select it and show its specific violations.
+                </div>
+              </div>
+
+              <div className="form-group">
                 <textarea
                   id="complaint_description"
                   aria-label="Complaint Description"
@@ -975,6 +1354,39 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
                     </div>
                   ) : null}
 
+                  {(selectedCategories.length > 0 || Object.keys(selectedSubcats || {}).length > 0) ? (
+                    <div className="review-row" style={{ alignItems: 'flex-start', borderTop: '1px dashed #e5e7eb', paddingTop: 10, marginTop: 10 }}>
+                      <div className="review-label">Complaint Category</div>
+                      <div className="review-value">
+                        <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
+                          {selectedCategories
+                            .map((catKey) => {
+                              const cat = GUIDED_CATEGORIES.find((c) => c.key === catKey);
+                              if (!cat) return null;
+                              const subs = selectedSubcats[catKey] || [];
+                              const arr = GUIDED_SUBCATS[catKey] || [];
+                              const byKey = new Map(arr.map((s) => [s.key, s.label]));
+                              const subLabels = subs.map((k) => byKey.get(k)).filter(Boolean);
+                              const displayLabel = String(cat.label || '').replace(/\s*&\s*/g, ' and ');
+                              return (
+                                <li key={catKey} style={{ margin: '4px 0' }}>
+                                  <span style={{ fontWeight: 800 }}>{displayLabel}</span>
+                                  {subLabels.length > 0 ? (
+                                    <ul style={{ margin: '4px 0 0 18px', padding: 0, listStyle: 'circle' }}>
+                                      {subLabels.map((label) => (
+                                        <li key={label} style={{ margin: '2px 0' }}>{label}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </li>
+                              );
+                            })
+                            .filter(Boolean)}
+                        </ul>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="review-row" style={{ alignItems: 'flex-start' }}>
                     <div className="review-label">Description</div>
                     <div className="review-value" style={{ whiteSpace: 'pre-wrap' }}>
@@ -1018,9 +1430,11 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
           <ErrorToast message={error} triggerKey={errorToastKey} />
 
           <div className="form-nav">
-            <button type="button" className="btn btn-secondary" onClick={goBack} disabled={loading || step === 1}>
-              Back
-            </button>
+            {step === 1 ? null : (
+              <button type="button" className="btn btn-secondary" onClick={goBack} disabled={loading}>
+                Back
+              </button>
+            )}
 
             {step < TOTAL_STEPS ? (
               <button type="button" className="btn btn-primary" onClick={goNext} disabled={loading}>
@@ -1035,6 +1449,9 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
         </form>
       </div>
     </div>
+      <Footer />
     </>
   );
 }
+
+

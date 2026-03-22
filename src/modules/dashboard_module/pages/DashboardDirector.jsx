@@ -175,7 +175,14 @@ function renderInspectorPills(inspectorNames, keyPrefix) {
   );
 }
 
-function getUrgencyText(authenticityLevel) {
+function hasSpecialComplaintTag(tags) {
+  return Array.isArray(tags) && tags.some((tag) => String(tag || '').trim().toLowerCase() === 'special complaint');
+}
+
+function getUrgencyText(authenticityLevel, tags) {
+  if (hasSpecialComplaintTag(tags)) {
+    return 'Special Complaint';
+  }
   const u = Number(authenticityLevel);
   if (u < 50) {
     return 'Monitoring and Records';
@@ -189,7 +196,13 @@ function getUrgencyText(authenticityLevel) {
   return '—';
 }
 
-function getUrgencyStyle(urgency) {
+function getUrgencyStyle(urgency, tags) {
+  if (hasSpecialComplaintTag(tags)) {
+    return {
+      badge: { background: '#fce7f3', border: '1px solid #ec4899', color: '#9d174d' },
+      hover: { borderLeft: '4px solid #ec4899', boxShadow: '0 10px 24px rgba(236, 72, 153, 0.18)' }
+    };
+  }
   const u = Number(urgency);
   if (u > 50) {
     return {
@@ -2507,8 +2520,9 @@ export default function DashboardDirector() {
                           </thead>
                           <tbody>
                             {dayGroup.items.map((c) => {
-                              const urgencyStyle = tab === 'queue' ? getUrgencyStyle(c?.authenticity_level) : null;
+                              const urgencyStyle = tab === 'queue' ? getUrgencyStyle(c?.authenticity_level, c?.tags) : null;
                               const urgencyColor = tab === 'queue' ? (() => {
+                                if (hasSpecialComplaintTag(c?.tags)) return '#ec4899';
                                 const u = Number(c?.authenticity_level);
                                 if (u > 50) return '#22c55e'; // green
                                 if (u === 50) return '#eab308'; // yellow
@@ -2544,7 +2558,7 @@ export default function DashboardDirector() {
                                   {tab === 'queue' ? (
                                     <>
                                       <td style={{ padding: '12px' }}>
-                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 800, fontSize: 12, padding: '6px 10px', borderRadius: 999, display: 'inline-block', whiteSpace: 'nowrap', border: '1px solid rgba(0,0,0,0.08)' }}>{getUrgencyText(c?.authenticity_level)}</span>
+                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 800, fontSize: 12, padding: '6px 10px', borderRadius: 999, display: 'inline-block', whiteSpace: 'nowrap', border: '1px solid rgba(0,0,0,0.08)' }}>{getUrgencyText(c?.authenticity_level, c?.tags)}</span>
                                       </td>
                                       <td style={{ padding: '12px' }}>
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>

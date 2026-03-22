@@ -84,7 +84,14 @@ function statusBadgeClass(status) {
   return 'status-badge';
 }
 
-function getUrgencyText(authenticityLevel) {
+function hasSpecialComplaintTag(tags) {
+  return Array.isArray(tags) && tags.some((tag) => String(tag || '').trim().toLowerCase() === 'special complaint');
+}
+
+function getUrgencyText(authenticityLevel, tags) {
+  if (hasSpecialComplaintTag(tags)) {
+    return 'Special Complaint';
+  }
   const u = Number(authenticityLevel);
   if (u < 50) {
     return 'Monitoring and Records';
@@ -98,7 +105,12 @@ function getUrgencyText(authenticityLevel) {
   return '—';
 }
 
-function getUrgencyStyle(urgency) {
+function getUrgencyStyle(urgency, tags) {
+  if (hasSpecialComplaintTag(tags)) {
+    return {
+      badge: { background: '#fce7f3', border: '1px solid #ec4899', color: '#9d174d' },
+    };
+  }
   const u = Number(urgency);
   if (u > 50) {
     return {
@@ -434,7 +446,7 @@ export default function ComplaintReview() {
     }
   };
 
-  const urgencyStyle = complaint ? getUrgencyStyle(complaint?.authenticity_level) : null;
+  const urgencyStyle = complaint ? getUrgencyStyle(complaint?.authenticity_level, complaint?.tags) : null;
 
   return (
     <div className="dash-container">
@@ -628,7 +640,7 @@ export default function ComplaintReview() {
                             <span
                               className="status-badge"
                               style={{
-                                ...getUrgencyStyle(complaint?.authenticity_level).badge,
+                                ...getUrgencyStyle(complaint?.authenticity_level, complaint?.tags).badge,
                                 fontWeight: 900,
                                 fontSize: 12,
                                 padding: '6px 10px',
@@ -639,7 +651,7 @@ export default function ComplaintReview() {
                                 border: '1px solid rgba(0,0,0,0.08)',
                               }}
                             >
-                              {getUrgencyText(complaint?.authenticity_level)}
+                              {getUrgencyText(complaint?.authenticity_level, complaint?.tags)}
                             </span>
                           )}
                         </div>
