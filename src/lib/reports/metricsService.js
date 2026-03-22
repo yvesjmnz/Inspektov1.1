@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { pickPreferredInspectionReport } from '../inspectionReports';
 
 /**
  * Metrics Service - Calculates KPIs for Director and Head Inspector dashboards
@@ -24,7 +25,7 @@ export async function getDirectorMetrics(dateRange = null) {
 
     let moQuery = supabase
       .from('mission_orders')
-      .select('id, complaint_id, status, created_at, submitted_at, date_of_inspection');
+      .select('id, complaint_id, status, created_at, submitted_at, date_of_inspection, director_preapproved_at');
 
     let inspectionQuery = supabase
       .from('inspection_reports')
@@ -65,6 +66,7 @@ export async function getDirectorMetrics(dateRange = null) {
       recurring: calculateRecurringComplaints(complaints || []),
       timeline: calculateProcessingTimeline(complaints || [], missionOrders || []),
       complaintToMOPreapproval: calculateComplaintToMOPreapprovalTime(complaints || [], missionOrders || []),
+      realtimeTrend: calculateDirectorRealtimeTrend(complaints || [], missionOrders || [], inspections || []),
     };
 
     return metrics;
@@ -189,10 +191,11 @@ export async function getHeadInspectorMetrics(dateRange = null) {
  * Calculate complaint-level metrics
  */
 function calculateComplaintMetrics(complaints) {
+  const normalizeStatus = (status) => String(status || '').toLowerCase().trim();
   const total = complaints.length;
-  const approved = complaints.filter(c => String(c.status || '').toLowerCase() === 'approved').length;
-  const declined = complaints.filter(c => String(c.status || '').toLowerCase() === 'declined').length;
-  const pending = complaints.filter(c => ['submitted', 'pending', 'new'].includes(String(c.status || '').toLowerCase())).length;
+  const approved = complaints.filter((c) => ['approved', 'completed'].includes(normalizeStatus(c.status))).length;
+  const declined = complaints.filter((c) => ['declined', 'rejected', 'invalid'].includes(normalizeStatus(c.status))).length;
+  const pending = complaints.filter((c) => ['submitted', 'pending', 'new'].includes(normalizeStatus(c.status))).length;
 
   // Average decision time (hours)
   const decisionTimes = complaints
@@ -273,15 +276,16 @@ function calculateMissionOrderMetrics(missionOrders, complaints) {
  * Calculate inspection metrics
  */
 function calculateInspectionMetrics(inspections) {
-  const total = inspections.length;
+  const normalizedInspections = dedupeInspectionsByMissionOrder(inspections);
+  const total = normalizedInspections.length;
   const byStatus = {
-    pending: inspections.filter(i => ['pending inspection', 'pending_inspection', 'pending'].includes(String(i.status || '').toLowerCase())).length,
-    inProgress: inspections.filter(i => ['in progress', 'in_progress'].includes(String(i.status || '').toLowerCase())).length,
-    completed: inspections.filter(i => String(i.status || '').toLowerCase() === 'completed').length,
+    pending: normalizedInspections.filter(i => ['pending inspection', 'pending_inspection', 'pending'].includes(String(i.status || '').toLowerCase())).length,
+    inProgress: normalizedInspections.filter(i => ['in progress', 'in_progress'].includes(String(i.status || '').toLowerCase())).length,
+    completed: normalizedInspections.filter(i => String(i.status || '').toLowerCase() === 'completed').length,
   };
 
   // Inspection duration (minutes) - from started_at to completed_at
-  const durations = inspections
+  const durations = normalizedInspections
     .filter(i => i.started_at && i.completed_at)
     .map(i => {
       const started = new Date(i.started_at).getTime();
@@ -293,10 +297,15 @@ function calculateInspectionMetrics(inspections) {
     ? Number((durations.reduce((a, b) => a + b, 0) / durations.length).toFixed(1))
     : null;
 
-  // Compliance with 5-10 min target
+  // Legacy 5-10 minute compliance for existing shared reports
   const withinTarget = durations.filter(d => d >= 5 && d <= 10).length;
   const targetCompliance = durations.length > 0
     ? Number(((withinTarget / durations.length) * 100).toFixed(1))
+    : null;
+
+  const withinDirectorGoal = durations.filter(d => d <= 42).length;
+  const directorGoalCompliance = durations.length > 0
+    ? Number(((withinDirectorGoal / durations.length) * 100).toFixed(1))
     : null;
 
   // Completion rate
@@ -309,6 +318,7 @@ function calculateInspectionMetrics(inspections) {
     byStatus,
     avgDuration,
     targetCompliance,
+    directorGoalCompliance,
     completionRate,
     durations: durations.sort((a, b) => a - b),
   };
@@ -471,17 +481,29 @@ function calculateInspectorPerformance(inspections, assignments) {
  * This is the complete workflow: complaint created → approved → MO created
  */
 function calculateComplaintToMOPreapprovalTime(complaints, missionOrders) {
-  const moMap = new Map(missionOrders.map(m => [m.complaint_id, m]));
+  const moMap = new Map();
+  missionOrders.forEach((missionOrder) => {
+    if (!missionOrder?.complaint_id) return;
+    const existing = moMap.get(missionOrder.complaint_id);
+    const existingTs = existing?.director_preapproved_at || existing?.created_at || null;
+    const currentTs = missionOrder.director_preapproved_at || missionOrder.created_at || null;
+
+    if (!existing || (currentTs && (!existingTs || new Date(currentTs).getTime() < new Date(existingTs).getTime()))) {
+      moMap.set(missionOrder.complaint_id, missionOrder);
+    }
+  });
 
   const timelines = complaints
-    .filter(c => c.created_at && c.approved_at)
+    .filter(c => c.created_at)
     .map(c => {
       const mo = moMap.get(c.id);
-      if (!mo?.created_at) return null; // Only include if MO exists
+      const preApprovedAt = mo?.director_preapproved_at;
+      if (!preApprovedAt) return null;
 
       const created = new Date(c.created_at).getTime();
-      const moCreated = new Date(mo.created_at).getTime();
-      return (moCreated - created) / (1000 * 60 * 60); // hours
+      const moPreApproved = new Date(preApprovedAt).getTime();
+      const diffHours = (moPreApproved - created) / (1000 * 60 * 60);
+      return diffHours >= 0 ? diffHours : null;
     })
     .filter(t => t !== null);
 
@@ -489,7 +511,7 @@ function calculateComplaintToMOPreapprovalTime(complaints, missionOrders) {
     ? Number((timelines.reduce((a, b) => a + b, 0) / timelines.length).toFixed(2))
     : null;
 
-  const withinTarget = timelines.filter(t => t <= 3).length; // 2-3 hour target
+  const withinTarget = timelines.filter(t => t <= 1).length;
   const targetCompliance = timelines.length > 0
     ? Number(((withinTarget / timelines.length) * 100).toFixed(1))
     : null;
@@ -549,7 +571,8 @@ function calculateProcessingTimeline(complaints, missionOrders) {
  * Calculate inspection timeline
  */
 function calculateInspectionTimeline(inspections) {
-  const completed = inspections.filter(i => i.started_at && i.completed_at);
+  const normalizedInspections = dedupeInspectionsByMissionOrder(inspections);
+  const completed = normalizedInspections.filter(i => i.started_at && i.completed_at);
 
   const durations = completed.map(i => {
     const started = new Date(i.started_at).getTime();
@@ -561,7 +584,7 @@ function calculateInspectionTimeline(inspections) {
     ? Number((durations.reduce((a, b) => a + b, 0) / durations.length).toFixed(1))
     : null;
 
-  const withinTarget = durations.filter(d => d >= 5 && d <= 10).length;
+  const withinTarget = durations.filter(d => d <= 42).length;
   const targetCompliance = durations.length > 0
     ? Number(((withinTarget / durations.length) * 100).toFixed(1))
     : null;
@@ -572,4 +595,112 @@ function calculateInspectionTimeline(inspections) {
     totalCompleted: completed.length,
     durations: durations.sort((a, b) => a - b),
   };
+}
+
+function dedupeInspectionsByMissionOrder(inspections) {
+  const byMissionOrderId = new Map();
+
+  for (const inspection of inspections || []) {
+    if (!inspection?.mission_order_id) continue;
+    const existing = byMissionOrderId.get(inspection.mission_order_id);
+    const preferred = pickPreferredInspectionReport([existing, inspection].filter(Boolean));
+    if (preferred) {
+      byMissionOrderId.set(inspection.mission_order_id, preferred);
+    }
+  }
+
+  return Array.from(byMissionOrderId.values());
+}
+
+function calculateDirectorRealtimeTrend(complaints, missionOrders, inspections) {
+  const today = new Date();
+  const days = [];
+
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset);
+    const key = day.toISOString().slice(0, 10);
+    days.push({
+      key,
+      label: day.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      complaints: 0,
+      missionOrders: 0,
+      inspections: 0,
+      complaintResolutionSamples: [],
+      inspectionResolutionSamples: [],
+    });
+  }
+
+  const byKey = new Map(days.map((day) => [day.key, day]));
+
+  complaints.forEach((complaint) => {
+    if (!complaint?.created_at) return;
+    const key = new Date(complaint.created_at).toISOString().slice(0, 10);
+    const bucket = byKey.get(key);
+    if (bucket) bucket.complaints += 1;
+  });
+
+  missionOrders.forEach((missionOrder) => {
+    const stamp = missionOrder?.director_preapproved_at || missionOrder?.created_at;
+    if (!stamp) return;
+    const key = new Date(stamp).toISOString().slice(0, 10);
+    const bucket = byKey.get(key);
+    if (bucket) bucket.missionOrders += 1;
+  });
+
+  inspections.forEach((inspection) => {
+    const stamp = inspection?.completed_at || inspection?.started_at || inspection?.created_at;
+    if (!stamp) return;
+    const key = new Date(stamp).toISOString().slice(0, 10);
+    const bucket = byKey.get(key);
+    if (bucket) bucket.inspections += 1;
+  });
+
+  const complaintMap = new Map(complaints.map((complaint) => [complaint.id, complaint]));
+  const missionOrderByComplaint = new Map();
+  missionOrders.forEach((missionOrder) => {
+    if (!missionOrder?.complaint_id) return;
+    const existing = missionOrderByComplaint.get(missionOrder.complaint_id);
+    const existingTs = existing?.director_preapproved_at || null;
+    const currentTs = missionOrder.director_preapproved_at || null;
+    if (!currentTs) return;
+    if (!existingTs || new Date(currentTs).getTime() < new Date(existingTs).getTime()) {
+      missionOrderByComplaint.set(missionOrder.complaint_id, missionOrder);
+    }
+  });
+
+  missionOrderByComplaint.forEach((missionOrder, complaintId) => {
+    const complaint = complaintMap.get(complaintId);
+    if (!complaint?.created_at || !missionOrder?.director_preapproved_at) return;
+
+    const resolutionHours = (new Date(missionOrder.director_preapproved_at).getTime() - new Date(complaint.created_at).getTime()) / (1000 * 60 * 60);
+    if (!Number.isFinite(resolutionHours) || resolutionHours < 0) return;
+
+    const key = new Date(missionOrder.director_preapproved_at).toISOString().slice(0, 10);
+    const bucket = byKey.get(key);
+    if (bucket) bucket.complaintResolutionSamples.push(resolutionHours);
+  });
+
+  inspections.forEach((inspection) => {
+    if (!inspection?.started_at || !inspection?.completed_at) return;
+    const resolutionMinutes = (new Date(inspection.completed_at).getTime() - new Date(inspection.started_at).getTime()) / (1000 * 60);
+    if (!Number.isFinite(resolutionMinutes) || resolutionMinutes < 0) return;
+
+    const key = new Date(inspection.completed_at).toISOString().slice(0, 10);
+    const bucket = byKey.get(key);
+    if (bucket) bucket.inspectionResolutionSamples.push(resolutionMinutes);
+  });
+
+  return days.map((day) => ({
+    key: day.key,
+    label: day.label,
+    complaints: day.complaints,
+    missionOrders: day.missionOrders,
+    inspections: day.inspections,
+    avgComplaintResolutionHours: day.complaintResolutionSamples.length > 0
+      ? Number((day.complaintResolutionSamples.reduce((sum, value) => sum + value, 0) / day.complaintResolutionSamples.length).toFixed(2))
+      : null,
+    avgInspectionResolutionMinutes: day.inspectionResolutionSamples.length > 0
+      ? Number((day.inspectionResolutionSamples.reduce((sum, value) => sum + value, 0) / day.inspectionResolutionSamples.length).toFixed(1))
+      : null,
+  }));
 }

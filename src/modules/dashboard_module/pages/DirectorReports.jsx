@@ -1,57 +1,211 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../../../lib/supabase';
 import { getDirectorMetrics } from '../../../lib/reports/metricsService';
 import './Dashboard.css';
 
-function formatDuration(hours) {
-  if (hours === null || hours === undefined) return '—';
-  if (hours < 1) {
-    const mins = Math.round(hours * 60);
-    return `${mins}m`;
-  }
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+const COMPLAINT_GOAL_HOURS = 1;
+const INSPECTION_GOAL_MINUTES = 42;
+
+function formatHours(hours) {
+  if (hours === null || hours === undefined) return 'N/A';
+  if (hours < 1) return `${Math.round(hours * 60)}m`;
+  const wholeHours = Math.floor(hours);
+  const minutes = Math.round((hours - wholeHours) * 60);
+  return minutes > 0 ? `${wholeHours}h ${minutes}m` : `${wholeHours}h`;
 }
 
 function formatMinutes(minutes) {
-  if (minutes === null || minutes === undefined) return '—';
+  if (minutes === null || minutes === undefined) return 'N/A';
   if (minutes < 60) return `${Math.round(minutes)}m`;
-  const h = Math.floor(minutes / 60);
-  const m = Math.round(minutes % 60);
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  const wholeHours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  return mins > 0 ? `${wholeHours}h ${mins}m` : `${wholeHours}h`;
+}
+
+function GoalPill({ label, value, goal, unit, subtitle }) {
+  const hasValue = value !== null && value !== undefined;
+  const delta = hasValue ? Number((value - goal).toFixed(2)) : null;
+  const isMet = hasValue ? value <= goal : null;
+  const accent = isMet === null ? '#64748b' : isMet ? '#16a34a' : '#dc2626';
+  const soft = '#ffffff';
+  const border = '#e2e8f0';
+  const arrow = !hasValue || delta === 0 ? '' : isMet ? '↓' : '↑';
+  const percentDelta = hasValue && goal > 0
+    ? Math.round((Math.abs(value - goal) / goal) * 100)
+    : null;
+  const trendLabel = !hasValue
+    ? 'Waiting for completed records'
+    : delta === 0
+      ? 'On goal'
+      : `${arrow} ${percentDelta}%`;
+
+  return (
+    <div
+      style={{
+        background: soft,
+        border: `1px solid ${border}`,
+        borderRadius: 18,
+        padding: '18px 20px',
+        display: 'grid',
+        gap: 10,
+        boxShadow: '0 8px 20px rgba(15, 23, 42, 0.05)',
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        {label}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 34, fontWeight: 900, color: '#0f172a', lineHeight: 1 }}>
+            {unit === 'hours' ? formatHours(value) : formatMinutes(value)}
+          </div>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '8px 12px',
+              borderRadius: 999,
+              background: isMet === null ? '#f8fafc' : isMet ? '#f0fdf4' : '#fef2f2',
+              color: accent,
+              border: `1px solid ${isMet === null ? '#cbd5e1' : isMet ? '#86efac' : '#fca5a5'}`,
+              fontWeight: 800,
+              fontSize: 12,
+            }}
+          >
+            {trendLabel}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 13 }}>
+        <span style={{ color: accent, fontWeight: 900 }}>
+          Goal: {unit === 'hours' ? formatHours(goal) : formatMinutes(goal)} or below
+        </span>
+        <span style={{ color: '#94a3b8' }}>•</span>
+        <span style={{ color: '#64748b' }}>{subtitle}</span>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, accent, breakdown }) {
+  return (
+    <div
+      style={{
+        background: '#ffffff',
+        border: '1px solid #dbe5f0',
+        borderRadius: 22,
+        padding: 22,
+        boxShadow: '0 14px 34px rgba(15, 23, 42, 0.06)',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{ position: 'relative', display: 'grid', gap: 14 }}>
+        <div style={{ fontSize: 12, color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 40, fontWeight: 900, color: '#0f172a', lineHeight: 1 }}>
+          {value}
+        </div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {breakdown.map((item) => (
+            <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+              <span style={{ color: '#64748b' }}>{item.label}</span>
+              <span style={{ color: '#0f172a', fontWeight: 800 }}>{item.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function DirectorReports() {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [dateRange, setDateRange] = useState(null);
-  const [expandedSection, setExpandedSection] = useState('overview');
 
   useEffect(() => {
-    const loadMetrics = async () => {
-      setLoading(true);
-      setError('');
+    let isMounted = true;
+
+    const loadMetrics = async (showLoader = false) => {
+      if (showLoader && isMounted) setLoading(true);
+      if (isMounted) setError('');
+
       try {
-        const data = await getDirectorMetrics(dateRange);
-        setMetrics(data);
+        const nextMetrics = await getDirectorMetrics();
+        if (!isMounted) return;
+        setMetrics(nextMetrics);
       } catch (err) {
-        setError(err.message || 'Failed to load metrics');
-        console.error(err);
+        if (!isMounted) return;
+        setError(err?.message || 'Failed to load metrics');
       } finally {
-        setLoading(false);
+        if (showLoader && isMounted) setLoading(false);
       }
     };
 
-    loadMetrics();
-  }, [dateRange]);
+    loadMetrics(true);
+
+    const channel = supabase
+      .channel('director-performance-report-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'complaints' }, () => loadMetrics(false))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_orders' }, () => loadMetrics(false))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inspection_reports' }, () => loadMetrics(false))
+      .subscribe();
+
+    const intervalId = window.setInterval(() => {
+      loadMetrics(false);
+    }, 60000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const summaryCards = useMemo(() => {
+    if (!metrics) return [];
+
+    return [
+      {
+        label: 'Total Complaints',
+        value: metrics.complaints.total,
+        accent: '#1d4ed8',
+        breakdown: [
+          { label: 'Approved', value: metrics.complaints.approved },
+          { label: 'Declined', value: metrics.complaints.declined },
+          { label: 'Pending', value: metrics.complaints.pending },
+        ],
+      },
+      {
+        label: 'Total Mission Orders',
+        value: metrics.missionOrders.total,
+        accent: '#f59e0b',
+        breakdown: [
+          { label: 'Draft', value: metrics.missionOrders.byStatus.draft },
+          { label: 'Issued', value: metrics.missionOrders.byStatus.issued },
+          { label: 'Pre-Approved', value: metrics.missionOrders.byStatus.forInspection },
+          { label: 'Completed', value: metrics.missionOrders.byStatus.complete },
+          { label: 'Cancelled', value: metrics.missionOrders.byStatus.cancelled },
+        ],
+      },
+      {
+        label: 'Total Inspections',
+        value: metrics.inspections.total,
+        accent: '#0f766e',
+        breakdown: [
+          { label: 'Pending', value: metrics.inspections.byStatus.pending },
+          { label: 'In Progress', value: metrics.inspections.byStatus.inProgress },
+          { label: 'Completed', value: metrics.inspections.byStatus.completed },
+        ],
+      },
+    ];
+  }, [metrics]);
 
   if (loading) {
-    return (
-      <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>
-        Loading metrics...
-      </div>
-    );
+    return <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>Loading analytics...</div>;
   }
 
   if (error) {
@@ -63,229 +217,39 @@ export default function DirectorReports() {
   }
 
   if (!metrics) {
-    return (
-      <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>
-        No data available
-      </div>
-    );
+    return <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No data available.</div>;
   }
 
-  const { complaints, missionOrders, inspections, timeline, complaintToMOPreapproval } = metrics;
-
   return (
-    <div style={{ display: 'grid', gap: 24 }}>
-      {/* KPI Cards - Overview */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
-            Total Complaints
-          </div>
-          <div style={{ fontSize: 32, fontWeight: 900, color: '#0f172a', marginBottom: 4 }}>
-            {complaints.total}
-          </div>
-          <div style={{ fontSize: 13, color: '#64748b' }}>
-            {complaints.approved} approved, {complaints.declined} declined
-          </div>
-        </div>
-
-        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
-            Approval Rate
-          </div>
-          <div style={{ fontSize: 32, fontWeight: 900, color: '#22c55e', marginBottom: 4 }}>
-            {complaints.approvalRate}%
-          </div>
-          <div style={{ fontSize: 13, color: '#64748b' }}>
-            Of all complaints reviewed
-          </div>
-        </div>
-
-        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
-            Avg Decision Time
-          </div>
-          <div style={{ fontSize: 32, fontWeight: 900, color: '#2563eb', marginBottom: 4 }}>
-            {formatDuration(complaints.avgDecisionTime)}
-          </div>
-          <div style={{ fontSize: 13, color: '#64748b' }}>
-            From submission to decision
-          </div>
-        </div>
-
-        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
-            Pending Review
-          </div>
-          <div style={{ fontSize: 32, fontWeight: 900, color: '#f59e0b', marginBottom: 4 }}>
-            {complaints.pending}
-          </div>
-          <div style={{ fontSize: 13, color: '#64748b' }}>
-            Awaiting director decision
-          </div>
-        </div>
-
-        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
-            Complaint to MO Pre-Approval
-          </div>
-          <div style={{ fontSize: 32, fontWeight: 900, color: complaintToMOPreapproval?.avgTime && complaintToMOPreapproval.avgTime <= 3 ? '#22c55e' : '#f59e0b', marginBottom: 4 }}>
-            {formatDuration(complaintToMOPreapproval?.avgTime)}
-          </div>
-          <div style={{ fontSize: 13, color: '#64748b' }}>
-            {complaintToMOPreapproval?.totalProcessed} processed (Target: 2-3h)
-          </div>
-        </div>
+    <div style={{ display: 'grid', gap: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+        <GoalPill
+          label="Average Resolution Time (Document Processing)"
+          value={metrics.complaintToMOPreapproval?.avgTime}
+          goal={COMPLAINT_GOAL_HOURS}
+          unit="hours"
+          subtitle="Received complaint to director pre-approved mission order"
+        />
+        <GoalPill
+          label="Average Resolution Time (Inspection)"
+          value={metrics.inspections?.avgDuration}
+          goal={INSPECTION_GOAL_MINUTES}
+          unit="minutes"
+          subtitle="Inspection status from In Progress to Completed"
+        />
       </div>
 
-      {/* Mission Orders Section */}
-      <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
-        <div
-          onClick={() => setExpandedSection(expandedSection === 'mission-orders' ? null : 'mission-orders')}
-          style={{
-            padding: '16px 20px',
-            background: '#0b2249',
-            color: '#ffffff',
-            cursor: 'pointer',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            userSelect: 'none',
-          }}
-        >
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900 }}>Mission Orders</h3>
-          <span style={{ fontSize: 20, fontWeight: 900 }}>
-            {expandedSection === 'mission-orders' ? '−' : '+'}
-          </span>
-        </div>
-
-        {expandedSection === 'mission-orders' && (
-          <div style={{ padding: 20, display: 'grid', gap: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Total</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#0f172a' }}>{missionOrders.total}</div>
-              </div>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Draft</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#0f172a' }}>{missionOrders.byStatus.draft}</div>
-              </div>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Issued</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#f59e0b' }}>{missionOrders.byStatus.issued}</div>
-              </div>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>For Inspection</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#22c55e' }}>{missionOrders.byStatus.forInspection}</div>
-              </div>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Complete</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#2563eb' }}>{missionOrders.byStatus.complete}</div>
-              </div>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Cancelled</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#ef4444' }}>{missionOrders.byStatus.cancelled}</div>
-              </div>
-            </div>
-
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
-                Processing Timeline
-              </div>
-              <div style={{ display: 'grid', gap: 8, fontSize: 13 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12 }}>
-                  <span style={{ color: '#64748b', fontWeight: 600 }}>Complaint to Approval:</span>
-                  <span style={{ color: '#0f172a', fontWeight: 700 }}>
-                    {formatDuration(timeline.avgComplaintToApproval)}
-                  </span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12 }}>
-                  <span style={{ color: '#64748b', fontWeight: 600 }}>Approval to Mission Order:</span>
-                  <span style={{ color: '#0f172a', fontWeight: 700 }}>
-                    {formatDuration(timeline.avgApprovalToMO)}
-                  </span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12 }}>
-                  <span style={{ color: '#64748b', fontWeight: 600 }}>Total (Complaint to MO):</span>
-                  <span style={{ color: timeline.targetMet ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
-                    {formatDuration(timeline.avgComplaintToMO)}
-                    {timeline.targetMet && ' ✓ (Target: 2-3h)'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+        {summaryCards.map((card) => (
+          <SummaryCard
+            key={card.label}
+            label={card.label}
+            value={card.value}
+            accent={card.accent}
+            breakdown={card.breakdown}
+          />
+        ))}
       </div>
-
-      {/* Inspections Section */}
-      <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
-        <div
-          onClick={() => setExpandedSection(expandedSection === 'inspections' ? null : 'inspections')}
-          style={{
-            padding: '16px 20px',
-            background: '#0b2249',
-            color: '#ffffff',
-            cursor: 'pointer',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            userSelect: 'none',
-          }}
-        >
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900 }}>Inspections</h3>
-          <span style={{ fontSize: 20, fontWeight: 900 }}>
-            {expandedSection === 'inspections' ? '−' : '+'}
-          </span>
-        </div>
-
-        {expandedSection === 'inspections' && (
-          <div style={{ padding: 20, display: 'grid', gap: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Total</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#0f172a' }}>{inspections.total}</div>
-              </div>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Completed</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#22c55e' }}>{inspections.byStatus.completed}</div>
-              </div>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>In Progress</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#2563eb' }}>{inspections.byStatus.inProgress}</div>
-              </div>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Pending</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#f59e0b' }}>{inspections.byStatus.pending}</div>
-              </div>
-              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Completion Rate</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#0f172a' }}>{inspections.completionRate}%</div>
-              </div>
-            </div>
-
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
-                Inspection Duration
-              </div>
-              <div style={{ display: 'grid', gap: 8, fontSize: 13 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12 }}>
-                  <span style={{ color: '#64748b', fontWeight: 600 }}>Average Duration:</span>
-                  <span style={{ color: '#0f172a', fontWeight: 700 }}>
-                    {formatMinutes(inspections.avgDuration)}
-                  </span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12 }}>
-                  <span style={{ color: '#64748b', fontWeight: 600 }}>Target Compliance (5-10m):</span>
-                  <span style={{ color: inspections.targetCompliance >= 80 ? '#22c55e' : '#f59e0b', fontWeight: 700 }}>
-                    {inspections.targetCompliance}%
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
     </div>
   );
 }

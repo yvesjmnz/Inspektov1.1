@@ -3,7 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import { pickPreferredInspectionReport } from '../../../lib/inspectionReports';
-import HeadInspectorReports from './HeadInspectorReports';
+import DirectorReports from './DirectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
 import HistorySearchBar from '../components/HistorySearchBar';
 import MiniRefreshButton from '../components/MiniRefreshButton';
@@ -1266,7 +1266,7 @@ export default function DashboardHeadInspector() {
               {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
               {tab === 'reports' ? (
-                <HeadInspectorReports />
+                <DirectorReports />
               ) : tab === 'todo' ? (
                 <div style={{ display: 'grid', gap: 20 }}>
                   {filteredComplaints.length === 0 ? (
