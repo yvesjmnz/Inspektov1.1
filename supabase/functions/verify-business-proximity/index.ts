@@ -4,16 +4,18 @@
 //
 // Responsibility:
 // - Load business address from public.businesses by business_pk
-// - Geocode address via Google Geocoding API (server-side; key not exposed to client)
+// - Geocode address via geocode.maps.co (server-side; key not exposed to client)
 // - Compute distance from reporter device coordinates when available
 // - Return resolved business coords plus Manila City jurisdiction metadata
 //
 // Notes:
 // - Uses SUPABASE_SERVICE_ROLE_KEY so it can read businesses regardless of RLS.
-// - Requires GOOGLE_MAPS_API_KEY set in Edge Function environment variables.
+// - Requires GEOCODE_MAPS_API_KEY in Edge Function environment variables.
+// - Also accepts legacy GOOGLE_MAPS_API_KEY during migration.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import { forwardGeocodeAddress } from '../_shared/geocodeMaps.ts';
 
 type VerifyRequest = {
   business_pk?: number | null;
@@ -41,11 +43,7 @@ type GeocodeResult = {
   lat: number;
   lng: number;
   formatted_address: string;
-  address_components: Array<{
-    long_name?: string;
-    short_name?: string;
-    types?: string[];
-  }>;
+  address: Record<string, string | undefined>;
 };
 
 const MANILA_CITY_NAMES = new Set(['manila', 'city of manila', 'maynila']);
@@ -90,52 +88,15 @@ function getSupabaseClient(req: Request) {
   return createClient(supabaseUrl, supabaseServiceRoleKey);
 }
 
-async function geocodeGoogle(address: string): Promise<GeocodeResult | null> {
-  const apiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
-  if (!apiKey) throw new Error('Missing GOOGLE_MAPS_API_KEY');
-
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-    address
-  )}&components=${encodeURIComponent('country:PH')}&region=PH&key=${encodeURIComponent(apiKey)}`;
-
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!res.ok) return null;
-
-  const json = (await res.json()) as {
-    status?: string;
-    results?: Array<{
-      formatted_address?: string;
-      address_components?: Array<{
-        long_name?: string;
-        short_name?: string;
-        types?: string[];
-      }>;
-      geometry?: { location?: { lat?: number; lng?: number } };
-    }>;
-    error_message?: string;
-  };
-
-  if (json.status !== 'OK' || !json.results || json.results.length === 0) {
-    return null;
-  }
-
-  const first = json.results[0];
-  const loc = first?.geometry?.location;
-  const lat = loc?.lat;
-  const lng = loc?.lng;
-  if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+async function geocodeAddress(address: string): Promise<GeocodeResult | null> {
+  const result = await forwardGeocodeAddress(address);
+  if (!result) return null;
 
   return {
-    lat,
-    lng,
-    formatted_address: String(first?.formatted_address || '').trim(),
-    address_components: Array.isArray(first?.address_components) ? first.address_components : [],
+    lat: result.lat,
+    lng: result.lng,
+    formatted_address: result.formatted_address,
+    address: result.address,
   };
 }
 
@@ -146,10 +107,9 @@ function normalizeName(value: string | undefined | null) {
     .replace(/\s+/g, ' ');
 }
 
-function getAddressComponentValues(result: GeocodeResult, type: string) {
-  return result.address_components
-    .filter((component) => Array.isArray(component.types) && component.types.includes(type))
-    .flatMap((component) => [component.long_name, component.short_name])
+function getAddressFieldValues(result: GeocodeResult, fields: string[]) {
+  return fields
+    .map((field) => result.address?.[field])
     .map((value) => normalizeName(value))
     .filter(Boolean);
 }
@@ -165,13 +125,13 @@ function isInsideManilaBounds(lat: number, lng: number) {
 
 function resolveJurisdiction(result: GeocodeResult) {
   const localities = [
-    ...getAddressComponentValues(result, 'locality'),
-    ...getAddressComponentValues(result, 'postal_town'),
-    ...getAddressComponentValues(result, 'administrative_area_level_2'),
+    ...getAddressFieldValues(result, ['city', 'municipality', 'town', 'village', 'hamlet']),
+    ...getAddressFieldValues(result, ['suburb', 'city_district', 'borough', 'quarter']),
+    ...getAddressFieldValues(result, ['county']),
   ];
   const adminRegions = [
-    ...getAddressComponentValues(result, 'administrative_area_level_1'),
-    ...getAddressComponentValues(result, 'administrative_area_level_2'),
+    ...getAddressFieldValues(result, ['state', 'region', 'province', 'state_district']),
+    ...getAddressFieldValues(result, ['county']),
   ];
 
   const resolvedLocality = localities.find(Boolean) || null;
@@ -266,7 +226,7 @@ serve(async (req) => {
       });
     }
 
-    const geocode = await geocodeGoogle(address);
+    const geocode = await geocodeAddress(address);
     if (!geocode) {
       const res: VerifyResponse = { ok: false, error: 'Unable to geocode business address' };
       return new Response(JSON.stringify(res), {

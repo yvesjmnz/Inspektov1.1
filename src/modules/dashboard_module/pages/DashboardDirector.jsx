@@ -2,7 +2,7 @@
 import { supabase } from '../../../lib/supabase';
 import NotificationBell from '../../../components/NotificationBell';
 import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications/notificationTriggers';
-import { cancelInspection as cancelInspectionApi } from '../../../lib/api';
+import { cancelInspection as cancelInspectionApi, sendSpecialComplaintFormLink as sendSpecialComplaintFormLinkApi } from '../../../lib/api';
 import { pickPreferredInspectionReport } from '../../../lib/inspectionReports';
 import DirectorReports from './DirectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
@@ -259,19 +259,23 @@ function formatDateNoSeconds(isoString) {
   return `${datePart} | ${timePart}`;
 }
 
+function isLikelyEmail(value) {
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(String(value || '').trim());
+}
+
 export default function DashboardDirector() {
   // Initialize tab from URL query parameter, default to 'queue'
   // Note: Director view no longer supports the 'general' (dashboard) tab.
   const getInitialTab = () => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
-    if (tabParam && ['queue', 'mission-orders', 'inspection', 'mission-orders-history', 'inspection-history', 'history', 'reports'].includes(tabParam)) {
+    if (tabParam && ['queue', 'special-complaint-form', 'mission-orders', 'inspection', 'mission-orders-history', 'inspection-history', 'history', 'reports'].includes(tabParam)) {
       return tabParam;
     }
     return 'queue';
   };
 
-  const [tab, setTab] = useState(getInitialTab); // queue | mission-orders | mission-orders-history | inspection | inspection-history | history | reports
+  const [tab, setTab] = useState(getInitialTab); // queue | special-complaint-form | mission-orders | mission-orders-history | inspection | inspection-history | history | reports
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -288,6 +292,10 @@ export default function DashboardDirector() {
       history: {
         title: 'Complaint History',
         subtitle: 'Browse past decisions and view audit details.',
+      },
+      'special-complaint-form': {
+        title: 'Send Special Complaint Form',
+        subtitle: 'Email a secure special complaint form link to government agencies or authorized complainants.',
       },
       'mission-orders': {
         title: 'Review Pending Mission Orders',
@@ -349,6 +357,9 @@ export default function DashboardDirector() {
   // Decline comment (required for declines)
   const [declineComment, setDeclineComment] = useState('');
   const [declineCommentError, setDeclineCommentError] = useState('');
+  const [specialFormRecipientEmail, setSpecialFormRecipientEmail] = useState('');
+  const [specialFormSendMessage, setSpecialFormSendMessage] = useState('');
+  const [sendingSpecialFormLink, setSendingSpecialFormLink] = useState(false);
 
   const [previewImage, setPreviewImage] = useState(null);
   const closePreview = () => setPreviewImage(null);
@@ -1035,6 +1046,12 @@ export default function DashboardDirector() {
 };
 
   useEffect(() => {
+    if (tab === 'special-complaint-form') {
+      setLoading(false);
+      setError('');
+      return;
+    }
+
     if (tab === 'mission-orders' || tab === 'mission-orders-history' || tab === 'inspection' || tab === 'inspection-history') {
       loadMissionOrders();
     } else {
@@ -1181,7 +1198,7 @@ export default function DashboardDirector() {
   }, [filteredMissionOrders]);
 
   const usesMissionOrderRefresh = tab === 'mission-orders' || tab === 'mission-orders-history' || tab === 'inspection' || tab === 'inspection-history';
-  const showHeaderRefresh = tab !== 'reports';
+  const showHeaderRefresh = tab !== 'reports' && tab !== 'special-complaint-form';
 
   // Group complaints by day for Review Complaints
   const complaintsByDay = useMemo(() => {
@@ -1674,6 +1691,29 @@ export default function DashboardDirector() {
     }
   };
 
+  const handleSendSpecialComplaintFormLink = async (event) => {
+    event.preventDefault();
+    setError('');
+    setSpecialFormSendMessage('');
+
+    const recipientEmail = String(specialFormRecipientEmail || '').trim().toLowerCase();
+    if (!isLikelyEmail(recipientEmail)) {
+      setError('Please enter a valid recipient email.');
+      return;
+    }
+
+    setSendingSpecialFormLink(true);
+    try {
+      await sendSpecialComplaintFormLinkApi(recipientEmail);
+      setSpecialFormRecipientEmail('');
+      setSpecialFormSendMessage(`Special complaint form link sent to ${recipientEmail}.`);
+    } catch (e) {
+      setError(e?.message || 'Failed to send special complaint form link.');
+    } finally {
+      setSendingSpecialFormLink(false);
+    }
+  };
+
   return (
     <div className="dash-container">
             <main className="dash-main">
@@ -1706,7 +1746,8 @@ export default function DashboardDirector() {
                 <div className="hamburger-bar"></div>
               </div>
             </div>
-            <ul className="dash-nav" style={{ flex: 1 }}>
+            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 2, display: 'grid', gap: 12 }}>
+            <ul className="dash-nav">
               <li className="dash-nav-section">
                 <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Complaints</span>
               </li>
@@ -1724,6 +1765,14 @@ export default function DashboardDirector() {
                     <img src="/ui_icons/history.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
                   </span>
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Complaint History</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'special-complaint-form' ? 'active' : ''}`} onClick={() => setTab('special-complaint-form')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/document.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Special Complaint Form</span>
                 </button>
               </li>
               <li className="dash-nav-section">
@@ -1777,7 +1826,8 @@ export default function DashboardDirector() {
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Performance Report</span>
                 </button>
               </li>
-                                                      </ul>
+            </ul>
+            </div>
             <button
               type="button"
               className="dash-nav-item"
@@ -1856,6 +1906,119 @@ export default function DashboardDirector() {
               formatStatus={formatStatusHI}
               statusBadgeClass={statusBadgeClassHI}
             />
+          ) : tab === 'special-complaint-form' ? (
+            <div style={{ display: 'grid', gap: 20 }}>
+              <section
+                style={{
+                  background: 'linear-gradient(135deg, #eff6ff 0%, #ffffff 58%, #f8fafc 100%)',
+                  border: '1px solid #dbeafe',
+                  borderRadius: 18,
+                  padding: 24,
+                  boxShadow: '0 12px 28px rgba(37, 99, 235, 0.08)',
+                }}
+              >
+                <div style={{ display: 'grid', gap: 18 }}>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        width: 'fit-content',
+                        padding: '6px 10px',
+                        borderRadius: 999,
+                        background: '#dbeafe',
+                        color: '#1d4ed8',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        letterSpacing: '0.03em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Director Access
+                    </span>
+                    <h3 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: '#0f172a' }}>Send a secure form link</h3>
+                    <p style={{ margin: 0, maxWidth: 760, color: '#475569', lineHeight: 1.6 }}>
+                      Use this tab when a special government agency or authorized complainant needs access to the special complaint workflow.
+                      We will email a one-time verification link that opens the special complaint form securely.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleSendSpecialComplaintFormLink} style={{ display: 'grid', gap: 16 }}>
+                    <div style={{ display: 'grid', gap: 8, maxWidth: 560 }}>
+                      <label htmlFor="special-complaint-recipient-email" style={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
+                        Recipient Email
+                      </label>
+                      <input
+                        id="special-complaint-recipient-email"
+                        type="email"
+                        className="dash-input"
+                        placeholder="recipient@agency.gov.ph"
+                        value={specialFormRecipientEmail}
+                        onChange={(e) => setSpecialFormRecipientEmail(e.target.value)}
+                        disabled={sendingSpecialFormLink}
+                        autoComplete="email"
+                        style={{ minWidth: 0, width: '100%' }}
+                      />
+                      <div style={{ fontSize: 12, color: '#64748b' }}>
+                        The email includes a secure access link for the special complaint form and expires automatically.
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+                      <button type="submit" className="dash-btn" disabled={sendingSpecialFormLink}>
+                        {sendingSpecialFormLink ? 'Sending link…' : 'Send special complaint form link'}
+                      </button>
+                      <a
+                        href="/special-complaint"
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: '#1d4ed8', fontWeight: 700, textDecoration: 'none' }}
+                      >
+                        View public form page
+                      </a>
+                    </div>
+                  </form>
+
+                  {specialFormSendMessage ? (
+                    <div
+                      style={{
+                        background: '#dcfce7',
+                        color: '#166534',
+                        border: '1px solid #bbf7d0',
+                        borderRadius: 12,
+                        padding: '12px 14px',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        maxWidth: 680,
+                      }}
+                    >
+                      {specialFormSendMessage}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+
+              <section
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 16,
+                  padding: 22,
+                  display: 'grid',
+                  gap: 10,
+                }}
+              >
+                <h4 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: '#0f172a' }}>How this works</h4>
+                <div style={{ color: '#475569', fontSize: 14, lineHeight: 1.6 }}>
+                  The director sends the recipient a secure verification email.
+                </div>
+                <div style={{ color: '#475569', fontSize: 14, lineHeight: 1.6 }}>
+                  After the recipient opens the link, they are redirected into the special complaint form with verified access.
+                </div>
+                <div style={{ color: '#475569', fontSize: 14, lineHeight: 1.6 }}>
+                  This tab is intended for special government agencies and authorized complainants only.
+                </div>
+              </section>
+            </div>
           ) : tab === 'reports' ? (
             <DirectorReports />
           ) : tab === 'mission-orders-history' ? (

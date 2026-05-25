@@ -2,6 +2,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
+import { forwardGeocodeAddress } from '../_shared/geocodeMaps.ts'
 
 type BatchRequest = {
   limit?: number
@@ -39,31 +40,15 @@ function getSupabaseClient() {
   return createClient(supabaseUrl, supabaseServiceRoleKey)
 }
 
-async function geocodeGoogle(address: string): Promise<{ lat: number; lng: number } | null> {
-  const apiKey = Deno.env.get('GOOGLE_MAPS_API_KEY')
-  if (!apiKey) throw new Error('Missing GOOGLE_MAPS_API_KEY')
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-    address
-  )}&key=${encodeURIComponent(apiKey)}`
+async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+  const result = await forwardGeocodeAddress(address)
+  if (!result) return null
 
-  try {
-    const res = await fetch(url)
-
-    if (!res.ok) return null
-
-    const json = await res.json()
-
-    if (json.status !== 'OK' || !json.results?.length) return null
-
-    const loc = json.results[0]?.geometry?.location
-
-    if (!loc?.lat || !loc?.lng) return null
-
-    return { lat: loc.lat, lng: loc.lng }
-  } catch {
-    return null
-  }
+  return { lat: result.lat, lng: result.lng }
 }
 
 serve(async (req) => {
@@ -90,8 +75,6 @@ serve(async (req) => {
     const limit = body.limit ?? 500
     const offset = body.offset ?? 0
     const dryRun = body.dryRun ?? false
-
-    const CONCURRENCY = 10
 
     const supabase = getSupabaseClient()
 
@@ -135,8 +118,11 @@ serve(async (req) => {
         let coords = cache.get(address)
 
         if (coords === undefined) {
-          coords = await geocodeGoogle(address)
+          coords = await geocodeAddress(address)
           cache.set(address, coords)
+
+          // geocode.maps.co can throttle aggressively on lower plans, so pace uncached requests.
+          await sleep(1100)
         }
 
         if (!coords) {
@@ -156,10 +142,8 @@ serve(async (req) => {
       }
     }
 
-    for (let i = 0; i < businesses.length; i += CONCURRENCY) {
-      const batch = businesses.slice(i, i + CONCURRENCY)
-
-      await Promise.all(batch.map(processBusiness))
+    for (const business of businesses) {
+      await processBusiness(business)
     }
 
     let updated = 0

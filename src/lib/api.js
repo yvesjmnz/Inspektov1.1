@@ -29,6 +29,18 @@ export async function verifyEmail(token) {
   return data;
 }
 
+export async function sendSpecialComplaintFormLink(email) {
+  const { data, error } = await supabase.functions.invoke('send-special-complaint-form-link', {
+    body: { email },
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to send special complaint form link');
+  }
+
+  return data;
+}
+
 /**
  * Cancel an inspection for a Mission Order.
  * - Sets status to 'cancelled' only if the MO is currently marked for inspection.
