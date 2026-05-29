@@ -608,9 +608,9 @@ export default function DashboardInspector() {
                       }}
                     >
                       {/* Header */}
-                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Assigned Inspections</h3>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#F2B705', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                           <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
                           <span>{filteredAssigned.length} {filteredAssigned.length === 1 ? 'Inspection' : 'Inspections'}</span>
                         </div>
@@ -775,11 +775,11 @@ export default function DashboardInspector() {
                           }}
                         >
                           {/* Day Header */}
-                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                               {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
                             </h3>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#22c55e', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                               <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
                               <span>
                                 {itemCount} Completed Inspection{itemCount === 1 ? '' : 's'}

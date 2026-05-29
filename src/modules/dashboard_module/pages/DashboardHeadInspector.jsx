@@ -1299,11 +1299,11 @@ export default function DashboardHeadInspector() {
                           }}
                         >
                           {/* Day Header */}
-                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                               {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
                             </h3>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#F2B705', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                               <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
                               <span>{count} Pending Mission Order{count !== 1 ? 's' : ''}</span>
                             </div>
@@ -1452,9 +1452,9 @@ export default function DashboardHeadInspector() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                   {/* Rejected Section */}
                   <div style={{ order: 2, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
-                    <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                    <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                       <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Rejected</h3>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                         <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#ef4444', flexShrink: 0 }}></div>
                         <span>{rejectedMissionOrders.length} Rejected Mission Order{rejectedMissionOrders.length !== 1 ? 's' : ''}</span>
                       </div>
@@ -1630,9 +1630,9 @@ export default function DashboardHeadInspector() {
 
                   {/* Pre-Approved Section */}
                   <div style={{ order: 1, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
-                    <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                    <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                       <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>Pre-Approved</h3>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: '#10b981', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                         <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}></div>
                         <span>{preApprovedMissionOrders.length} Pre-Approved Mission Order{preApprovedMissionOrders.length !== 1 ? 's' : ''}</span>
                       </div>
@@ -1836,9 +1836,9 @@ export default function DashboardHeadInspector() {
                           overflow: 'hidden',
                         }}
                       >
-                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>{title}</h3>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: dotColor, marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: dotColor, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                             <div style={{ width: 12, height: 12, borderRadius: '50%', background: dotColor, flexShrink: 0 }}></div>
                             <span>{rows.length} {rows.length === 1 ? countLabelSingular : countLabelPlural}</span>
                           </div>
@@ -1965,11 +1965,11 @@ export default function DashboardHeadInspector() {
                             e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)';
                           }}
                         >
-                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                               {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
                             </h3>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#22c55e', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                               <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
                               <span>{itemCount} Completed Inspection{itemCount === 1 ? '' : 's'}</span>
                             </div>
@@ -2080,11 +2080,11 @@ export default function DashboardHeadInspector() {
                           }}
                         >
                           {/* Day Header */}
-                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                               {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
                             </h3>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#F2B705', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                               <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
                               <span>{count} Pending Signature{count !== 1 ? 's' : ''}</span>
                             </div>
@@ -2344,11 +2344,11 @@ export default function DashboardHeadInspector() {
                           }}
                         >
                           {/* Day Header */}
-                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                          <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                               {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
                             </h3>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#10b981', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                               <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}></div>
                               <span>{count} Completed Mission Order{count !== 1 ? 's' : ''}</span>
                             </div>

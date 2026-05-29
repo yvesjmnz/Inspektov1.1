@@ -294,8 +294,8 @@ export default function DashboardDirector() {
         subtitle: 'Browse past decisions and view audit details.',
       },
       'special-complaint-form': {
-        title: 'Send Special Complaint Form',
-        subtitle: 'Email a secure special complaint form link to government agencies or authorized complainants.',
+        title: 'Special Complaint Access',
+        subtitle: 'Send a secure, one-time access link to an authorized recipient.',
       },
       'mission-orders': {
         title: 'Review Pending Mission Orders',
@@ -323,7 +323,9 @@ export default function DashboardDirector() {
   }, [tab]);
 
   const [complaints, setComplaints] = useState([]);
+  const [complaintsLoadedTab, setComplaintsLoadedTab] = useState('');
   const [missionOrders, setMissionOrders] = useState([]);
+  const [missionOrdersLoadedTab, setMissionOrdersLoadedTab] = useState('');
   const [auditComplaint, setAuditComplaint] = useState(null);
   const [complaintHistorySearch, setComplaintHistorySearch] = useState('');
   const [missionOrderHistorySearch, setMissionOrderHistorySearch] = useState('');
@@ -357,6 +359,8 @@ export default function DashboardDirector() {
   // Decline comment (required for declines)
   const [declineComment, setDeclineComment] = useState('');
   const [declineCommentError, setDeclineCommentError] = useState('');
+  const [declineConfirmOpen, setDeclineConfirmOpen] = useState(false);
+  const [declineConfirmAcknowledged, setDeclineConfirmAcknowledged] = useState(false);
   const [specialFormRecipientEmail, setSpecialFormRecipientEmail] = useState('');
   const [specialFormSendMessage, setSpecialFormSendMessage] = useState('');
   const [sendingSpecialFormLink, setSendingSpecialFormLink] = useState(false);
@@ -478,10 +482,12 @@ export default function DashboardDirector() {
 
       if (!isActiveRequest(request)) return;
       setComplaints(data || []);
+      setComplaintsLoadedTab(request.tab);
     } catch (e) {
       if (!isActiveRequest(request)) return;
       setError(e?.message || 'Failed to load complaints.');
       setComplaints([]);
+      setComplaintsLoadedTab(request.tab);
     } finally {
       if (isActiveRequest(request)) {
         setLoading(false);
@@ -649,6 +655,7 @@ export default function DashboardDirector() {
 
       if (!isActiveRequest(request)) return;
       setMissionOrders((merged || []).filter(Boolean));
+      setMissionOrdersLoadedTab(request.tab);
       return;
     }
 
@@ -769,6 +776,7 @@ export default function DashboardDirector() {
 
       if (!isActiveRequest(request)) return;
       setMissionOrders(merged);
+      setMissionOrdersLoadedTab(request.tab);
       return;
     }
 
@@ -875,6 +883,7 @@ export default function DashboardDirector() {
 
       if (!isActiveRequest(request)) return;
       setMissionOrders(merged);
+      setMissionOrdersLoadedTab(request.tab);
       return;
     }
 
@@ -1017,6 +1026,7 @@ export default function DashboardDirector() {
 
       if (!isActiveRequest(request)) return;
       setMissionOrders(filtered);
+      setMissionOrdersLoadedTab(request.tab);
       return;
     }
 
@@ -1033,11 +1043,13 @@ export default function DashboardDirector() {
 
     if (!isActiveRequest(request)) return;
     setMissionOrders(data || []);
+    setMissionOrdersLoadedTab(request.tab);
 
   } catch (e) {
     if (!isActiveRequest(request)) return;
     setError(e?.message || 'Failed to load mission orders.');
     setMissionOrders([]);
+    setMissionOrdersLoadedTab(request.tab);
   } finally {
     if (isActiveRequest(request)) {
       setLoading(false);
@@ -1141,17 +1153,18 @@ export default function DashboardDirector() {
   }, [auditComplaint]);
 
   const filteredComplaints = useMemo(() => {
+    const currentTabComplaints = complaintsLoadedTab === tab ? complaints : [];
     // If a field filter is active, don't apply client-side filtering (backend already filtered)
     const hasFieldFilter = complaintHistoryFilters.businessName || complaintHistoryFilters.address || complaintHistoryFilters.reporterEmail;
     if (hasFieldFilter) {
-      return complaints;
+      return currentTabComplaints;
     }
 
     // Broad client-side filtering across common fields when no specific field filter is active.
     const q = complaintHistorySearch.trim().toLowerCase();
-    if (!q) return complaints;
+    if (!q) return currentTabComplaints;
 
-    return complaints.filter((c) => {
+    return currentTabComplaints.filter((c) => {
       const nameStr = String(c?.business_name ?? '').toLowerCase();
       const addrStr = String(c?.business_address ?? '').toLowerCase();
       const emailStr = String(c?.reporter_email ?? '').toLowerCase();
@@ -1161,17 +1174,18 @@ export default function DashboardDirector() {
         emailStr.includes(q)
       );
     });
-  }, [complaints, complaintHistorySearch, complaintHistoryFilters]);
+  }, [complaints, complaintsLoadedTab, tab, complaintHistorySearch, complaintHistoryFilters]);
 
   const filteredMissionOrders = useMemo(() => {
-    if (tab !== 'mission-orders-history') return missionOrders;
+    const currentTabMissionOrders = missionOrdersLoadedTab === tab ? missionOrders : [];
+    if (tab !== 'mission-orders-history') return currentTabMissionOrders;
 
     const q = missionOrderHistorySearch.trim().toLowerCase();
     const hasMissionOrderFieldFilter = missionOrderHistoryFilters.businessName || missionOrderHistoryFilters.address || missionOrderHistoryFilters.inspectorName;
 
-    if (!q) return missionOrders;
+    if (!q) return currentTabMissionOrders;
 
-    return missionOrders.filter((mo) => {
+    return currentTabMissionOrders.filter((mo) => {
       const idStr = String(mo?.id ?? '').toLowerCase();
       const titleStr = String(mo?.title ?? '').toLowerCase();
       const complaintStr = String(mo?.complaint_id ?? '').toLowerCase();
@@ -1187,7 +1201,7 @@ export default function DashboardDirector() {
 
       return idStr.includes(q) || titleStr.includes(q) || complaintStr.includes(q) || businessNameStr.includes(q) || addressStr.includes(q) || inspectorStr.includes(q);
     });
-  }, [missionOrders, missionOrderHistorySearch, tab, missionOrderHistoryFilters.businessName, missionOrderHistoryFilters.address, missionOrderHistoryFilters.inspectorName]);
+  }, [missionOrders, missionOrdersLoadedTab, missionOrderHistorySearch, tab, missionOrderHistoryFilters.businessName, missionOrderHistoryFilters.address, missionOrderHistoryFilters.inspectorName]);
 
   const reviewMissionOrdersHeaderLabel = useMemo(() => {
     const firstIssuedAt = filteredMissionOrders?.[0]?.submitted_at || filteredMissionOrders?.[0]?.mission_order_created_at || filteredMissionOrders?.[0]?.created_at || null;
@@ -1198,6 +1212,9 @@ export default function DashboardDirector() {
   }, [filteredMissionOrders]);
 
   const usesMissionOrderRefresh = tab === 'mission-orders' || tab === 'mission-orders-history' || tab === 'inspection' || tab === 'inspection-history';
+  const missionOrdersReadyForTab = !usesMissionOrderRefresh || missionOrdersLoadedTab === tab;
+  const usesComplaintData = tab === 'queue' || tab === 'history';
+  const complaintsReadyForTab = !usesComplaintData || complaintsLoadedTab === tab;
   const showHeaderRefresh = tab !== 'reports' && tab !== 'special-complaint-form';
 
   // Group complaints by day for Review Complaints
@@ -1684,11 +1701,36 @@ export default function DashboardDirector() {
       if (status === 'declined') {
         setDeclineComment('');
       }
+      return true;
     } catch (e) {
       setError(e?.message || 'Failed to update status.');
+      return false;
     } finally {
       setLoading(false);
     }
+  };
+
+  const closeDeclineConfirm = () => {
+    setDeclineConfirmOpen(false);
+    setDeclineConfirmAcknowledged(false);
+  };
+
+  const requestDeclineConfirmation = () => {
+    if (!fullComplaint) return;
+    const comment = declineComment.trim();
+    if (!comment) {
+      setDeclineCommentError('Comment is required to decline a complaint.');
+      return;
+    }
+    setDeclineCommentError('');
+    setDeclineConfirmAcknowledged(false);
+    setDeclineConfirmOpen(true);
+  };
+
+  const confirmDeclineComplaint = async () => {
+    if (!fullComplaint || !declineConfirmAcknowledged || loading) return;
+    const declined = await updateComplaintStatus(fullComplaint.id, 'declined');
+    if (declined) closeDeclineConfirm();
   };
 
   const handleSendSpecialComplaintFormLink = async (event) => {
@@ -1891,131 +1933,294 @@ export default function DashboardDirector() {
           {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
           {tab === 'mission-orders-history' ? (
-            <MissionOrderHistory
-              missionOrdersByDay={missionOrdersByDay}
-              expandedComplaintId={expandedComplaintId}
-              setExpandedComplaintId={setExpandedComplaintId}
-              onRowClick={(mo) => {
-                try {
-                  sessionStorage.setItem('missionOrderSource', 'history');
-                } catch {
-                  // ignore
-                }
-                window.location.assign(`/mission-order?id=${encodeURIComponent(mo.mission_order_id || mo.id || mo.mission_order_id)}`);
-              }}
-              formatStatus={formatStatusHI}
-              statusBadgeClass={statusBadgeClassHI}
-            />
+            loading || !missionOrdersReadyForTab ? (
+              <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                Loading…
+              </div>
+            ) : (
+              <MissionOrderHistory
+                missionOrdersByDay={missionOrdersByDay}
+                expandedComplaintId={expandedComplaintId}
+                setExpandedComplaintId={setExpandedComplaintId}
+                onRowClick={(mo) => {
+                  try {
+                    sessionStorage.setItem('missionOrderSource', 'history');
+                  } catch {
+                    // ignore
+                  }
+                  window.location.assign(`/mission-order?id=${encodeURIComponent(mo.mission_order_id || mo.id || mo.mission_order_id)}`);
+                }}
+                formatStatus={formatStatusHI}
+                statusBadgeClass={statusBadgeClassHI}
+              />
+            )
           ) : tab === 'special-complaint-form' ? (
             <div style={{ display: 'grid', gap: 20 }}>
               <section
                 style={{
-                  background: 'linear-gradient(135deg, #eff6ff 0%, #ffffff 58%, #f8fafc 100%)',
-                  border: '1px solid #dbeafe',
+                  background: 'linear-gradient(135deg, #ffffff 0%, #ffffff 54%, #f4f8ff 100%)',
+                  border: '1px solid #d6e4f5',
                   borderRadius: 18,
-                  padding: 24,
-                  boxShadow: '0 12px 28px rgba(37, 99, 235, 0.08)',
+                  padding: '30px 34px',
+                  boxShadow: '0 12px 30px rgba(11, 34, 73, 0.10)',
+                  overflow: 'hidden',
                 }}
               >
-                <div style={{ display: 'grid', gap: 18 }}>
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        width: 'fit-content',
-                        padding: '6px 10px',
-                        borderRadius: 999,
-                        background: '#dbeafe',
-                        color: '#1d4ed8',
-                        fontSize: 12,
-                        fontWeight: 800,
-                        letterSpacing: '0.03em',
-                        textTransform: 'uppercase',
-                      }}
-                    >
-                      Director Access
-                    </span>
-                    <h3 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: '#0f172a' }}>Send a secure form link</h3>
-                    <p style={{ margin: 0, maxWidth: 760, color: '#475569', lineHeight: 1.6 }}>
-                      Use this tab when a special government agency or authorized complainant needs access to the special complaint workflow.
-                      We will email a one-time verification link that opens the special complaint form securely.
-                    </p>
-                  </div>
-
-                  <form onSubmit={handleSendSpecialComplaintFormLink} style={{ display: 'grid', gap: 16 }}>
-                    <div style={{ display: 'grid', gap: 8, maxWidth: 560 }}>
-                      <label htmlFor="special-complaint-recipient-email" style={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
-                        Recipient Email
-                      </label>
-                      <input
-                        id="special-complaint-recipient-email"
-                        type="email"
-                        className="dash-input"
-                        placeholder="recipient@agency.gov.ph"
-                        value={specialFormRecipientEmail}
-                        onChange={(e) => setSpecialFormRecipientEmail(e.target.value)}
-                        disabled={sendingSpecialFormLink}
-                        autoComplete="email"
-                        style={{ minWidth: 0, width: '100%' }}
-                      />
-                      <div style={{ fontSize: 12, color: '#64748b' }}>
-                        The email includes a secure access link for the special complaint form and expires automatically.
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1.45fr) minmax(360px, 0.95fr)',
+                    gap: 42,
+                    alignItems: 'center',
+                  }}
+                >
+                  <div style={{ display: 'grid', gap: 24, minWidth: 0 }}>
+                    <div style={{ display: 'grid', gap: 14 }}>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          width: 'fit-content',
+                          padding: '8px 15px',
+                          borderRadius: 999,
+                          background: '#eff6ff',
+                          color: '#1d4ed8',
+                          fontSize: 13,
+                          fontWeight: 900,
+                          letterSpacing: '0.02em',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex' }} aria-hidden="true">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 3 19 6v5c0 5-2.8 8.3-7 10-4.2-1.7-7-5-7-10V6l7-3Z" fill="#2563eb" />
+                            <path d="m9 12 2 2 4-5" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                        Director Access
+                      </span>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: 32, fontWeight: 950, color: '#0f172a', letterSpacing: '-0.035em' }}>
+                          Send Secure Access Link
+                        </h3>
+                        <p style={{ margin: '12px 0 0', maxWidth: 'none', color: '#475569', fontSize: 16, lineHeight: 1.65, whiteSpace: 'nowrap' }}>
+                          Enter the official email address of the government agency or authorized complainant.
+                          They will receive a secure link to the special complaint form.
+                        </p>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-                      <button type="submit" className="dash-btn" disabled={sendingSpecialFormLink}>
-                        {sendingSpecialFormLink ? 'Sending link…' : 'Send special complaint form link'}
-                      </button>
-                      <a
-                        href="/special-complaint"
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: '#1d4ed8', fontWeight: 700, textDecoration: 'none' }}
-                      >
-                        View public form page
-                      </a>
-                    </div>
-                  </form>
+                    <form onSubmit={handleSendSpecialComplaintFormLink} style={{ display: 'grid', gap: 18 }}>
+                      <div style={{ display: 'grid', gap: 9, maxWidth: 820 }}>
+                        <label htmlFor="special-complaint-recipient-email" style={{ fontSize: 14, fontWeight: 900, color: '#0f172a' }}>
+                          Official recipient email
+                        </label>
+                        <div style={{ position: 'relative' }}>
+                          <span
+                            style={{
+                              position: 'absolute',
+                              left: 15,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              color: '#94a3b8',
+                              display: 'inline-flex',
+                              pointerEvents: 'none',
+                            }}
+                            aria-hidden="true"
+                          >
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                              <path d="M4 6h16v12H4V6Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                              <path d="m4 7 8 6 8-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </span>
+                          <input
+                            id="special-complaint-recipient-email"
+                            type="email"
+                            className="dash-input"
+                            placeholder="name@agency.gov.ph"
+                            value={specialFormRecipientEmail}
+                            onChange={(e) => setSpecialFormRecipientEmail(e.target.value)}
+                            disabled={sendingSpecialFormLink}
+                            autoComplete="email"
+                            style={{
+                              minWidth: 0,
+                              width: '100%',
+                              minHeight: 56,
+                              borderRadius: 12,
+                              paddingLeft: 50,
+                              fontSize: 15,
+                              borderColor: '#cbd5e1',
+                              boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+                            }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#64748b' }}>
+                          <span style={{ display: 'inline-flex', color: '#94a3b8' }} aria-hidden="true">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                              <rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
+                              <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            </svg>
+                          </span>
+                          <span>The link expires after first use or in 24 hours.</span>
+                        </div>
+                      </div>
 
-                  {specialFormSendMessage ? (
-                    <div
-                      style={{
-                        background: '#dcfce7',
-                        color: '#166534',
-                        border: '1px solid #bbf7d0',
-                        borderRadius: 12,
-                        padding: '12px 14px',
-                        fontSize: 13,
-                        fontWeight: 700,
-                        maxWidth: 680,
-                      }}
-                    >
-                      {specialFormSendMessage}
-                    </div>
-                  ) : null}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center' }}>
+                        <button
+                          type="submit"
+                          className="dash-btn"
+                          disabled={sendingSpecialFormLink}
+                          style={{
+                            minHeight: 54,
+                            padding: '0 28px',
+                            borderRadius: 12,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            boxShadow: '0 10px 20px rgba(37, 99, 235, 0.22)',
+                          }}
+                        >
+                          <span style={{ display: 'inline-flex' }} aria-hidden="true">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                              <path d="M3.5 20.5 21 12 3.5 3.5 6.5 12l-3 8.5Z" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                              <path d="M6.5 12H21" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                            </svg>
+                          </span>
+                          {sendingSpecialFormLink ? 'Sending Access Link…' : 'Send Access Link'}
+                        </button>
+                        <a
+                          href="/special-complaint"
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            minHeight: 54,
+                            padding: '0 28px',
+                            border: '1px solid #d6e4f5',
+                            borderRadius: 12,
+                            color: '#334155',
+                            fontWeight: 900,
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            background: '#ffffff',
+                            boxShadow: '0 4px 10px rgba(11, 34, 73, 0.04)',
+                          }}
+                        >
+                          <span style={{ display: 'inline-flex', color: '#64748b' }} aria-hidden="true">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                              <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" strokeWidth="2" />
+                            </svg>
+                          </span>
+                          Preview Public Form
+                        </a>
+                      </div>
+                    </form>
+
+                    {specialFormSendMessage ? (
+                      <div
+                        style={{
+                          background: '#ecfdf5',
+                          color: '#166534',
+                          border: '1px solid #86efac',
+                          borderRadius: 14,
+                          padding: '12px 14px',
+                          fontSize: 13,
+                          fontWeight: 800,
+                          maxWidth: 620,
+                        }}
+                      >
+                        {specialFormSendMessage}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      minHeight: 310,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'radial-gradient(circle at 50% 50%, #eff6ff 0%, rgba(239, 246, 255, 0.74) 42%, rgba(239, 246, 255, 0) 70%)',
+                    }}
+                  >
+                    <img
+                      src="/ui_icons/special-secure-envelope.svg"
+                      alt="Secure email access illustration"
+                      style={{ width: 'min(390px, 100%)', height: 'auto', display: 'block' }}
+                    />
+                  </div>
                 </div>
               </section>
 
               <section
                 style={{
                   background: '#ffffff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 16,
-                  padding: 22,
+                  border: '1px solid #d6e4f5',
+                  borderRadius: 18,
+                  padding: '30px 34px 34px',
                   display: 'grid',
-                  gap: 10,
+                  gap: 24,
+                  boxShadow: '0 10px 24px rgba(11, 34, 73, 0.08)',
                 }}
               >
-                <h4 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: '#0f172a' }}>How this works</h4>
-                <div style={{ color: '#475569', fontSize: 14, lineHeight: 1.6 }}>
-                  The director sends the recipient a secure verification email.
-                </div>
-                <div style={{ color: '#475569', fontSize: 14, lineHeight: 1.6 }}>
-                  After the recipient opens the link, they are redirected into the special complaint form with verified access.
-                </div>
-                <div style={{ color: '#475569', fontSize: 14, lineHeight: 1.6 }}>
-                  This tab is intended for special government agencies and authorized complainants only.
+                <h4 style={{ margin: 0, fontSize: 22, fontWeight: 950, color: '#0f172a', letterSpacing: '-0.02em' }}>How it works</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24, alignItems: 'stretch' }}>
+                  {[
+                    {
+                      icon: '/ui_icons/special-envelope.svg',
+                      title: '1. Enter email',
+                      text: 'Provide the official recipient email address.',
+                    },
+                    {
+                      icon: '/ui_icons/special-shield-check.svg',
+                      title: '2. Access is sent',
+                      text: 'A secure link is emailed instantly to the recipient.',
+                    },
+                    {
+                      icon: '/ui_icons/special-clipboard-check.svg',
+                      title: '3. Complaint submitted',
+                      text: 'The recipient verifies access and submits the complaint securely.',
+                    },
+                  ].map((step) => (
+                    <div
+                      key={step.title}
+                      style={{
+                        minHeight: 178,
+                        padding: '26px 28px',
+                        border: '1px solid #dbeafe',
+                        borderRadius: 18,
+                        background: 'linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)',
+                        display: 'grid',
+                        gridTemplateColumns: '112px 1fr',
+                        gap: 22,
+                        alignItems: 'center',
+                        minWidth: 0,
+                        boxShadow: '0 8px 18px rgba(11, 34, 73, 0.05)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 104,
+                          height: 104,
+                          borderRadius: '50%',
+                          background: '#eff6ff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <img src={step.icon} alt="" aria-hidden="true" style={{ width: 94, height: 94, objectFit: 'contain', display: 'block' }} />
+                      </div>
+                      <div>
+                        <div style={{ color: '#0f172a', fontWeight: 950, fontSize: 17 }}>{step.title}</div>
+                        <div style={{ marginTop: 10, color: '#64748b', fontSize: 14, lineHeight: 1.55 }}>{step.text}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </section>
             </div>
@@ -2025,7 +2230,7 @@ export default function DashboardDirector() {
             <div style={{ display: 'grid', gap: 20 }}>
               {missionOrdersByDay.sortedKeys.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                  {loading ? 'Loading…' : 'No mission orders found.'}
+                  {loading || !missionOrdersReadyForTab ? 'Loading…' : 'No mission orders found.'}
                 </div>
               ) : (
                 missionOrdersByDay.sortedKeys.map((dayKey) => {
@@ -2047,11 +2252,11 @@ export default function DashboardDirector() {
                       onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 8px 20px rgba(2,6,23,0.12)'; }}
                       onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(2,6,23,0.08)'; }}
                     >
-                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                           {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
                         </h3>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#F2B705', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                           <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
                           <span>{count} Mission Order{count !== 1 ? 's' : ''}</span>
                         </div>
@@ -2141,7 +2346,7 @@ export default function DashboardDirector() {
             <div style={{ display: 'grid', gap: 20 }}>
               {filteredMissionOrders.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                  {loading ? 'Loading…' : 'No mission orders found.'}
+                  {loading || !missionOrdersReadyForTab ? 'Loading…' : 'No mission orders found.'}
                 </div>
               ) : (
                 <div
@@ -2161,9 +2366,9 @@ export default function DashboardDirector() {
                   }}
                 >
                   {/* Header */}
-                  <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                  <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                     <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>{reviewMissionOrdersHeaderLabel}</h3>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                       <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
                       <span style={{ color: '#F2B705' }}>{filteredMissionOrders.length} Issued Mission Order{filteredMissionOrders.length !== 1 ? 's' : ''}</span>
                     </div>
@@ -2291,9 +2496,9 @@ export default function DashboardDirector() {
                           overflow: 'hidden',
                         }}
                       >
-                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                        <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>{title}</h3>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: dotColor, marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: dotColor, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                             <div style={{ width: 12, height: 12, borderRadius: '50%', background: dotColor, flexShrink: 0 }}></div>
                             <span>{rows.length} {rows.length === 1 ? countLabelSingular : countLabelPlural}</span>
                           </div>
@@ -2312,7 +2517,7 @@ export default function DashboardDirector() {
                               {rows.length === 0 ? (
                                 <tr>
                                   <td colSpan="4" style={{ textAlign: 'center', padding: 24, color: '#475569' }}>
-                                    {loading ? 'Loading…' : 'No records found.'}
+                                    {loading || !missionOrdersReadyForTab ? 'Loading…' : 'No records found.'}
                                   </td>
                                 </tr>
                               ) : (
@@ -2393,7 +2598,7 @@ export default function DashboardDirector() {
             <div style={{ display: 'grid', gap: 20 }}>
               {filteredMissionOrders.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                  {loading ? 'Loading…' : 'No completed inspections found.'}
+                  {loading || !missionOrdersReadyForTab ? 'Loading…' : 'No completed inspections found.'}
                 </div>
               ) : (
                 inspectionsByDay.sortedKeys.map((dayKey) => {
@@ -2422,11 +2627,11 @@ export default function DashboardDirector() {
                       }}
                     >
                       {/* Day Header */}
-                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                           {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
                         </h3>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#22c55e', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                           <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }}></div>
                           <span>{itemCount} Completed Inspection{itemCount === 1 ? '' : 's'}</span>
                         </div>
@@ -2510,7 +2715,7 @@ export default function DashboardDirector() {
             <div style={{ display: 'grid', gap: 20 }}>
               {filteredMissionOrders.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                  {loading ? 'Loading…' : 'No records found.'}
+                  {loading || !missionOrdersReadyForTab ? 'Loading…' : 'No records found.'}
                 </div>
               ) : (
                 missionOrdersByDay.sortedKeys.map((dayKey) => {
@@ -2539,12 +2744,12 @@ export default function DashboardDirector() {
                       }}
                     >
                       {/* Day Header */}
-                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                           {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
                         </h3>
                         {/* Statistics for mission order history */}
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginLeft: 'auto' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span>Total</span>
                             <span>{itemCount}</span>
@@ -2626,7 +2831,7 @@ export default function DashboardDirector() {
             <div style={{ display: 'grid', gap: 20 }}>
               {filteredComplaints.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                  {loading ? 'Loading…' : 'No records found.'}
+                  {loading || !complaintsReadyForTab ? 'Loading…' : 'No records found.'}
                 </div>
               ) : (
                 complaintsByDay.sortedKeys.map((dayKey) => {
@@ -2656,13 +2861,26 @@ export default function DashboardDirector() {
                       }}
                     >
                       {/* Day Header */}
-                      <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
-                        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
-                          {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
-                        </h3>
+                      <div
+                        style={{
+                          padding: '18px 24px',
+                          background: '#0b2249',
+                          borderBottom: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 16,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <div>
+                          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
+                            {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
+                          </h3>
+                        </div>
                         {tab === 'history' ? (
                           // Statistics for history tab
-                          <div style={{ fontSize: 13, fontWeight: 600, color: '#E5E7EB', marginTop: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginLeft: 'auto' }}>
                             {/* Total */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span>Total</span>
@@ -2683,7 +2901,7 @@ export default function DashboardDirector() {
                           </div>
                         ) : (
                           // Pending count for queue tab
-                          <div style={{ fontSize: 13, fontWeight: 600, color: '#F2B705', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#F2B705', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                             <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
                             <span>{pendingCount} Pending {pendingCount === 1 ? 'Complaint' : 'Complaints'}</span>
                           </div>
@@ -3185,7 +3403,7 @@ export default function DashboardDirector() {
                   <button
                     className="dash-btn dash-btn-danger"
                     type="button"
-                    onClick={() => updateComplaintStatus(fullComplaint.id, 'declined')}
+                    onClick={requestDeclineConfirmation}
                     disabled={loading || !fullComplaint}
                     aria-label="Decline"
                     title="Decline"
@@ -3198,6 +3416,89 @@ export default function DashboardDirector() {
                 </div>
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {declineConfirmOpen && fullComplaint ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="decline-confirm-title"
+          onClick={closeDeclineConfirm}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 4000,
+            background: 'rgba(15, 23, 42, 0.48)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 18,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(430px, 94vw)',
+              background: '#ffffff',
+              borderRadius: 4,
+              overflow: 'hidden',
+              boxShadow: '0 24px 60px rgba(15, 23, 42, 0.35)',
+            }}
+          >
+            <div style={{ background: '#c8191f', color: '#ffffff', padding: '18px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3 22 20H2L12 3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                  <path d="M12 9v5M12 17.5v.01" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                </svg>
+                <h2 id="decline-confirm-title" style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Confirm Decline</h2>
+              </div>
+              <button type="button" onClick={closeDeclineConfirm} aria-label="Close decline confirmation" style={{ border: 'none', background: 'transparent', color: '#ffffff', fontSize: 28, lineHeight: 1, cursor: 'pointer', padding: 0 }}>
+                ×
+              </button>
+            </div>
+
+            <div style={{ padding: 20, display: 'grid', gap: 18 }}>
+              <p style={{ margin: 0, color: '#334155', lineHeight: 1.55 }}>
+                You are about to decline this complaint for <strong style={{ color: '#0f172a' }}>{fullComplaint.business_name || 'this business'}</strong>
+                {fullComplaint.id ? <> (ID: #{String(fullComplaint.id).slice(0, 8)})</> : null}.
+              </p>
+
+              <div style={{ border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', borderRadius: 4, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+                  <path d="M12 8v5M12 16.5v.01" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                </svg>
+                <span>This action will notify the reporter and cannot be undone.</span>
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, color: '#64748b', fontSize: 13, lineHeight: 1.4, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={declineConfirmAcknowledged}
+                  onChange={(e) => setDeclineConfirmAcknowledged(e.target.checked)}
+                  style={{ width: 16, height: 16, marginTop: 1 }}
+                />
+                <span>I understand this action is final and will notify the reporter</span>
+              </label>
+            </div>
+
+            <div style={{ background: '#f8fafc', borderTop: '1px solid #e2e8f0', padding: '18px 20px', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button type="button" onClick={closeDeclineConfirm} className="dash-btn" style={{ background: '#ffffff', color: '#334155', border: '1px solid #94a3b8', minWidth: 96 }}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeclineComplaint}
+                disabled={loading || !declineConfirmAcknowledged}
+                className="dash-btn dash-btn-danger"
+                style={{ minWidth: 172, opacity: loading || !declineConfirmAcknowledged ? 0.55 : 1, cursor: loading || !declineConfirmAcknowledged ? 'not-allowed' : 'pointer' }}
+              >
+                {loading ? 'Declining…' : 'Confirm Decline'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

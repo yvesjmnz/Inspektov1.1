@@ -64,11 +64,11 @@ export default function MissionOrderHistory({ missionOrdersByDay, expandedCompla
 
         return (
           <div key={`day-card-${dayKey}`} style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 4px 12px rgba(2,6,23,0.08)', overflow: 'hidden' }}>
-            <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none' }}>
+            <div style={{ padding: '18px 24px', background: '#0b2249', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
                 {new Date(dayKey).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
               </h3>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#10b981', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                 <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}></div>
                 <span style={{ color: '#10b981' }}>{count} Completed Mission Order{count !== 1 ? 's' : ''}</span>
               </div>

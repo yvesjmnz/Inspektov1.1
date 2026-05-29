@@ -167,6 +167,8 @@ export default function ComplaintReview() {
 
   const [declineComment, setDeclineComment] = useState('');
   const [declineCommentError, setDeclineCommentError] = useState('');
+  const [declineConfirmOpen, setDeclineConfirmOpen] = useState(false);
+  const [declineConfirmAcknowledged, setDeclineConfirmAcknowledged] = useState(false);
 
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
@@ -370,8 +372,10 @@ export default function ComplaintReview() {
 
       setToast(status === 'approved' ? 'Complaint approved.' : 'Complaint declined.');
       await load();
+      return true;
     } catch (e) {
       showError(e?.message || 'Failed to save decision.');
+      return false;
     } finally {
       setSavingDecision(false);
     }
@@ -400,7 +404,20 @@ export default function ComplaintReview() {
       return;
     }
 
-    await updateComplaintStatus('declined');
+    setDeclineConfirmAcknowledged(false);
+    setDeclineConfirmOpen(true);
+  };
+
+  const closeDeclineConfirm = () => {
+    setDeclineConfirmOpen(false);
+    setDeclineConfirmAcknowledged(false);
+  };
+
+  const confirmReject = async () => {
+    if (!declineConfirmAcknowledged || savingDecision) return;
+    const declined = await updateComplaintStatus('declined');
+    if (!declined) return;
+    closeDeclineConfirm();
     // Navigate back to review complaints after decline
     setTimeout(() => {
       window.location.href = '/dashboard/director?tab=queue';
@@ -1139,6 +1156,95 @@ export default function ComplaintReview() {
           </div>
         </section>
       </main>
+
+      {declineConfirmOpen && complaint ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="decline-confirm-title"
+          onClick={closeDeclineConfirm}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 4000,
+            background: 'rgba(15, 23, 42, 0.48)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 18,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(430px, 94vw)',
+              background: '#ffffff',
+              borderRadius: 4,
+              overflow: 'hidden',
+              boxShadow: '0 24px 60px rgba(15, 23, 42, 0.35)',
+            }}
+          >
+            <div style={{ background: '#c8191f', color: '#ffffff', padding: '18px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3 22 20H2L12 3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                  <path d="M12 9v5M12 17.5v.01" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                </svg>
+                <h2 id="decline-confirm-title" style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Confirm Decline</h2>
+              </div>
+              <button type="button" onClick={closeDeclineConfirm} aria-label="Close decline confirmation" style={{ border: 'none', background: 'transparent', color: '#ffffff', fontSize: 28, lineHeight: 1, cursor: 'pointer', padding: 0 }}>
+                ×
+              </button>
+            </div>
+
+            <div style={{ padding: 20, display: 'grid', gap: 18 }}>
+              <p style={{ margin: 0, color: '#334155', lineHeight: 1.55 }}>
+                You are about to decline this complaint for <strong style={{ color: '#0f172a' }}>{complaint.business_name || 'this business'}</strong>
+                {complaint.id ? <> (ID: #{String(complaint.id).slice(0, 8)})</> : null}.
+              </p>
+
+              <div style={{ border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', borderRadius: 4, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+                  <path d="M12 8v5M12 16.5v.01" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                </svg>
+                <span>This action will notify the reporter and cannot be undone.</span>
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, color: '#64748b', fontSize: 13, lineHeight: 1.4, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={declineConfirmAcknowledged}
+                  onChange={(e) => setDeclineConfirmAcknowledged(e.target.checked)}
+                  style={{ width: 16, height: 16, marginTop: 1 }}
+                />
+                <span>I understand this action is final and will notify the reporter</span>
+              </label>
+            </div>
+
+            <div style={{ background: '#f8fafc', borderTop: '1px solid #e2e8f0', padding: '18px 20px', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button type="button" onClick={closeDeclineConfirm} className="dash-btn" style={{ background: '#ffffff', color: '#334155', border: '1px solid #94a3b8', minWidth: 96 }}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmReject}
+                disabled={savingDecision || !declineConfirmAcknowledged}
+                className="dash-btn"
+                style={{
+                  minWidth: 172,
+                  background: '#c8191f',
+                  color: '#ffffff',
+                  opacity: savingDecision || !declineConfirmAcknowledged ? 0.55 : 1,
+                  cursor: savingDecision || !declineConfirmAcknowledged ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {savingDecision ? 'Declining…' : 'Confirm Decline'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Image Preview Overlay */}
       {previewImage ? (
