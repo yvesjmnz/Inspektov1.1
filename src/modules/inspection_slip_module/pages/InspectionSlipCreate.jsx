@@ -297,6 +297,49 @@ function pickInspectionStarterReport(reports) {
   })[0];
 }
 
+function pickFirstBusinessValue(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (value == null) continue;
+    const normalized = String(value).trim();
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function hasBusinessDetailValue(value) {
+  return String(value ?? '').trim() !== '';
+}
+
+function fillBlankBusinessDetail(currentValue, fallbackValue) {
+  if (hasBusinessDetailValue(currentValue)) return currentValue;
+  if (fallbackValue == null) return currentValue;
+  const normalized = String(fallbackValue).trim();
+  return normalized || currentValue;
+}
+
+function formatBusinessDetailValue(value) {
+  if (value == null) return '';
+  return String(value).trim();
+}
+
+function isSameBusinessRecord(a, b) {
+  if (!a || !b) return false;
+  const aPk = a.business_pk != null ? String(a.business_pk) : '';
+  const bPk = b.business_pk != null ? String(b.business_pk) : '';
+  if (aPk && bPk) return aPk === bPk;
+
+  const aBin = String(a.bin || a.permit_bin || a.business_bin || '').trim().toLowerCase();
+  const bBin = String(b.bin || b.permit_bin || b.business_bin || '').trim().toLowerCase();
+  if (aBin && bBin) return aBin === bBin;
+
+  const aName = String(a.business_name || '').trim().toLowerCase();
+  const bName = String(b.business_name || '').trim().toLowerCase();
+  const aAddress = String(a.business_address || a.address || '').trim().toLowerCase();
+  const bAddress = String(b.business_address || b.address || '').trim().toLowerCase();
+  return !!aName && !!bName && aName === bName && aAddress === bAddress;
+}
+
 function OverviewField({ label, children, fullWidth = false }) {
   return (
     <div
@@ -1074,29 +1117,46 @@ export default function InspectionSlipCreate() {
             const name = String(c.business_name || '').trim();
             const addr = String(c.business_address || '').trim();
 
-            if (name || addr) {
-              const orClauses = [];
-              if (name) orClauses.push(`business_name.ilike.%${name}%`);
-              if (addr) orClauses.push(`business_address.ilike.%${addr}%`);
+            if (!existingReport?.id && (name || addr || c.business_pk)) {
+              let bizMatches = [];
+              let bizError = null;
 
-              if (orClauses.length > 0) {
-                const { data: bizMatches, error: bizError } = await supabase
+              if (c.business_pk) {
+                const exactResult = await supabase
                   .from('businesses')
                   .select('*')
-                  .or(orClauses.join(','))
-                  .limit(5);
+                  .eq('business_pk', c.business_pk)
+                  .limit(1);
+                bizMatches = exactResult.data || [];
+                bizError = exactResult.error;
+              }
 
-                if (!bizError && bizMatches && bizMatches.length > 0) {
-                  setBusinessResult({ matches: bizMatches });
-                  setBusinessSearch(name || addr || '');
-                  // Use the first match to pre-fill fields; inspector can override.
-                  handleUseBusiness(bizMatches[0]);
-                  setAutoFillMessage(
-                    'Autofilled from registered business based on the complained business. Click a result card to change.'
-                  );
-                } else {
-                  setAutoFillMessage('');
+              if (!bizError && bizMatches.length === 0 && (name || addr)) {
+                const orClauses = [];
+                if (name) orClauses.push(`business_name.ilike.%${name}%`);
+                if (addr) orClauses.push(`business_address.ilike.%${addr}%`);
+
+                if (orClauses.length > 0) {
+                  const fuzzyResult = await supabase
+                    .from('businesses')
+                    .select('*')
+                    .or(orClauses.join(','))
+                    .limit(5);
+                  bizMatches = fuzzyResult.data || [];
+                  bizError = fuzzyResult.error;
                 }
+              }
+
+              if (!bizError && bizMatches && bizMatches.length > 0) {
+                setBusinessResult({ matches: bizMatches });
+                setBusinessSearch(name || addr || '');
+                // Use the first match to pre-fill fields; inspector can override.
+                handleUseBusiness(bizMatches[0]);
+                setAutoFillMessage(
+                  'Autofilled from registered business based on the complained business. Click a result card to change.'
+                );
+              } else {
+                setAutoFillMessage('');
               }
             } else {
               setAutoFillMessage('');
@@ -1278,6 +1338,7 @@ export default function InspectionSlipCreate() {
 
   const handleUseBusiness = async (b, nextOwnerType = ownerType) => {
     if (!b) return;
+    const keepCurrentBusinessSpecificValues = isSameBusinessRecord(selectedBusiness, b);
     setSelectedBusiness(b);
     setBusinessResult(null);
 
@@ -1321,77 +1382,186 @@ export default function InspectionSlipCreate() {
     }
     // For Corporation, keep the owner name blank and still autofill the rest.
 
-    const bin = b.bin || b.permit_bin || b.business_bin || '';
+    const bin = pickFirstBusinessValue(b, ['bin', 'permit_bin', 'business_bin']);
+    const estimatedAreaSqm = pickFirstBusinessValue(b, [
+      'estimated_area_sqm',
+      'business_area_sqm',
+      'floor_area_sqm',
+      'area_sqm',
+      'sqm',
+      'business_area',
+      'floor_area',
+      'area',
+    ]);
+    const landline = pickFirstBusinessValue(b, [
+      'landline_no',
+      'landline',
+      'telephone_no',
+      'telephone',
+      'tel_no',
+      'phone_no',
+      'phone',
+    ]);
+    const cellphone = pickFirstBusinessValue(b, [
+      'mobile_number',
+      'mobile_no',
+      'mobile',
+      'cellphone_no',
+      'cellphone',
+      'contact_no',
+      'contact_number',
+    ]);
+    const email = pickFirstBusinessValue(b, ['email', 'email_address', 'business_email']);
+    const numberOfEmployees = pickFirstBusinessValue(b, [
+      'no_of_employees',
+      'number_of_employees',
+      'employee_count',
+      'employees',
+      'total_employees',
+    ]);
+    const address = pickFirstBusinessValue(b, [
+      'address',
+      'business_address',
+      'full_address',
+      'business_address1',
+    ]);
 
     setBusinessDetails((prev) => ({
       ...prev,
-      bin: bin || prev.bin,
-      address:
-        b.address ||
-        b.business_address ||
-        b.full_address ||
-        b.business_address1 ||
-        prev.address,
+      bin: bin || (keepCurrentBusinessSpecificValues ? prev.bin : ''),
+      address: address || (keepCurrentBusinessSpecificValues ? prev.address : ''),
+      estimatedAreaSqm: estimatedAreaSqm || (keepCurrentBusinessSpecificValues ? prev.estimatedAreaSqm : ''),
+      numberOfEmployees: numberOfEmployees || (keepCurrentBusinessSpecificValues ? prev.numberOfEmployees : ''),
+      landline: landline || (keepCurrentBusinessSpecificValues ? prev.landline : ''),
+      cellphone: cellphone || (keepCurrentBusinessSpecificValues ? prev.cellphone : ''),
+      email: email || (keepCurrentBusinessSpecificValues ? prev.email : ''),
     }));
 
     // Pull multi-line LOB + total_employees from businesses_additional based on BIN.
     // LOB should be autofilled for BOTH Sole Proprietor and Corporation.
     try {
       const businessBin = String(b?.bin || bin || '').trim();
-      if (!businessBin) return;
-
-      const { data: addRows, error: addErr } = await supabase
+      const businessName = String(b?.business_name || '').trim();
+      const additionalQuery = supabase
         .from('businesses_additional')
-        .select('line_of_business, total_employees, owner_name')
-        .eq('bin', businessBin);
+        .select('line_of_business, total_employees, owner_name');
 
-      if (addErr) throw addErr;
-      if (!addRows || addRows.length === 0) return;
-
-      const lobs = addRows
-        .flatMap((r) => {
-          const v = r?.line_of_business ?? '';
-          if (typeof v === 'string') {
-            return v
-              .split(/\r?\n|\s*;\s*|\s*,\s*/g)
-              .map((s) => s.trim())
-              .filter(Boolean);
-          }
-          return [];
-        })
-        .filter((val, idx, arr) => arr.indexOf(val) === idx);
-
-      if (lobs.length > 0) {
-        setLineOfBusinessList(lobs);
+      let addRows = [];
+      let addErr = null;
+      if (businessBin) {
+        const result = await additionalQuery.eq('bin', businessBin);
+        addRows = result.data || [];
+        addErr = result.error;
+      } else if (businessName) {
+        const result = await additionalQuery.eq('business_name', businessName);
+        addRows = result.data || [];
+        addErr = result.error;
       }
 
-      // If businesses_additional has an owner_name, use it as a fallback only for Sole Proprietor.
-      if (isSole) {
-        const additionalOwnerName = addRows
-          .map((r) => String(r?.owner_name || '').trim())
-          .find(Boolean);
+      if (addErr) throw addErr;
+      if (!addRows || addRows.length === 0) {
+        if (!keepCurrentBusinessSpecificValues) setLineOfBusinessList(['']);
+      } else {
+        const lobs = addRows
+          .flatMap((r) => {
+            const v = r?.line_of_business ?? '';
+            if (typeof v === 'string') {
+              return v
+                .split(/\r?\n|\s*;\s*|\s*,\s*/g)
+                .map((s) => s.trim())
+                .filter(Boolean);
+            }
+            return [];
+          })
+          .filter((val, idx, arr) => arr.indexOf(val) === idx);
 
-        if (additionalOwnerName) {
-          setOwnerDetails((prev) => ({
+        if (lobs.length > 0) {
+          setLineOfBusinessList(lobs);
+        } else if (!keepCurrentBusinessSpecificValues) {
+          setLineOfBusinessList(['']);
+        }
+
+        // If businesses_additional has an owner_name, use it as a fallback only for Sole Proprietor.
+        if (isSole) {
+          const additionalOwnerName = addRows
+            .map((r) => String(r?.owner_name || '').trim())
+            .find(Boolean);
+
+          if (additionalOwnerName) {
+            setOwnerDetails((prev) => ({
+              ...prev,
+              fullName: prev.fullName || additionalOwnerName,
+            }));
+          }
+        }
+
+        const maxEmployees = addRows
+          .map((r) => Number(r?.total_employees || 0))
+          .filter((n) => Number.isFinite(n) && n > 0)
+          .reduce((m, n) => (n > m ? n : m), 0);
+
+        if (maxEmployees > 0) {
+          setBusinessDetails((prev) => ({
             ...prev,
-            fullName: prev.fullName || additionalOwnerName,
+            numberOfEmployees: keepCurrentBusinessSpecificValues
+              ? prev.numberOfEmployees || String(maxEmployees)
+              : String(maxEmployees),
           }));
         }
       }
-
-      const maxEmployees = addRows
-        .map((r) => Number(r?.total_employees || 0))
-        .filter((n) => Number.isFinite(n) && n > 0)
-        .reduce((m, n) => (n > m ? n : m), 0);
-
-      if (maxEmployees > 0) {
-        setBusinessDetails((prev) => ({
-          ...prev,
-          numberOfEmployees: String(maxEmployees),
-        }));
-      }
     } catch {
       // Silent fail
+    }
+
+    try {
+      let previousQuery = supabase
+        .from('inspection_reports')
+        .select(
+          'mission_order_id, estimated_area_sqm, no_of_employees, landline_no, mobile_no, email_address, updated_at, completed_at'
+        )
+        .eq('status', 'completed')
+        .order('completed_at', { ascending: false, nullsFirst: false })
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (missionOrderId) {
+        previousQuery = previousQuery.neq('mission_order_id', missionOrderId);
+      }
+
+      if (bin) {
+        previousQuery = previousQuery.eq('bin', bin);
+      } else if (b.business_name) {
+        previousQuery = previousQuery.eq('business_name', b.business_name);
+      } else {
+        return;
+      }
+
+      const { data: previousReports, error: previousErr } = await previousQuery;
+      if (previousErr) throw previousErr;
+
+      const previousReport = previousReports?.[0];
+      if (!previousReport) return;
+
+      setBusinessDetails((prev) => ({
+        ...prev,
+        estimatedAreaSqm: keepCurrentBusinessSpecificValues
+          ? fillBlankBusinessDetail(prev.estimatedAreaSqm, previousReport.estimated_area_sqm)
+          : formatBusinessDetailValue(previousReport.estimated_area_sqm),
+        numberOfEmployees: keepCurrentBusinessSpecificValues
+          ? fillBlankBusinessDetail(prev.numberOfEmployees, previousReport.no_of_employees)
+          : formatBusinessDetailValue(previousReport.no_of_employees),
+        landline: keepCurrentBusinessSpecificValues
+          ? fillBlankBusinessDetail(prev.landline, previousReport.landline_no)
+          : formatBusinessDetailValue(previousReport.landline_no),
+        cellphone: keepCurrentBusinessSpecificValues
+          ? fillBlankBusinessDetail(prev.cellphone, previousReport.mobile_no)
+          : formatBusinessDetailValue(previousReport.mobile_no),
+        email: keepCurrentBusinessSpecificValues
+          ? fillBlankBusinessDetail(prev.email, previousReport.email_address)
+          : formatBusinessDetailValue(previousReport.email_address),
+      }));
+    } catch {
+      // Previous inspection reuse is best-effort; registered business autofill remains usable.
     }
   };
 
