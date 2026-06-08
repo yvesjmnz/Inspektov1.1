@@ -719,13 +719,14 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
       };
 
       const created = await submitComplaint(complaintPayload);
+      const complaintReference = created?.complaint_code || created?.id || '';
 
       // Call send-complaint-confirmation edge function (best-effort)
       try {
         await supabase.functions.invoke('send-complaint-confirmation', {
           body: {
             email: formData.reporter_email,
-            complaintId: created?.id,
+            complaintCode: complaintReference,
           },
         });
       } catch (emailErr) {
@@ -733,7 +734,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
         // ignore email errors here; submission is already successful
       }
 
-      window.location.href = `/complaint-confirmation?id=${encodeURIComponent(created?.id ?? '')}`;
+      window.location.href = `/complaint-confirmation?id=${encodeURIComponent(complaintReference)}`;
     } catch (err) {
       showError(err?.message || String(err));
     } finally {

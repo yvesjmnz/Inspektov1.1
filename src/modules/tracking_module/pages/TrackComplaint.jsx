@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
 import { getComplaintTracking } from '../../../lib/complaints';
@@ -117,7 +117,12 @@ function formatComplaintStatusLabel(status) {
 }
 
 export default function TrackComplaint() {
-  const [complaintId, setComplaintId] = useState('');
+  const initialComplaintLookup = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return String(params.get('id') || params.get('code') || '').trim();
+  }, []);
+
+  const [complaintId, setComplaintId] = useState(initialComplaintLookup);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [complaint, setComplaint] = useState(null);
@@ -126,16 +131,44 @@ export default function TrackComplaint() {
   const canSearch = useMemo(() => String(complaintId).trim().length > 0, [complaintId]);
 
   const loadTrackingData = async (rawId) => {
-    const idRaw = String(rawId || '').trim();
-    if (!idRaw) {
+    const complaintLookup = String(rawId || '').trim();
+    if (!complaintLookup) {
       throw new Error('Please enter your complaint ID.');
     }
 
-    const idForQuery = /^\d+$/.test(idRaw) ? Number(idRaw) : idRaw;
-    const data = await getComplaintTracking(idForQuery);
+    const data = await getComplaintTracking(complaintLookup);
     setComplaint(data.complaint);
     setRelated({ missionOrders: data.missionOrders, inspections: data.inspections });
   };
+
+  useEffect(() => {
+    if (!initialComplaintLookup) return;
+
+    let cancelled = false;
+
+    const loadInitialComplaint = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        await loadTrackingData(initialComplaintLookup);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || 'Unable to find this complaint ID.');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadInitialComplaint();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialComplaintLookup]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -183,8 +216,8 @@ export default function TrackComplaint() {
                     id="complaintId"
                     className="track-input"
                     type="text"
-                    inputMode="numeric"
-                    placeholder="e.g., 123"
+                    autoCapitalize="characters"
+                    placeholder="e.g., CMP-000123"
                     value={complaintId}
                     onChange={(e) => setComplaintId(e.target.value)}
                   />
@@ -221,7 +254,7 @@ export default function TrackComplaint() {
                   <div className="track-meta-left">
                     <div className="track-meta-item">
                       <span className="track-meta-label">Complaint ID:</span>
-                      <span className="track-meta-value monospace">{complaint.id}</span>
+                      <span className="track-meta-value monospace">{complaint.complaint_code || complaint.id}</span>
                     </div>
                     <div className="track-meta-item">
                       <span className="track-meta-label">Reported by:</span>

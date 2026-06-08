@@ -7,6 +7,19 @@ const MANILA_CITY_BOUNDS = {
   maxLng: 121.03,
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeComplaintLookup(complaintId) {
+  const lookup = String(complaintId || '').trim().toUpperCase();
+  if (!lookup) return '';
+
+  if (/^\d{1,6}$/.test(lookup)) {
+    return `CMP-${lookup.padStart(6, '0')}`;
+  }
+
+  return lookup;
+}
+
 function isInsideManilaBounds(lat, lng) {
   return (
     typeof lat === 'number' &&
@@ -87,11 +100,14 @@ export async function resolveBusinessJurisdiction(address) {
 }
 
 export async function getComplaintById(complaintId) {
-  const { data, error } = await supabase
+  const lookup = normalizeComplaintLookup(complaintId);
+  const query = supabase
     .from('complaints')
-    .select('*')
-    .eq('id', complaintId)
-    .single();
+    .select('*');
+
+  const { data, error } = UUID_PATTERN.test(lookup)
+    ? await query.eq('id', lookup).single()
+    : await query.eq('complaint_code', lookup).single();
 
   if (error) throw new Error(error.message);
   return data;
@@ -106,7 +122,7 @@ export async function getComplaintTracking(complaintId) {
   const { data: missionOrders, error: moErr } = await supabase
     .from('mission_orders')
     .select('id, status, submitted_at, updated_at, created_at, director_preapproved_at')
-    .eq('complaint_id', complaintId)
+    .eq('complaint_id', complaint.id)
     .order('created_at', { ascending: true });
   if (moErr) throw new Error(moErr.message);
 

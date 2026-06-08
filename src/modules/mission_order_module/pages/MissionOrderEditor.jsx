@@ -49,10 +49,10 @@ function formatDateInputValue(value) {
 }
 
 function formatDateHuman(yyyyMmDd) {
-  if (!yyyyMmDd) return '—';
+  if (!yyyyMmDd) return '-';
   const s = String(yyyyMmDd);
   const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s);
-  if (Number.isNaN(d.getTime())) return '—';
+  if (Number.isNaN(d.getTime())) return '-';
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
@@ -65,7 +65,7 @@ function statusLabel(status) {
   if (s === 'complete' || s === 'completed') return 'Complete';
   if (s === 'rejected') return 'Rejected';
   if (s === 'cancelled' || s === 'canceled') return 'Cancelled';
-  return status || '—';
+  return status || '-';
 }
 
 function statusBadgeClass(status) {
@@ -299,7 +299,7 @@ function KeyTile({ label, value, sub }) {
         {label}
       </div>
       <div style={{ marginTop: 8, fontSize: 18, fontWeight: 900, color: '#0f172a', lineHeight: 1.2 }}>
-        {value || '—'}
+        {value || '-'}
       </div>
       {sub ? <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: '#475569' }}>{sub}</div> : null}
     </div>
@@ -476,7 +476,7 @@ export default function MissionOrderEditor() {
     try {
       await supabase.auth.signOut({ scope: 'global' });
     } catch (e) {
-      setError(e?.message || 'Logout failed. Clearing local session…');
+      setError(e?.message || 'Logout failed. Clearing local session...');
     } finally {
       try {
         localStorage.clear();
@@ -543,7 +543,7 @@ export default function MissionOrderEditor() {
       if (mo?.complaint_id) {
         const { data: c, error: cError } = await supabase
           .from('complaints')
-          .select('id, business_pk, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls, decline_comment')
+          .select('id, complaint_code, business_pk, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls, decline_comment')
           .eq('id', mo.complaint_id)
           .single();
         if (cError) throw cError;
@@ -676,7 +676,7 @@ export default function MissionOrderEditor() {
     const businessPk = complaint?.business_pk ? Number(complaint.business_pk) : null;
     const brgyNo = business?.brgy_no ? String(business.brgy_no) : null;
 
-    // If we don't have primary filters, don’t show stale recommendations.
+    // If we don't have primary filters, don't show stale recommendations.
     if (!businessPk && !brgyNo) {
       setSmartInspectorRows([]);
       return;
@@ -697,7 +697,7 @@ export default function MissionOrderEditor() {
         setSmartInspectorRows(Array.isArray(data) ? data : []);
       } catch (e) {
         if (seq !== smartInspectorsSeqRef.current) return;
-        // Don’t hard-fail the editor if recommendations aren’t available yet (e.g., migration not applied).
+        // Don't hard-fail the editor if recommendations aren't available yet (e.g., migration not applied).
         setSmartInspectorRows([]);
         console.warn('Smart inspector recommendations unavailable:', e);
       } finally {
@@ -977,7 +977,7 @@ export default function MissionOrderEditor() {
           .filter(Boolean)
           .join('\n');
 
-        const complaintDetailsForDocx = `CITY ORDINANCES VIOLATED:\n${ordinancesText || '—'}`;
+        const complaintDetailsForDocx = `CITY ORDINANCES VIOLATED:\n${ordinancesText || '-'}`;
 
         // If signature url points to private storage, attempt to sign. Best-effort.
         let directorSignatureUrl = fresh?.director_signature_url || null;
@@ -1006,7 +1006,7 @@ export default function MissionOrderEditor() {
 
         const blob = await generateMissionOrderDocx({
           templateUrl: signedTemplate.signedUrl,
-          inspectors: assignedInspectorNames || '—',
+          inspectors: assignedInspectorNames || '-',
           date_of_complaint: complaint?.created_at,
           date_of_inspection: fresh.date_of_inspection,
           date_of_issuance: fresh.date_of_issuance,
@@ -1552,11 +1552,11 @@ export default function MissionOrderEditor() {
 
       const complaintDetailsForDocx = ordinancesText
         ? `CITY ORDINANCES VIOLATED:\n${ordinancesText}`
-        : (c?.complaint_description || '—');
+        : (c?.complaint_description || '-');
 
       const blob = await generateMissionOrderDocx({
         templateUrl: signedTemplate.signedUrl,
-        inspectors: assignedInspectorNamesFresh || '—',
+        inspectors: assignedInspectorNamesFresh || '-',
         date_of_complaint: complaint?.created_at,
         date_of_inspection: inspectionDate,
         date_of_issuance: fresh.date_of_issuance,
@@ -1616,7 +1616,7 @@ export default function MissionOrderEditor() {
         setToast(wasUnsigned ? 'Unsigned DOCX ready' : 'Signed DOCX ready');
       }
     } catch (e) {
-      // When auto-regenerating, don’t block the user with errors unless they explicitly clicked.
+      // When auto-regenerating, don't block the user with errors unless they explicitly clicked.
       if (!silent) setError(e?.message || 'Failed to generate DOCX.');
       if (!silent) setToast('');
     } finally {
@@ -1638,7 +1638,7 @@ export default function MissionOrderEditor() {
       autoRegenTimerRef.current = null;
     }
 
-    setToast('Updating document…');
+    setToast('Updating document...');
 
     autoRegenTimerRef.current = setTimeout(async () => {
       autoRegenTimerRef.current = null;
@@ -1916,7 +1916,7 @@ export default function MissionOrderEditor() {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 1000, fontSize: 20, color: '#0f172a' }}>Mission Order</div>
                     <div style={{ color: '#475569', fontWeight: 800, marginTop: 6, fontSize: 14 }}>
-                      {complaint?.business_name || '—'}
+                      {complaint?.business_name || '-'}
                     </div>
                     {null}
                   </div>
@@ -1932,7 +1932,7 @@ export default function MissionOrderEditor() {
                         disabled={loading || savingDecision || !missionOrder}
                         style={{ background: '#16a34a', color: '#fff', border: '1px solid #16a34a' }}
                       >
-                        {savingDecision ? 'Saving…' : 'Approve'}
+                        {savingDecision ? 'Saving...' : 'Approve'}
                       </button>
                       <button
                         type="button"
@@ -1941,7 +1941,7 @@ export default function MissionOrderEditor() {
                         disabled={loading || savingDecision || !missionOrder}
                         style={{ background: '#dc2626', color: '#fff', border: '1px solid #dc2626' }}
                       >
-                        {savingDecision ? 'Saving…' : 'Reject'}
+                        {savingDecision ? 'Saving...' : 'Reject'}
                       </button>
                     </>
                   ) : (canHeadInspectorSubmit ? (
@@ -1962,7 +1962,7 @@ export default function MissionOrderEditor() {
                                 : 'Submit to Director'
                         }
                       >
-                        {submitting ? 'Submitting…' : 'Submit'}
+                        {submitting ? 'Submitting...' : 'Submit'}
                       </button>
                     </>
                   ) : null)}
@@ -2132,8 +2132,8 @@ export default function MissionOrderEditor() {
                       {statusLabel(missionOrder?.status)}
                     </span>
                   </div>
-                  <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{assignedInspectorNames || '—'}</div>
-                  <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{dateOfInspection ? formatDateHuman(dateOfInspection) : '—'}</div>
+                  <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{assignedInspectorNames || '-'}</div>
+                  <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{dateOfInspection ? formatDateHuman(dateOfInspection) : '-'}</div>
                   <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 14 }}>{missionOrder?.date_of_issuance ? formatDateHuman(missionOrder.date_of_issuance) : 'N/A'}</div>
                   {isComplete ? (
                     <div style={{ minWidth: 0 }}>
@@ -2197,7 +2197,7 @@ export default function MissionOrderEditor() {
                       ))}
                     </div>
                   ) : (
-                    <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>—</span>
+                    <span style={{ color: '#fff', fontWeight: 900, fontSize: 14 }}>-</span>
                   )}
                 </div>
 
@@ -2317,7 +2317,7 @@ export default function MissionOrderEditor() {
                                 onClick={() => removeInspector(id)}
                                 disabled={loading}
                               >
-                                ×
+                                x
                               </button>
                             ) : null}
                           </span>
@@ -2343,7 +2343,7 @@ export default function MissionOrderEditor() {
                             }
                           }}
                           disabled={loading}
-                          placeholder={assignedInspectorIds.length ? 'Add more…' : 'Search inspectors…'}
+                          placeholder={assignedInspectorIds.length ? 'Add more...' : 'Search inspectors...'}
                           aria-label="Search inspectors"
                         />
                       ) : null}
@@ -2353,7 +2353,7 @@ export default function MissionOrderEditor() {
                         if (isReadOnly || !inspectorDropdownOpen) return null;
 
                         const availableInspectors = inspectors.filter((ins) => !assignedInspectorIds.includes(ins.id));
-                        // If all inspectors are already selected, don’t show an empty dropdown.
+                        // If all inspectors are already selected, don't show an empty dropdown.
                         if (availableInspectors.length === 0) return null;
 
                         const q = inspectorQuery.trim().toLowerCase();
@@ -2532,7 +2532,7 @@ export default function MissionOrderEditor() {
                             style={{ fontSize: 14, fontWeight: 1000 }}
                           >
                             <span className="mo-chip-label">{label}</span>
-                            {!isReadOnly ? <span aria-hidden="true" className="mo-chip-x">×</span> : null}
+                            {!isReadOnly ? <span aria-hidden="true" className="mo-chip-x">x</span> : null}
                           </button>
                         );
                       })}
@@ -2555,7 +2555,7 @@ export default function MissionOrderEditor() {
                               }
                             }}
                             disabled={loading}
-                            placeholder={assignedOrdinanceIds.length ? 'Add more…' : 'Search ordinances…'}
+                            placeholder={assignedOrdinanceIds.length ? 'Add more...' : 'Search ordinances...'}
                             aria-label="Search ordinances"
                           />
 
@@ -2710,7 +2710,7 @@ export default function MissionOrderEditor() {
                               : 'Available during draft or after approval.'
                           }
                         >
-                          {generatingDocx ? 'Generating…' : missionOrder?.generated_docx_url ? 'Regenerate DOCX' : 'Generate DOCX'}
+                          {generatingDocx ? 'Generating...' : missionOrder?.generated_docx_url ? 'Regenerate DOCX' : 'Generate DOCX'}
                         </button>
                       ) : null}
 
@@ -2752,13 +2752,13 @@ export default function MissionOrderEditor() {
                           <span style={{ fontSize: 11, fontWeight: 800, color: '#334155' }}>
                             {complaint?.created_at
                               ? `${new Date(complaint.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} | ${new Date(complaint.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
-                              : '—'}
+                              : '-'}
                           </span>
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', columnGap: 8, alignItems: 'baseline' }}>
                           <span style={{ fontSize: 10, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>Email</span>
                           <span style={{ fontSize: 11, fontWeight: 800, color: '#334155', wordBreak: 'break-word' }}>
-                            {complaint?.reporter_email || '—'}
+                            {complaint?.reporter_email || '-'}
                           </span>
                         </div>
                       </div>
@@ -2769,14 +2769,14 @@ export default function MissionOrderEditor() {
                           type="button"
                           onClick={async () => {
                             try {
-                              await navigator.clipboard.writeText(String(complaint.id));
-                              setToast('Complaint ID copied');
+                              await navigator.clipboard.writeText(String(complaint.complaint_code || complaint.id));
+                              setToast('ID copied');
                             } catch {
                               setToast('Failed to copy');
                             }
                           }}
-                          title="Copy complaint ID"
-                          aria-label="Copy complaint ID"
+                          title="Copy ID"
+                          aria-label="Copy ID"
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
@@ -2794,7 +2794,7 @@ export default function MissionOrderEditor() {
                           }}
                         >
                           <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
-                            {String(complaint.id).slice(0, 8)}…
+                            {complaint.complaint_code || `${String(complaint.id).slice(0, 8)}...`}
                           </span>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
                             <path d="M16 1H6a2 2 0 0 0-2 2v12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -2808,14 +2808,14 @@ export default function MissionOrderEditor() {
                       <div style={{ paddingBottom: 6 }}>
                         <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6 }}>Business Name</div>
                         <div style={{ marginTop: 6, fontWeight: 900, color: '#0f172a', fontSize: 14 }}>
-                          {complaint?.business_name || '—'}
+                          {complaint?.business_name || '-'}
                         </div>
                       </div>
 
                       <div style={{ paddingBottom: 6 }}>
                         <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6 }}>Business Address</div>
                         <div style={{ marginTop: 6, fontWeight: 800, color: '#334155', fontSize: 13, lineHeight: 1.4 }}>
-                          {complaint?.business_address || '—'}
+                          {complaint?.business_address || '-'}
                         </div>
                       </div>
 
@@ -2824,13 +2824,13 @@ export default function MissionOrderEditor() {
                         {(() => {
                           const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
                           if (!groups.length) {
-                            return <div style={{ marginTop: 6, fontWeight: 800, color: '#334155', fontSize: 13, lineHeight: 1.4 }}>—</div>;
+                            return <div style={{ marginTop: 6, fontWeight: 800, color: '#334155', fontSize: 13, lineHeight: 1.4 }}>-</div>;
                           }
 
                           return (
                             <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: '#334155' }}>
                               {groups.map((g) => {
-                                const category = g?.category || '—';
+                                const category = g?.category || '-';
                                 const subs = Array.isArray(g?.subs) ? g.subs.filter(Boolean) : [];
                                 return (
                                   <li key={category} style={{ margin: '4px 0' }}>
@@ -2857,7 +2857,7 @@ export default function MissionOrderEditor() {
                       <div style={{ paddingTop: 6 }}>
                         <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6 }}>Complaint Details</div>
                         <div style={{ marginTop: 10, fontWeight: 500, color: '#334155', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                          {complaint?.complaint_description || '—'}
+                          {complaint?.complaint_description || '-'}
                         </div>
                       </div>
 
@@ -2879,7 +2879,7 @@ export default function MissionOrderEditor() {
                             ))}
                           </div>
                         ) : (
-                          <div style={{ marginTop: 8, fontWeight: 700, color: '#94a3b8', fontSize: 13 }}>—</div>
+                          <div style={{ marginTop: 8, fontWeight: 700, color: '#94a3b8', fontSize: 13 }}>-</div>
                         )}
                       </div>
 
@@ -2943,7 +2943,7 @@ export default function MissionOrderEditor() {
                             padding: 0,
                           }}
                         >
-                          ×
+                          x
                         </button>
                         <img
                           src={evidencePreviewUrl}
@@ -3079,7 +3079,7 @@ export default function MissionOrderEditor() {
                 </div>
               </div>
 
-              {loading ? <div style={{ marginTop: 12, color: '#64748b', fontWeight: 800 }}>Loading…</div> : null}
+              {loading ? <div style={{ marginTop: 12, color: '#64748b', fontWeight: 800 }}>Loading...</div> : null}
             </div>
           </div>
         </section>
@@ -3087,3 +3087,4 @@ export default function MissionOrderEditor() {
     </div>
   );
 }
+

@@ -246,6 +246,7 @@ export default function InspectorInspectionDetails() {
             .select(
               [
                 'id',
+                'complaint_code',
                 'business_name',
                 'business_address',
                 'complaint_description',
@@ -352,20 +353,20 @@ export default function InspectorInspectionDetails() {
             <div className="dash-tile">
               <h3>Mission Order</h3>
               <div className="dash-cell-sub" style={{ marginTop: 6 }}>
-                <strong>ID:</strong> {missionOrderId ? `${String(missionOrderId).slice(0, 8)}…` : '—'}
+                <strong>ID:</strong> {missionOrderId ? String(missionOrderId).slice(0, 8) + '...' : '-'}
               </div>
               <div className="dash-cell-sub">
                 <strong>Status:</strong>{' '}
                 <span className={statusBadgeClass(missionOrder?.status)}>{formatStatus(missionOrder?.status)}</span>
               </div>
               <div className="dash-cell-sub">
-                <strong>Title:</strong> {missionOrder?.title || '—'}
+                <strong>Title:</strong> {missionOrder?.title || '-'}
               </div>
               <div className="dash-cell-sub">
-                <strong>Submitted:</strong> {missionOrder?.submitted_at ? new Date(missionOrder.submitted_at).toLocaleString() : '—'}
+                <strong>Submitted:</strong> {missionOrder?.submitted_at ? new Date(missionOrder.submitted_at).toLocaleString() : '-'}
               </div>
               <div className="dash-cell-sub">
-                <strong>Updated:</strong> {missionOrder?.updated_at ? new Date(missionOrder.updated_at).toLocaleString() : '—'}
+                <strong>Updated:</strong> {missionOrder?.updated_at ? new Date(missionOrder.updated_at).toLocaleString() : '-'}
               </div>
 
               <div className="dash-note" style={{ marginTop: 12 }}>
@@ -387,23 +388,23 @@ export default function InspectorInspectionDetails() {
             <div className="dash-tile">
               <h3>Business / Complaint Details</h3>
               <div className="dash-cell-sub" style={{ marginTop: 6 }}>
-                <strong>Business Name:</strong> {complaint?.business_name || '—'}
+                <strong>Business Name:</strong> {complaint?.business_name || '-'}
               </div>
               <div className="dash-cell-sub">
-                <strong>Address:</strong> {complaint?.business_address || '—'}
+                <strong>Address:</strong> {complaint?.business_address || '-'}
               </div>
               <div className="dash-cell-sub">
-                <strong>Reporter Email:</strong> {complaint?.reporter_email || '—'}
+                <strong>Reporter Email:</strong> {complaint?.reporter_email || '-'}
               </div>
               <div className="dash-cell-sub">
-                <strong>Complaint ID:</strong> {complaint?.id ? `${String(complaint.id).slice(0, 8)}…` : '—'}
+                <strong>ID:</strong> {complaint?.complaint_code || (complaint?.id ? String(complaint.id).slice(0, 8) + '...' : '-')}
               </div>
               <div className="dash-cell-sub">
                 <strong>Complaint Status:</strong>{' '}
                 <span className={statusBadgeClass(complaint?.status)}>{formatStatus(complaint?.status)}</span>
               </div>
               <div className="dash-cell-sub">
-                <strong>Submitted:</strong> {complaint?.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}
+                <strong>Submitted:</strong> {complaint?.created_at ? new Date(complaint.created_at).toLocaleString() : '-'}
               </div>
 
               <h4 style={{ marginTop: 14, marginBottom: 8, color: '#0f172a' }}>Complaint Description</h4>
@@ -416,7 +417,7 @@ export default function InspectorInspectionDetails() {
                   whiteSpace: 'pre-wrap',
                 }}
               >
-                {complaint?.complaint_description || '—'}
+                {complaint?.complaint_description || '-'}
               </div>
             </div>
 
@@ -441,7 +442,7 @@ export default function InspectorInspectionDetails() {
           </div>
 
           <div className="dash-note" style={{ marginTop: 14 }}>
-            {loading ? 'Loading…' : ' '}
+            {loading ? 'Loading...' : ' '}
           </div>
         </section>
       </main>
@@ -449,3 +450,4 @@ export default function InspectorInspectionDetails() {
     </div>
   );
 }
+

@@ -290,6 +290,7 @@ export async function generateInspectionSlipDocx({
   date_of_inspection,
   time_of_inspection,
   inspection_report_id,
+  control_number,
   bin,
   business_address,
   estimated_area_sqm,
@@ -404,6 +405,8 @@ export async function generateInspectionSlipDocx({
   const businessPermitDisplay = formatChecklistStatus(business_permit_status);
   const cctvStatusDisplay = formatChecklistStatus(cctv_status);
   const signageStatusDisplay = formatChecklistStatus(signage_status);
+  const controlNumberDisplay = safeText(control_number) || safeText(inspection_report_id) || '-';
+  const rawInspectionReportIdDisplay = safeText(inspection_report_id) || '-';
 
   const owner = safeText(owner_name) || '—';
   const truncatedBusinessAddress = truncateAddressAtNcr(business_address);
@@ -424,8 +427,14 @@ export async function generateInspectionSlipDocx({
     date_of_inspection: humanDate(date_of_inspection),
     time_of_inspection: humanTime(time_of_inspection),
 
-    inspection_report_id: safeText(inspection_report_id) || '—',
-    report_id: safeText(inspection_report_id) || '—',
+    inspection_report_id: controlNumberDisplay,
+    report_id: controlNumberDisplay,
+    control_number: controlNumberDisplay,
+    control_no: controlNumberDisplay,
+    complaint_code: controlNumberDisplay,
+    public_complaint_id: controlNumberDisplay,
+    raw_inspection_report_id: rawInspectionReportIdDisplay,
+    original_inspection_report_id: rawInspectionReportIdDisplay,
 
     // Contact / identifiers
     bin: safeText(bin) || '—',

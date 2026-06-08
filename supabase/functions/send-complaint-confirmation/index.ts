@@ -3,7 +3,8 @@ import { sendMail } from "../_shared/smtp.ts";
 
 type RequestBody = {
   email: string;
-  complaintId: string;
+  complaintCode?: string;
+  complaintId?: string;
 };
 
 function json(status: number, body: unknown) {
@@ -43,10 +44,10 @@ Deno.serve(async (req) => {
   }
 
   const email = (body.email || "").trim().toLowerCase();
-  const complaintId = (body.complaintId || "").trim();
+  const complaintCode = (body.complaintCode || body.complaintId || "").trim();
 
   if (!isValidEmail(email)) return json(400, { error: "Invalid email" });
-  if (!complaintId) return json(400, { error: "Missing complaint ID" });
+  if (!complaintCode) return json(400, { error: "Missing complaint ID" });
 
   const smtpUser = Deno.env.get("GMAIL_SMTP_USERNAME");
   const smtpPass = Deno.env.get("GMAIL_SMTP_APP_PASSWORD");
@@ -57,7 +58,7 @@ Deno.serve(async (req) => {
   if (!appBaseUrl) return json(500, { error: "Missing APP_BASE_URL" });
 
   const supportEmail = Deno.env.get("SUPPORT_EMAIL") || "support@inspekto.local";
-  const trackingUrl = `${appBaseUrl.replace(/\/$/, "")}/tracking?id=${encodeURIComponent(complaintId)}`;
+  const trackingUrl = `${appBaseUrl.replace(/\/$/, "")}/track-complaint?id=${encodeURIComponent(complaintCode)}`;
 
   const subject = "Inspekto: Your complaint has been submitted";
 
@@ -83,7 +84,7 @@ Deno.serve(async (req) => {
 
           <div style="background:#f1f5f9;border-left:4px solid #2563eb;padding:14px 16px;margin:18px 0;border-radius:4px;">
             <div style="font-size:12px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Your Complaint ID</div>
-            <div style="font-size:18px;font-weight:700;color:#0f172a;font-family:'Courier New',monospace;letter-spacing:1px;">${complaintId}</div>
+            <div style="font-size:18px;font-weight:700;color:#0f172a;font-family:'Courier New',monospace;letter-spacing:1px;">${complaintCode}</div>
           </div>
 
           <p style="margin:0 0 14px 0;font-size:14px;color:#334155;">

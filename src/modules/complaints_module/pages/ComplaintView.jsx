@@ -104,7 +104,7 @@ export default function ComplaintView() {
                     <span className="status-badge status-warning" title="Urgency">{complaint?.authenticity_level ?? '—'}</span>
                     <span className="status-badge" title="Status">{formatStatus(complaint.status)}</span>
                   </div>
-                  <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>ID:</strong> {complaint.id}</div>
+                  <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>ID:</strong> {complaint.complaint_code || complaint.id}</div>
                   <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>Submitted:</strong> {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : '—'}</div>
                   <div style={{ color: '#64748b', fontWeight: 700 }}><strong style={{ color: '#0f172a' }}>Updated:</strong> {complaint.updated_at ? new Date(complaint.updated_at).toLocaleString() : '—'}</div>
                 </div>
@@ -181,4 +181,3 @@ export default function ComplaintView() {
     </div>
   );
 }
-

@@ -152,6 +152,12 @@ function formatDatePipe(isoString) {
   return `${datePart} | ${timePart}`;
 }
 
+function getPublicComplaintId(complaint) {
+  if (complaint?.complaint_code) return complaint.complaint_code;
+  if (complaint?.id) return `${String(complaint.id).slice(0, 8)}…`;
+  return '—';
+}
+
 export default function ComplaintReview() {
   const complaintId = useMemo(() => getComplaintIdFromQuery(), []);
 
@@ -187,8 +193,9 @@ export default function ComplaintReview() {
   }, []);
 
   const handleCopyId = () => {
-    if (complaint?.id) {
-      navigator.clipboard.writeText(complaint.id);
+    const complaintPublicId = getPublicComplaintId(complaint);
+    if (complaintPublicId && complaintPublicId !== '—') {
+      navigator.clipboard.writeText(complaintPublicId);
     }
   };
 
@@ -615,10 +622,10 @@ export default function ComplaintReview() {
                                 fontSize: 11,
                                 cursor: 'pointer',
                               }}
-                              title="Click to copy Complaint ID"
+                              title="Click to copy ID"
                             >
                               <span style={{ fontSize: 9, fontWeight: 1000, color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>ID</span>
-                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{complaint?.id ? String(complaint.id).slice(0, 8) + '…' : '—'}</span>
+                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{getPublicComplaintId(complaint)}</span>
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }} aria-hidden="true">
                                 <path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                               </svg>
@@ -1200,7 +1207,7 @@ export default function ComplaintReview() {
             <div style={{ padding: 20, display: 'grid', gap: 18 }}>
               <p style={{ margin: 0, color: '#334155', lineHeight: 1.55 }}>
                 You are about to decline this complaint for <strong style={{ color: '#0f172a' }}>{complaint.business_name || 'this business'}</strong>
-                {complaint.id ? <> (ID: #{String(complaint.id).slice(0, 8)})</> : null}.
+                {complaint?.id ? <> (ID: {getPublicComplaintId(complaint)})</> : null}.
               </p>
 
               <div style={{ border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', borderRadius: 4, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
@@ -1376,3 +1383,4 @@ export default function ComplaintReview() {
     </div>
   );
 }
+

@@ -427,7 +427,7 @@ export default function InspectionSlipReview() {
           if (mo?.complaint_id) {
             const { data: c, error: cErr } = await supabase
               .from('complaints')
-              .select('id, business_name, business_address, complaint_description, reporter_email, created_at, status, tags')
+              .select('id, complaint_code, business_name, business_address, complaint_description, reporter_email, created_at, status, tags')
               .eq('id', mo.complaint_id)
               .single();
 
@@ -666,6 +666,8 @@ export default function InspectionSlipReview() {
         }
       }
 
+      const complaintControlNumber = complaint?.complaint_code || complaint?.id || freshReport?.id;
+
       const blob = await generateInspectionSlipDocx({
         templateUrl,
 
@@ -674,6 +676,7 @@ export default function InspectionSlipReview() {
         date_of_inspection: dateOfInspection,
         time_of_inspection: timeOfInspection,
         inspection_report_id: freshReport?.id,
+        control_number: complaintControlNumber,
 
         bin: freshReport?.bin,
         business_address: freshReport?.business_address,
