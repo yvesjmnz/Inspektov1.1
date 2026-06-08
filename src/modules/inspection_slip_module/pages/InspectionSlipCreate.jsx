@@ -84,6 +84,48 @@ const VIOLATION_FINDING_OPTIONS = [
   { key: 'no_violation', label: 'No Violation Found', text: 'No Violation Found' },
 ];
 
+const BUSINESS_BIN_KEYS = ['bin', 'permit_bin', 'business_bin'];
+const BUSINESS_ADDRESS_KEYS = ['address', 'business_address', 'full_address', 'business_address1'];
+const BUSINESS_ESTIMATED_AREA_KEYS = [
+  'estimated_area_sqm',
+  'estimated_area',
+  'business_area_sqm',
+  'floor_area_sqm',
+  'area_sqm',
+  'sqm',
+  'business_area',
+  'floor_area',
+  'area',
+];
+const BUSINESS_LANDLINE_KEYS = [
+  'landline_no',
+  'landline_number',
+  'landline',
+  'telephone_no',
+  'telephone',
+  'tel_no',
+  'phone_no',
+  'phone',
+];
+const BUSINESS_MOBILE_KEYS = [
+  'mobile_number',
+  'mobile_no',
+  'mobile',
+  'cellphone_no',
+  'cellphone',
+  'contact_no',
+  'contact_number',
+];
+const BUSINESS_EMAIL_KEYS = ['email', 'email_address', 'business_email'];
+const BUSINESS_EMPLOYEE_COUNT_KEYS = [
+  'no_of_employees',
+  'employee_no',
+  'number_of_employees',
+  'employee_count',
+  'employees',
+  'total_employees',
+];
+
 function parseInspectionComments(value) {
   const raw = String(value || '');
   const legacyMatch = raw.match(
@@ -329,14 +371,14 @@ function isSameBusinessRecord(a, b) {
   const bPk = b.business_pk != null ? String(b.business_pk) : '';
   if (aPk && bPk) return aPk === bPk;
 
-  const aBin = String(a.bin || a.permit_bin || a.business_bin || '').trim().toLowerCase();
-  const bBin = String(b.bin || b.permit_bin || b.business_bin || '').trim().toLowerCase();
+  const aBin = pickFirstBusinessValue(a, BUSINESS_BIN_KEYS).toLowerCase();
+  const bBin = pickFirstBusinessValue(b, BUSINESS_BIN_KEYS).toLowerCase();
   if (aBin && bBin) return aBin === bBin;
 
   const aName = String(a.business_name || '').trim().toLowerCase();
   const bName = String(b.business_name || '').trim().toLowerCase();
-  const aAddress = String(a.business_address || a.address || '').trim().toLowerCase();
-  const bAddress = String(b.business_address || b.address || '').trim().toLowerCase();
+  const aAddress = pickFirstBusinessValue(a, BUSINESS_ADDRESS_KEYS).toLowerCase();
+  const bAddress = pickFirstBusinessValue(b, BUSINESS_ADDRESS_KEYS).toLowerCase();
   return !!aName && !!bName && aName === bName && aAddress === bAddress;
 }
 
@@ -458,7 +500,6 @@ export default function InspectionSlipCreate() {
   // Only used when "Business Signage" is marked Compliant.
   const [signage_sqm, setSignageSqm] = useState('');
 
-  const COMMENTS_MAX = 500;
   const [complianceStatus, setComplianceStatus] = useState('');
   const [additionalComments, setAdditionalComments] = useState('');
 
@@ -1382,49 +1423,13 @@ export default function InspectionSlipCreate() {
     }
     // For Corporation, keep the owner name blank and still autofill the rest.
 
-    const bin = pickFirstBusinessValue(b, ['bin', 'permit_bin', 'business_bin']);
-    const estimatedAreaSqm = pickFirstBusinessValue(b, [
-      'estimated_area_sqm',
-      'business_area_sqm',
-      'floor_area_sqm',
-      'area_sqm',
-      'sqm',
-      'business_area',
-      'floor_area',
-      'area',
-    ]);
-    const landline = pickFirstBusinessValue(b, [
-      'landline_no',
-      'landline',
-      'telephone_no',
-      'telephone',
-      'tel_no',
-      'phone_no',
-      'phone',
-    ]);
-    const cellphone = pickFirstBusinessValue(b, [
-      'mobile_number',
-      'mobile_no',
-      'mobile',
-      'cellphone_no',
-      'cellphone',
-      'contact_no',
-      'contact_number',
-    ]);
-    const email = pickFirstBusinessValue(b, ['email', 'email_address', 'business_email']);
-    const numberOfEmployees = pickFirstBusinessValue(b, [
-      'no_of_employees',
-      'number_of_employees',
-      'employee_count',
-      'employees',
-      'total_employees',
-    ]);
-    const address = pickFirstBusinessValue(b, [
-      'address',
-      'business_address',
-      'full_address',
-      'business_address1',
-    ]);
+    const bin = pickFirstBusinessValue(b, BUSINESS_BIN_KEYS);
+    const estimatedAreaSqm = pickFirstBusinessValue(b, BUSINESS_ESTIMATED_AREA_KEYS);
+    const landline = pickFirstBusinessValue(b, BUSINESS_LANDLINE_KEYS);
+    const cellphone = pickFirstBusinessValue(b, BUSINESS_MOBILE_KEYS);
+    const email = pickFirstBusinessValue(b, BUSINESS_EMAIL_KEYS);
+    const numberOfEmployees = pickFirstBusinessValue(b, BUSINESS_EMPLOYEE_COUNT_KEYS);
+    const address = pickFirstBusinessValue(b, BUSINESS_ADDRESS_KEYS);
 
     setBusinessDetails((prev) => ({
       ...prev,
@@ -1588,8 +1593,7 @@ export default function InspectionSlipCreate() {
     setComplianceStatus((prev) => (prev === nextStatus ? prev : nextStatus));
     setAdditionalComments((prev) => {
       const nextComments = nextStatus ? upsertComplianceTag(nextStatus, prev) : stripComplianceTag(prev);
-      const clipped = nextComments.slice(0, COMMENTS_MAX);
-      return clipped === prev ? prev : clipped;
+      return nextComments === prev ? prev : nextComments;
     });
   }, [checklist, complianceStatus, additionalComments]);
 
@@ -1681,8 +1685,7 @@ export default function InspectionSlipCreate() {
 
     currentStatuses[ordinanceLabel] = currentStatuses[ordinanceLabel] === nextStatus ? '' : nextStatus;
 
-    const rebuiltComments = rebuildRemarksWithViolationFindings(additionalComments, ordinanceLabels, currentStatuses);
-    const nextComments = rebuiltComments.slice(0, COMMENTS_MAX);
+    const nextComments = rebuildRemarksWithViolationFindings(additionalComments, ordinanceLabels, currentStatuses);
     setAdditionalComments(nextComments);
 
     if (shouldRestoreCommentCursor) {
@@ -3512,7 +3515,7 @@ export default function InspectionSlipCreate() {
                             className={complianceStatus === option ? 'mo-btn mo-btn-primary mo-btn--sm' : 'mo-btn mo-btn-secondary mo-btn--sm'}
                             onClick={() => {
                               setComplianceStatus(option);
-                              setAdditionalComments((prev) => upsertComplianceTag(option, prev).slice(0, COMMENTS_MAX));
+                              setAdditionalComments((prev) => upsertComplianceTag(option, prev));
                             }}
                             aria-pressed={complianceStatus === option}
                             title={`Set compliance status to ${option}`}
@@ -3587,10 +3590,7 @@ export default function InspectionSlipCreate() {
                         <textarea
                           ref={commentsTextareaRef}
                           value={additionalComments}
-                          onChange={(e) => {
-                            const next = String(e.target.value || '').slice(0, COMMENTS_MAX);
-                            setAdditionalComments(next);
-                          }}
+                          onChange={(e) => setAdditionalComments(String(e.target.value || ''))}
                           rows={7}
                           placeholder="Type any specific findings or recommendations here…"
                           style={{
@@ -3624,7 +3624,7 @@ export default function InspectionSlipCreate() {
                             borderRadius: 999,
                           }}
                         >
-                          {String(additionalComments || '').length} / {COMMENTS_MAX}
+                          {String(additionalComments || '').length} characters
                         </div>
                       </div>
                     </div>
@@ -3799,7 +3799,7 @@ export default function InspectionSlipCreate() {
                         {additionalComments?.trim() ? additionalComments : '—'}
                       </div>
                       <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800, color: '#94a3b8' }}>
-                        {String(additionalComments || '').length} / {COMMENTS_MAX}
+                        {String(additionalComments || '').length} characters
                       </div>
                     </div>
 
