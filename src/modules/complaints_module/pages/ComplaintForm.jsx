@@ -4,6 +4,7 @@ import L from 'leaflet';
 import { submitComplaint, getBusinesses, uploadImage, resolveBusinessJurisdiction } from '../../../lib/complaints';
 import { supabase } from '../../../lib/supabase';
 import { getNearbyBusinesses, formatDistance } from '../../../lib/complaints/nearbyBusinesses';
+import { getBusinessDisplayName, getBusinessSecondaryName } from '../../../lib/businessNames';
 import Header from '../../../components/Header.jsx';
 import Footer from '../../../components/Footer.jsx';
 import Stepper from '../../../components/Stepper.jsx';
@@ -231,8 +232,9 @@ export default function ComplaintForm({ verifiedEmail }) {
       const needle = q.toLowerCase();
       const filtered = (nearbyBusinessesCache || []).filter((b) => {
         const name = String(b.business_name || '').toLowerCase();
+        const marketedName = String(b.marketed_name || '').toLowerCase();
         const addr = String(b.business_address || '').toLowerCase();
-        return name.includes(needle) || addr.includes(needle);
+        return name.includes(needle) || marketedName.includes(needle) || addr.includes(needle);
       });
       setBusinesses(filtered);
       setShowBusinessList(true);
@@ -273,13 +275,14 @@ export default function ComplaintForm({ verifiedEmail }) {
   };
 
   const selectBusiness = (business, source = 'initial') => {
+    const displayName = getBusinessDisplayName(business) || business.business_name || '';
     setBusinessNotInDb(false);
     setManualJurisdictionCheck(EMPTY_MANUAL_JURISDICTION);
 
     setFormData((prev) => ({
       ...prev,
       business_pk: business.business_pk,
-      business_name: business.business_name,
+      business_name: displayName,
       business_address: business.business_address,
     }));
 
@@ -289,10 +292,10 @@ export default function ComplaintForm({ verifiedEmail }) {
     if (source === 'initial') {
       setFirstSearchDone(true);
       setSearchQuery('');
-      setNameSearchQuery(business.business_name || '');
+      setNameSearchQuery(displayName);
     } else {
       // source === 'name'
-      setNameSearchQuery(business.business_name || '');
+      setNameSearchQuery(displayName);
     }
   };
 
@@ -964,7 +967,7 @@ export default function ComplaintForm({ verifiedEmail }) {
         setFormData((prev) => ({
           ...prev,
           business_pk: match.business_pk,
-          business_name: match.business_name,
+          business_name: getBusinessDisplayName(match) || match.business_name,
           business_address: match.business_address,
         }));
         // Exit "Business not listed" mode since we found a match
@@ -1115,6 +1118,7 @@ export default function ComplaintForm({ verifiedEmail }) {
       const mergedTags = Array.from(new Set([...(formData.tags || []), ...violationTags]));
 
       const complaintPayload = {
+        business_pk: formData.business_pk || null,
         business_name: formData.business_name,
         business_address: formData.business_address,
         complaint_description: formData.complaint_description,
@@ -1299,7 +1303,10 @@ export default function ComplaintForm({ verifiedEmail }) {
                             className="business-item"
                             onClick={() => selectBusiness(business, 'initial')}
                           >
-                            <div className="business-name">{business.business_name}</div>
+                            <div className="business-name">{getBusinessDisplayName(business) || business.business_name}</div>
+                            {getBusinessSecondaryName(business) ? (
+                              <div className="business-address">Legal name: {getBusinessSecondaryName(business)}</div>
+                            ) : null}
                             <div className="business-address">{business.business_address}</div>
                           </div>
                         ))}
@@ -1358,7 +1365,10 @@ export default function ComplaintForm({ verifiedEmail }) {
                             className="business-item"
                             onClick={() => selectBusiness(business, 'name')}
                           >
-                            <div className="business-name">{business.business_name}</div>
+                            <div className="business-name">{getBusinessDisplayName(business) || business.business_name}</div>
+                            {getBusinessSecondaryName(business) ? (
+                              <div className="business-address">Legal name: {getBusinessSecondaryName(business)}</div>
+                            ) : null}
                             <div className="business-address">{business.business_address}</div>
                           </div>
                         ))}

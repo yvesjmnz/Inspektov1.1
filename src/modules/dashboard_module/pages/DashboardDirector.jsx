@@ -8,6 +8,8 @@ import DirectorReports from './DirectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
 import HistorySearchBar from '../components/HistorySearchBar';
 import MiniRefreshButton from '../components/MiniRefreshButton';
+import BusinessNamingPanel from '../components/BusinessNamingPanel';
+import { enrichRowsWithBusinessDisplayNames } from '../../../lib/businessNames';
 import './Dashboard.css';
 
 // Complaint category grouping (Director view) from tags like "Violation: <Sub>"
@@ -269,7 +271,7 @@ export default function DashboardDirector() {
   const getInitialTab = () => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
-    if (tabParam && ['queue', 'special-complaint-form', 'mission-orders', 'inspection', 'mission-orders-history', 'inspection-history', 'history', 'reports'].includes(tabParam)) {
+    if (tabParam && ['queue', 'special-complaint-form', 'mission-orders', 'inspection', 'mission-orders-history', 'inspection-history', 'history', 'naming-approvals', 'reports'].includes(tabParam)) {
       return tabParam;
     }
     return 'queue';
@@ -312,6 +314,10 @@ export default function DashboardDirector() {
       'inspection-history': {
         title: 'Inspection History',
         subtitle: 'History for all completed inspections (from inspection reports).',
+      },
+      'naming-approvals': {
+        title: 'Naming Approvals',
+        subtitle: 'Review Head Inspector requests for public/common business names.',
       },
       reports: {
         title: 'Performance Report',
@@ -425,7 +431,7 @@ export default function DashboardDirector() {
     try {
       let query = supabase
         .from('complaints')
-        .select('id, status, created_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, approved_by, approved_at, declined_by, declined_at, tags')
+        .select('id, business_pk, status, created_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, approved_by, approved_at, declined_by, declined_at, tags')
         .order('created_at', { ascending: false })
         .limit(200);
 
@@ -479,9 +485,10 @@ export default function DashboardDirector() {
 
       const { data, error } = await query;
       if (error) throw error;
+      const displayRows = await enrichRowsWithBusinessDisplayNames(supabase, data || []);
 
       if (!isActiveRequest(request)) return;
-      setComplaints(data || []);
+      setComplaints(displayRows || []);
       setComplaintsLoadedTab(request.tab);
     } catch (e) {
       if (!isActiveRequest(request)) return;
@@ -517,7 +524,7 @@ export default function DashboardDirector() {
       // because the Director UI uses filteredMissionOrders for rendering.
       const complaintQuery = supabase
         .from('complaints')
-        .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
+        .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at')
         .in('status', ['approved', 'Approved', 'completed', 'Completed']);
 
       const appliedComplaintQuery = (() => {
@@ -531,8 +538,9 @@ export default function DashboardDirector() {
 
       const { data: complaintRows, error: complaintErr } = await appliedComplaintQuery;
       if (complaintErr) throw complaintErr;
+      const displayComplaintRows = await enrichRowsWithBusinessDisplayNames(supabase, complaintRows || []);
 
-      const complaintIds = Array.from(new Set((complaintRows || []).map((c) => c.id).filter(Boolean)));
+      const complaintIds = Array.from(new Set((displayComplaintRows || []).map((c) => c.id).filter(Boolean)));
 
       const { data: mos = [], error: moErr } = complaintIds.length
         ? await supabase
@@ -624,7 +632,7 @@ export default function DashboardDirector() {
         inspectorNamesByMissionOrderId.set(a.mission_order_id, arr);
       });
 
-      const merged = (complaintRows || []).map((c) => {
+      const merged = (displayComplaintRows || []).map((c) => {
         const mo = latestMoByComplaintId.get(c.id) || null;
         if (!mo) return null;
         const inspectionStatus =
@@ -709,12 +717,13 @@ export default function DashboardDirector() {
       const { data: complaintRows = [], error: cErr } = complaintIds.length
         ? await supabase
             .from('complaints')
-            .select('id, business_name, business_address')
+            .select('id, business_pk, business_name, business_address')
             .in('id', complaintIds)
         : { data: [], error: null };
       if (cErr) throw cErr;
 
-      const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
+      const displayComplaintRows = await enrichRowsWithBusinessDisplayNames(supabase, complaintRows || []);
+      const complaintById = new Map((displayComplaintRows || []).map((c) => [c.id, c]));
 
       const { data: assignmentRows = [], error: assignmentErr } = missionOrderIds.length
         ? await supabase
@@ -783,7 +792,7 @@ export default function DashboardDirector() {
     if (tab === 'mission-orders') {
       const complaintQuery = supabase
         .from('complaints')
-        .select('id, business_name, business_address, reporter_email, approved_at, created_at')
+        .select('id, business_pk, business_name, business_address, reporter_email, approved_at, created_at')
         .in('status', ['approved', 'Approved', 'completed', 'Completed']);
 
       if (missionOrderHistoryAppliedRange?.start && missionOrderHistoryAppliedRange?.end) {
@@ -796,8 +805,9 @@ export default function DashboardDirector() {
 
       const { data: complaints = [], error: complaintErr } = await complaintQuery;
       if (complaintErr) throw complaintErr;
+      const displayComplaints = await enrichRowsWithBusinessDisplayNames(supabase, complaints || []);
 
-      const complaintIds = [...new Set(complaints.map((c) => c.id).filter(Boolean))];
+      const complaintIds = [...new Set(displayComplaints.map((c) => c.id).filter(Boolean))];
 
       const { data: mos = [], error: moErr } = complaintIds.length
         ? await supabase
@@ -855,7 +865,7 @@ export default function DashboardDirector() {
         inspectorMap.get(a.mission_order_id).push(name);
       });
 
-      const merged = complaints
+      const merged = displayComplaints
         .map((c) => {
           const mo = latestMO.get(c.id);
           if (!mo) return null;
@@ -899,7 +909,7 @@ export default function DashboardDirector() {
     if (tab === 'mission-orders-history') {
       const complaintQuery = supabase
         .from('complaints')
-        .select('id, business_name, business_address, reporter_email, approved_at, created_at')
+        .select('id, business_pk, business_name, business_address, reporter_email, approved_at, created_at')
         .in('status', ['approved', 'Approved', 'completed', 'Completed']);
 
       if (missionOrderHistoryAppliedRange?.start && missionOrderHistoryAppliedRange?.end) {
@@ -912,8 +922,9 @@ export default function DashboardDirector() {
 
       const { data: complaints, error } = await complaintQuery;
       if (error) throw error;
+      const displayComplaints = await enrichRowsWithBusinessDisplayNames(supabase, complaints || []);
 
-      const complaintIds = [...new Set(complaints.map(c => c.id).filter(Boolean))];
+      const complaintIds = [...new Set(displayComplaints.map(c => c.id).filter(Boolean))];
 
       const { data: mos = [], error: moErr } = complaintIds.length
         ? await supabase
@@ -987,7 +998,7 @@ export default function DashboardDirector() {
         inspectorMap.get(a.mission_order_id).push(name);
       });
 
-      const merged = complaints.map(c => {
+      const merged = displayComplaints.map(c => {
         const mo = latestMO.get(c.id);
         const inspectionStatus =
           mo
@@ -1215,7 +1226,7 @@ export default function DashboardDirector() {
   const missionOrdersReadyForTab = !usesMissionOrderRefresh || missionOrdersLoadedTab === tab;
   const usesComplaintData = tab === 'queue' || tab === 'history';
   const complaintsReadyForTab = !usesComplaintData || complaintsLoadedTab === tab;
-  const showHeaderRefresh = tab !== 'reports' && tab !== 'special-complaint-form';
+  const showHeaderRefresh = tab !== 'reports' && tab !== 'special-complaint-form' && tab !== 'naming-approvals';
 
   // Group complaints by day for Review Complaints
   const complaintsByDay = useMemo(() => {
@@ -1858,6 +1869,18 @@ export default function DashboardDirector() {
               </li>
 
               <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Business Records</span>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'naming-approvals' ? 'active' : ''}`} onClick={() => setTab('naming-approvals')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/Business.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Naming Approvals</span>
+                </button>
+              </li>
+
+              <li className="dash-nav-section">
                 <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Reports</span>
               </li>
               <li>
@@ -1954,6 +1977,8 @@ export default function DashboardDirector() {
                 statusBadgeClass={statusBadgeClassHI}
               />
             )
+          ) : tab === 'naming-approvals' ? (
+            <BusinessNamingPanel mode="director" />
           ) : tab === 'special-complaint-form' ? (
             <div style={{ display: 'grid', gap: 20 }}>
               <section

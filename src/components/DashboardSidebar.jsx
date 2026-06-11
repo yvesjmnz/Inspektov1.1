@@ -91,6 +91,16 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           section: null,
         },
         {
+          label: 'Business Records',
+          section: 'BUSINESS RECORDS',
+        },
+        {
+          label: 'Naming Approvals',
+          icon: '/ui_icons/Business.png',
+          href: '/dashboard/director?tab=naming-approvals',
+          section: null,
+        },
+        {
           label: 'Reports',
           section: 'REPORTS',
         },
@@ -155,6 +165,17 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           href: '/dashboard/head-inspector',
           section: null,
           tabName: 'inspection-history',
+        },
+        {
+          label: 'Business Records',
+          section: 'BUSINESS RECORDS',
+        },
+        {
+          label: 'Business Naming',
+          icon: '/ui_icons/Business.png',
+          href: '/dashboard/head-inspector',
+          section: null,
+          tabName: 'business-naming',
         },
         {
           label: 'Reports',
@@ -235,9 +256,10 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (hash === 'results') return 'Director Approval';
       if (hash === 'for-inspection') return 'Secretary Approval';
       if (hash === 'revisions') return 'Mission Order History';
-      if (hash === 'inspection') return 'Inspections';
-      if (hash === 'inspection-history') return 'Inspection History';
-      if (hash === 'reports') return 'Performance Report';
+        if (hash === 'inspection') return 'Inspections';
+        if (hash === 'inspection-history') return 'Inspection History';
+        if (hash === 'business-naming') return 'Business Naming';
+        if (hash === 'reports') return 'Performance Report';
       return 'Draft'; // default to Draft
     }
 
@@ -268,6 +290,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'mission-orders-history') return 'Mission Order History';
       if (tab === 'inspection') return 'Inspections';
       if (tab === 'inspection-history') return 'Inspection History';
+      if (tab === 'naming-approvals') return 'Naming Approvals';
       if (tab === 'reports') return 'Performance Report';
       // Director dashboard overview tab was removed; default highlight to queue.
       return 'Review Complaints';
@@ -283,6 +306,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
         if (hash === 'reports') return 'Performance Report';
         if (hash === 'inspection') return 'Inspections';
         if (hash === 'inspection-history') return 'Inspection History';
+        if (hash === 'business-naming') return 'Business Naming';
       }
       if (tab === 'todo') return 'Draft';
       if (tab === 'results') return 'Director Approval';
@@ -291,6 +315,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'reports') return 'Performance Report';
       if (tab === 'inspection') return 'Inspections';
       if (tab === 'inspection-history') return 'Inspection History';
+      if (tab === 'business-naming') return 'Business Naming';
       return 'Draft';
     }
 

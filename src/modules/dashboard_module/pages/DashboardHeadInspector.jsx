@@ -7,6 +7,8 @@ import DirectorReports from './DirectorReports';
 import MissionOrderHistory from '../components/MissionOrderHistory';
 import HistorySearchBar from '../components/HistorySearchBar';
 import MiniRefreshButton from '../components/MiniRefreshButton';
+import BusinessNamingPanel from '../components/BusinessNamingPanel';
+import { enrichRowsWithBusinessDisplayNames } from '../../../lib/businessNames';
 import './Dashboard.css';
 import { getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
 
@@ -85,7 +87,7 @@ function resolveInspectionWorkflowStatus(report) {
 
 function getInitialTab() {
   const hash = window.location.hash.slice(1);
-  const validTabs = ['todo', 'results', 'inspection', 'inspection-history', 'for-inspection', 'revisions', 'reports'];
+  const validTabs = ['todo', 'results', 'inspection', 'inspection-history', 'for-inspection', 'revisions', 'business-naming', 'reports'];
   return validTabs.includes(hash) ? hash : 'todo';
 }
 
@@ -224,6 +226,10 @@ export default function DashboardHeadInspector() {
         title: 'Mission Order History',
         subtitle: 'History for all of the Mission-Orders Accomplished.',
       },
+      'business-naming': {
+        title: 'Business Naming',
+        subtitle: 'Propose public/common business names for Director approval.',
+      },
     };
 
     return meta[tab] || {
@@ -298,7 +304,7 @@ export default function DashboardHeadInspector() {
       // Then attach the latest mission order per complaint (if any).
       let complaintQuery = supabase
         .from('complaints')
-        .select('id, business_name, business_address, reporter_email, status, approved_at, created_at')
+        .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at')
         .in('status', ['approved', 'Approved', 'completed', 'Completed']);
 
       // Apply date range to the most relevant timestamp for this dashboard (approval date is primary)
@@ -312,7 +318,8 @@ export default function DashboardHeadInspector() {
 
       if (complaintError) throw complaintError;
 
-      const complaintIds = Array.from(new Set((complaintRows || []).map((c) => c.id).filter(Boolean)));
+      const displayComplaintRows = await enrichRowsWithBusinessDisplayNames(supabase, complaintRows || []);
+      const complaintIds = Array.from(new Set((displayComplaintRows || []).map((c) => c.id).filter(Boolean)));
 
       const { data: missionOrders, error: moError } = complaintIds.length
         ? await supabase
@@ -334,7 +341,7 @@ export default function DashboardHeadInspector() {
         }
       });
 
-      const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
+      const complaintById = new Map((displayComplaintRows || []).map((c) => [c.id, c]));
 
       // Load inspector assignments (FK-only) and resolve inspector display names.
       // Expected columns in mission_order_assignments: mission_order_id, inspector_id (or user_id)
@@ -426,7 +433,7 @@ export default function DashboardHeadInspector() {
       });
 
       // Merge into the shape the table expects.
-      const merged = (complaintRows || []).map((c) => {
+      const merged = (displayComplaintRows || []).map((c) => {
         const mo = latestMoByComplaintId.get(c.id) || null;
         const inspectionStatus =
           mo?.id
@@ -950,13 +957,14 @@ export default function DashboardHeadInspector() {
       const { data: complaintRows, error: cErr } = complaintIds.length
         ? await supabase
             .from('complaints')
-            .select('id, business_name, business_address')
+            .select('id, business_pk, business_name, business_address')
             .in('id', complaintIds)
         : { data: [], error: null };
 
       if (cErr) throw cErr;
 
-      const complaintById = new Map((complaintRows || []).map((c) => [c.id, c]));
+      const displayComplaintRows = await enrichRowsWithBusinessDisplayNames(supabase, complaintRows || []);
+      const complaintById = new Map((displayComplaintRows || []).map((c) => [c.id, c]));
 
       // 4) Load inspector assignments + names (to match Inspections tab pills)
       const { data: assignmentRows, error: assignmentErr } = missionOrderIds.length
@@ -1087,7 +1095,7 @@ export default function DashboardHeadInspector() {
     return { groups, sortedKeys };
   }, [filteredInspectionHistory, tab]);
 
-  const showHeaderRefresh = tab !== 'reports';
+  const showHeaderRefresh = tab !== 'reports' && tab !== 'business-naming';
 
   const handleRefresh = () => {
     if (tab === 'inspection-history') {
@@ -1188,6 +1196,18 @@ export default function DashboardHeadInspector() {
               </li>
 
               <li className="dash-nav-section">
+                <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Business Records</span>
+              </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'business-naming' ? 'active' : ''}`} onClick={() => setTab('business-naming')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/Business.png" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Business Naming</span>
+                </button>
+              </li>
+
+              <li className="dash-nav-section">
                 <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Reports</span>
               </li>
               <li>
@@ -1265,7 +1285,9 @@ export default function DashboardHeadInspector() {
               {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
               {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
-              {tab === 'reports' ? (
+              {tab === 'business-naming' ? (
+                <BusinessNamingPanel mode="head_inspector" />
+              ) : tab === 'reports' ? (
                 <DirectorReports />
               ) : tab === 'todo' ? (
                 <div style={{ display: 'grid', gap: 20 }}>

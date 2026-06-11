@@ -36,7 +36,7 @@ export async function getBusinesses(searchQuery = '') {
 
   if (searchQuery) {
     query = query.or(
-      `business_name.ilike.%${searchQuery}%,business_address.ilike.%${searchQuery}%`
+      `business_name.ilike.%${searchQuery}%,marketed_name.ilike.%${searchQuery}%,business_address.ilike.%${searchQuery}%`
     );
   }
 

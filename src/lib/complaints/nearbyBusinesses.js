@@ -42,7 +42,7 @@ export async function getNearbyBusinesses(userLat, userLng, radiusMeters = 200) 
 
   const { data, error } = await supabase
     .from('businesses')
-    .select('business_pk, business_name, business_address, business_lat, business_lng')
+    .select('business_pk, business_name, marketed_name, business_address, business_lat, business_lng')
     .gte('business_lat', userLat - latDelta)
     .lte('business_lat', userLat + latDelta)
     .gte('business_lng', userLng - lngDelta)
