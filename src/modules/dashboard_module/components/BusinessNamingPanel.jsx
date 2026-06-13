@@ -399,48 +399,57 @@ export default function BusinessNamingPanel({ mode = 'head_inspector' }) {
                   aria-expanded={isExpanded}
                   style={{ width: '100%', border: 'none', background: isExpanded ? '#ffffff' : '#f8fafc', cursor: 'pointer', textAlign: 'left', padding: isExpanded ? '22px 20px' : 14 }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: isExpanded ? 18 : 16, fontWeight: 1000, color: '#020617' }}>{request.proposed_marketed_name}</span>
-                        {isExpanded ? <StatusPill status={request.status} /> : null}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#0f172a', fontWeight: 800, marginTop: 4 }}>Legal name: {business.business_name || '-'}</div>
-                      <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
-                        {isExpanded ? `Address: ${business.business_address || '-'}` : business.business_address || '-'}
-                        {!isExpanded ? ` | Requested by: ${requesterName}` : ''}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }}>
+                    <div style={{ minWidth: 0, display: 'grid', gap: 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8 }}>Legal Name</div>
+                      <div style={{ fontSize: isExpanded ? 22 : 18, fontWeight: 1000, color: '#020617', lineHeight: 1.1 }}>{business.business_name || '-'}</div>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13, marginTop: 4 }}>
+                        <img src="/ui_icons/Address.png" alt="Address" style={{ width: 16, height: 16, opacity: 0.75 }} />
+                        <span style={{ lineHeight: 1.4 }}>{business.business_address || '-'}</span>
                       </div>
                     </div>
-                    {isExpanded ? (
-                      <span aria-hidden="true" style={{ width: 80, height: 56, border: '1px solid #cbd5e1', borderRadius: 4, background: '#f1f5f9', color: '#64748b', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 1000, flex: '0 0 auto', lineHeight: 1.1, whiteSpace: 'nowrap', fontSize: 13 }}>
-                        PK #{business.business_pk || '-'}
-                      </span>
-                    ) : (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 18, color: '#64748b', fontSize: 12, fontWeight: 800, flex: '0 0 auto' }}>
-                        <span>{formatDateOnly(request.requested_at)}</span>
-                        <span aria-hidden="true" style={{ color: '#2563eb' }}>View</span>
-                        <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }}>&gt;</span>
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10, flex: '0 0 auto' }}>
+                      {isExpanded ? (
+                        <span aria-hidden="true" style={{ width: 80, height: 56, border: '1px solid #cbd5e1', borderRadius: 4, background: '#f1f5f9', color: '#64748b', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 1000, lineHeight: 1.1, whiteSpace: 'nowrap', fontSize: 13 }}>
+                          PK #{business.business_pk || '-'}
+                        </span>
+                      ) : (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 18, color: '#64748b', fontSize: 12, fontWeight: 800 }}>
+                          <span>{formatDateOnly(request.requested_at)}</span>
+                          <span aria-hidden="true" style={{ color: '#2563eb' }}>View</span>
+                          <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }}>&gt;</span>
+                        </div>
+                      )}
+                      {isExpanded ? <StatusPill status={request.status} /> : null}
+                    </div>
                   </div>
                 </button>
 
                 {isExpanded ? (
                   <div style={{ borderTop: '1px solid #e2e8f0', background: '#ffffff' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 18, padding: '20px', background: '#f8fafc' }}>
-                      <div style={{ background: '#f1f5f9', borderLeft: '4px solid #c7ccd5', borderRadius: 2, padding: '14px 16px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(190px, 1fr))', gap: 12, padding: '16px', background: '#f8fafc' }}>
+                      <div style={{ background: '#eef2f7', borderRadius: 4, padding: '16px 18px', display: 'grid', gap: 10, minHeight: 120 }}>
                         <div style={{ fontSize: 10, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8 }}>Current Public Name</div>
-                        <div style={{ fontWeight: 1000, color: '#020617', marginTop: 8, fontSize: 16 }}>{getBusinessDisplayName(business) || '-'}</div>
+                        <div style={{ fontWeight: 1000, color: '#020617', fontSize: 16 }}>{getBusinessDisplayName(business) || '-'}</div>
                       </div>
-                      <div style={{ background: '#f1f5f9', borderLeft: '4px solid #c7ccd5', borderRadius: 2, padding: '14px 16px' }}>
-                        <div style={{ fontSize: 10, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8 }}>Requested By</div>
-                        <div style={{ fontWeight: 1000, color: '#020617', marginTop: 8, fontSize: 16 }}>{requesterName}</div>
-                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>Head Inspector</div>
+                      <div style={{ background: '#ffffff', borderRadius: 4, border: '1px solid #dbe3ef', padding: '16px 18px', display: 'grid', gap: 10, minHeight: 120 }}>
+                        <div style={{ fontSize: 10, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8 }}>Proposed Public Name</div>
+                        <div style={{ fontWeight: 1000, color: '#2563eb', fontSize: 16 }}>{request.proposed_marketed_name || '-'}</div>
                       </div>
-                      <div style={{ background: '#f1f5f9', borderLeft: '4px solid #c7ccd5', borderRadius: 2, padding: '14px 16px' }}>
-                        <div style={{ fontSize: 10, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8 }}>Submitted</div>
-                        <div style={{ fontWeight: 1000, color: '#020617', marginTop: 8, fontSize: 16 }}>{formatDateOnly(request.requested_at)}</div>
-                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>{formatTimeOnly(request.requested_at)}</div>
+                      <div style={{ background: '#f1f5f9', borderRadius: 4, padding: '16px 18px', display: 'grid', gap: 12, minHeight: 120 }}>
+                        <div style={{ fontSize: 10, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8 }}>Submitted Info</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'flex-start' }}>
+                          <div style={{ display: 'grid', gap: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8 }}>Date & Time</span>
+                            <span style={{ fontWeight: 1000, color: '#020617', fontSize: 15 }}>{formatDateOnly(request.requested_at)}</span>
+                            <span style={{ fontSize: 11, color: '#64748b' }}>{formatTimeOnly(request.requested_at)}</span>
+                          </div>
+                          <div style={{ display: 'grid', gap: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8 }}>Requested by</span>
+                            <span style={{ fontWeight: 1000, color: '#020617', fontSize: 15 }}>{requesterName}</span>
+                            <span style={{ fontSize: 11, color: '#64748b' }}>Head Inspector</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -554,12 +563,9 @@ export default function BusinessNamingPanel({ mode = 'head_inspector' }) {
         >
           <section style={{ width: 'min(520px, 100%)', background: '#ffffff', borderRadius: 8, boxShadow: '0 24px 60px rgba(15, 23, 42, 0.24)', overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '18px 22px', borderBottom: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 4, background: '#2563eb', color: '#ffffff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 1000 }}>T</span>
-                <h3 id="business-name-modal-title" style={{ margin: 0, color: '#0f172a', fontSize: 20, fontWeight: 900 }}>
-                  {modalBusiness.marketed_name ? 'Edit Public Name' : 'Submit Public Name'}
-                </h3>
-              </div>
+              <h3 id="business-name-modal-title" style={{ margin: 0, color: '#0f172a', fontSize: 20, fontWeight: 900 }}>
+                {modalBusiness.marketed_name ? 'Edit Public Name' : 'Submit Public Name'}
+              </h3>
               <button
                 type="button"
                 aria-label="Close"
@@ -598,9 +604,9 @@ export default function BusinessNamingPanel({ mode = 'head_inspector' }) {
                 <span style={{ color: '#64748b', fontSize: 12, fontStyle: 'italic' }}>This name will be sent to the Director approval queue.</span>
               </label>
 
-              <div style={{ display: 'grid', gap: 4, border: '1px solid #bfdbfe', background: '#eff6ff', color: '#1d4ed8', borderRadius: 4, padding: 14, fontWeight: 800 }}>
-                <div style={{ fontWeight: 1000 }}>Important Notice</div>
-                <div style={{ fontSize: 13 }}>Submitting will lock this naming request until it is approved or rejected by the Director.</div>
+              <div style={{ border: '1px solid #fecaca', background: '#fef2f2', borderRadius: 4, padding: 14, display: 'grid', gap: 6 }}>
+                <div style={{ fontWeight: 700, color: '#b91c1c' }}>Important Notice</div>
+                <div style={{ fontSize: 13, color: '#991b1b', fontWeight: 400 }}>Submitting will lock this naming request until it is approved or rejected by the Director.</div>
               </div>
             </div>
 
