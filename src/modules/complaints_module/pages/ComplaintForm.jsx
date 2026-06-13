@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, TileLayer, Polyline } from 'react-leaflet';
 import L from 'leaflet';
-import { submitComplaint, getBusinesses, uploadImage, resolveBusinessJurisdiction } from '../../../lib/complaints';
+import { submitComplaint, getBusinesses, uploadImage, resolveBusinessJurisdiction, checkComplaintCooldown } from '../../../lib/complaints';
 import { supabase } from '../../../lib/supabase';
 import { getNearbyBusinesses, formatDistance } from '../../../lib/complaints/nearbyBusinesses';
 import { getBusinessDisplayName, getBusinessSecondaryName } from '../../../lib/businessNames';
@@ -81,6 +81,7 @@ export default function ComplaintForm({ verifiedEmail }) {
   const [errorToastKey, setErrorToastKey] = useState(0);
   const [note, setNote] = useState(null);
   const [noteToastKey, setNoteToastKey] = useState(0);
+  const [cooldownStatus, setCooldownStatus] = useState(null);
 
   const showError = (msg) => {
     const m = String(msg || '').trim();
@@ -94,6 +95,36 @@ export default function ComplaintForm({ verifiedEmail }) {
     if (!m) return;
     setNote(m);
     setNoteToastKey((k) => k + 1);
+  };
+
+  const clearCooldownStatus = () => {
+    setCooldownStatus(null);
+  };
+
+  const verifyComplaintCooldownClear = async ({ manageLoading = true } = {}) => {
+    if (manageLoading) setLoading(true);
+
+    try {
+      const status = await checkComplaintCooldown({
+        business_pk: formData.business_pk || null,
+        business_name: formData.business_name,
+        business_address: formData.business_address,
+      });
+
+      setCooldownStatus(status);
+
+      if (status?.blocked) {
+        showError(status.message || 'Complaints cannot be filed for this establishment at this time.');
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      showError(err?.message || 'Unable to check complaint cooldown. Please try again.');
+      return false;
+    } finally {
+      if (manageLoading) setLoading(false);
+    }
   };
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -216,6 +247,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     // Update visible input immediately.
     setSearchQuery(q);
     setError(null);
+    clearCooldownStatus();
 
     // Track latest query so slow responses can be ignored.
     businessSearchQueryRef.current = q;
@@ -258,6 +290,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
   const clearBusinessSearch = () => {
     setError(null);
+    clearCooldownStatus();
     setSearchQuery('');
     businessSearchQueryRef.current = '';
     setBusinesses([]);
@@ -269,6 +302,7 @@ export default function ComplaintForm({ verifiedEmail }) {
     // otherwise the address will remain populated and confuse the user.
     clearSelectedBusiness();
     setError(null);
+    clearCooldownStatus();
     setNameSearchQuery('');
     setBusinesses([]);
     setShowBusinessList(false);
@@ -276,6 +310,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
   const selectBusiness = (business, source = 'initial') => {
     const displayName = getBusinessDisplayName(business) || business.business_name || '';
+    clearCooldownStatus();
     setBusinessNotInDb(false);
     setManualJurisdictionCheck(EMPTY_MANUAL_JURISDICTION);
 
@@ -301,6 +336,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
   const clearSelectedBusiness = () => {
     setError(null);
+    clearCooldownStatus();
     setBusinesses([]);
     setShowBusinessList(false);
     setSearchQuery('');
@@ -337,6 +373,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
   const handleNameSearch = async (query) => {
     const q = String(query || '');
+    clearCooldownStatus();
 
     // If the user edits the business name after selecting one from the DB,
     // clear the selected business details so address/pk aren't kept (or re-used)
@@ -964,6 +1001,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
       if (match) {
         // Found a matching business in database - auto-link to it
+        clearCooldownStatus();
         setFormData((prev) => ({
           ...prev,
           business_pk: match.business_pk,
@@ -1019,6 +1057,11 @@ export default function ComplaintForm({ verifiedEmail }) {
         if (!withinJurisdiction) {
           return;
         }
+      }
+
+      const cooldownClear = await verifyComplaintCooldownClear();
+      if (!cooldownClear) {
+        return;
       }
     }
 
@@ -1108,6 +1151,11 @@ export default function ComplaintForm({ verifiedEmail }) {
     }
 
     try {
+      const cooldownClear = await verifyComplaintCooldownClear({ manageLoading: false });
+      if (!cooldownClear) {
+        return;
+      }
+
       // Derive Violation tags from selected sub-categories
       const selectedSubLabels = Object.entries(selectedSubcats || {}).flatMap(([catKey, subKeys]) => {
         const arr = GUIDED_SUBCATS[catKey] || [];
@@ -1197,6 +1245,7 @@ export default function ComplaintForm({ verifiedEmail }) {
 
                       setBusinessNotInDb(checked);
                       setError(null);
+                      clearCooldownStatus();
                       setShowBusinessList(false);
                       setBusinesses([]);
                       setSearchQuery('');
@@ -1387,6 +1436,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                       value={formData.business_name}
                       onChange={(e) => {
                         setManualJurisdictionCheck(EMPTY_MANUAL_JURISDICTION);
+                        clearCooldownStatus();
                         setFormData((prev) => ({ ...prev, business_name: e.target.value }));
                       }}
                       placeholder="Enter business name"
@@ -1406,6 +1456,7 @@ export default function ComplaintForm({ verifiedEmail }) {
                       value={formData.business_address}
                       onChange={(e) => {
                         setManualJurisdictionCheck(EMPTY_MANUAL_JURISDICTION);
+                        clearCooldownStatus();
                         setFormData((prev) => ({ ...prev, business_address: e.target.value }));
                       }}
                       placeholder="Full business address"
@@ -1417,6 +1468,12 @@ export default function ComplaintForm({ verifiedEmail }) {
                     />
                     {null}
                   </div>
+
+                  {cooldownStatus?.blocked ? (
+                    <div className="inline-note" style={{ borderColor: '#fecaca', background: '#fef2f2', color: '#991b1b' }}>
+                      {cooldownStatus.message}
+                    </div>
+                  ) : null}
 
                   <div className="form-group">
                     <label htmlFor="reporter_email">Your Email</label>

@@ -68,6 +68,17 @@ export async function submitComplaint(complaintData) {
   return data;
 }
 
+export async function checkComplaintCooldown({ business_pk, business_name, business_address } = {}) {
+  const { data, error } = await supabase.rpc('get_complaint_cooldown_status', {
+    p_business_pk: business_pk || null,
+    p_business_name: String(business_name || '').trim(),
+    p_business_address: String(business_address || '').trim(),
+  });
+
+  if (error) throw new Error(error.message);
+  return data || { blocked: false };
+}
+
 export async function resolveBusinessJurisdiction(address) {
   const normalizedAddress = String(address || '').trim();
 
