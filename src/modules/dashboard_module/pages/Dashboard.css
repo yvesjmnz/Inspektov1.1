@@ -332,6 +332,28 @@
 .dash-btn-danger { background: #ef4444; text-transform: lowercase; font-weight: 700; }
 .dash-btn-danger:hover { background: #dc2626; }
 
+.queue-toolbar {
+  animation: queueFadeIn 180ms ease both;
+}
+
+.queue-section {
+  animation: queueFadeIn 220ms ease both;
+}
+
+.queue-complaint-card {
+  animation: queueCardIn 220ms ease both;
+}
+
+.queue-complaint-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.10) !important;
+  border-color: #cbd5e1 !important;
+}
+
+.queue-complaint-card:active {
+  transform: translateY(0);
+}
+
 .dash-row-actions {
   display: flex;
   gap: 8px;
@@ -545,8 +567,31 @@
   }
 }
 
+@keyframes queueFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes queueCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (max-width: 900px) {
   .dash-grid { grid-template-columns: 1fr; }
   .dash-shell { padding-left: 240px; grid-template-columns: 1fr; }
   .dash-card { padding: 18px; border-radius: 0; }
+  .queue-toolbar { grid-template-columns: 1fr !important; }
 }

@@ -62,19 +62,26 @@ function App() {
     }
   };
 
-  const getCachedRole = () => {
+  const getCachedRole = (userId = null) => {
     try {
+      if (userId) {
+        const cachedUserId = localStorage.getItem('auth:userId');
+        if (cachedUserId !== userId) return null;
+      }
       return normalizeRole(localStorage.getItem('auth:role'));
     } catch {
       return null;
     }
   };
 
-  const setCachedRole = (role) => {
+  const setCachedRole = (role, userId = null) => {
     const normalized = normalizeRole(role);
     if (!normalized) return;
     try {
       localStorage.setItem('auth:role', normalized);
+      if (userId) {
+        localStorage.setItem('auth:userId', userId);
+      }
     } catch {
       // ignore cache write failures
     }
@@ -177,11 +184,15 @@ function App() {
           }
         }
 
-        normalizedRole = normalizeRole(getRoleFromUser(user)) || getCachedRole();
-        if (!normalizedRole && user?.id) {
-          normalizedRole = await getRoleFromProfiles(user.id);
-        }
-        if (normalizedRole) setCachedRole(normalizedRole);
+        const metadataRole = normalizeRole(getRoleFromUser(user));
+        const profileRole = user?.id && navigator.onLine !== false
+          ? await getRoleFromProfiles(user.id)
+          : null;
+
+        // Prefer the live profile role while online. Cached role is only a same-user
+        // fallback for transient auth/profile failures and must not leak across accounts.
+        normalizedRole = profileRole || metadataRole || getCachedRole(user?.id || null);
+        if (normalizedRole && user?.id) setCachedRole(normalizedRole, user.id);
         if (!normalizedRole && offlinePreparedInspectorAccess) {
           normalizedRole = 'inspector';
         }

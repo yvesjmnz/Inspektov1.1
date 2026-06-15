@@ -265,6 +265,329 @@ function isLikelyEmail(value) {
   return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(String(value || '').trim());
 }
 
+const QUEUE_DAY_MS = 24 * 60 * 60 * 1000;
+
+function normalizeQueueKey(value) {
+  return String(value || '').toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function getQueueBusinessKey(complaint) {
+  if (complaint?.business_pk !== null && complaint?.business_pk !== undefined) {
+    return `pk:${complaint.business_pk}`;
+  }
+  return `text:${normalizeQueueKey(complaint?.business_name)}|${normalizeQueueKey(complaint?.business_address)}`;
+}
+
+function getQueueComplaintTime(complaint) {
+  const time = complaint?.created_at ? new Date(complaint.created_at).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function getQueueDecisionSignal(complaint, allComplaints) {
+  if (!complaint) {
+    return {
+      tone: 'neutral',
+      label: 'Review',
+      title: 'Review normally',
+      detail: 'Check the details, then accept or decline.',
+    };
+  }
+
+  const anchorTime = getQueueComplaintTime(complaint) || Date.now();
+  const email = normalizeQueueKey(complaint.reporter_email);
+  const businessKey = getQueueBusinessKey(complaint);
+  const rows = Array.isArray(allComplaints) ? allComplaints : [];
+
+  const sameReporter = rows.filter((row) => normalizeQueueKey(row.reporter_email) === email);
+  const reporter24h = sameReporter.filter((row) => {
+    const time = getQueueComplaintTime(row);
+    return time <= anchorTime && time > anchorTime - QUEUE_DAY_MS;
+  });
+  const reporter7d = sameReporter.filter((row) => {
+    const time = getQueueComplaintTime(row);
+    return time <= anchorTime && time > anchorTime - (7 * QUEUE_DAY_MS);
+  });
+  const reporterBusinesses7d = new Set(reporter7d.map(getQueueBusinessKey));
+
+  const sameBusiness7d = rows.filter((row) => {
+    const time = getQueueComplaintTime(row);
+    return getQueueBusinessKey(row) === businessKey && time <= anchorTime && time > anchorTime - (7 * QUEUE_DAY_MS);
+  });
+  const businessReporters7d = new Set(sameBusiness7d.map((row) => normalizeQueueKey(row.reporter_email)).filter(Boolean));
+
+  if (reporter24h.length > 5 || reporterBusinesses7d.size >= 10 || normalizeQueueKey(complaint.status) === 'on_hold') {
+    return {
+      tone: 'warning',
+      label: 'Possible spam',
+      title: 'Check before accepting',
+      detail: reporter24h.length > 5
+        ? `${reporter24h.length} complaints from this email today.`
+        : `${reporterBusinesses7d.size} establishments from this reporter this week.`,
+      declineHint: 'Potential spam or repetitive complaint pattern.',
+    };
+  }
+
+  if (businessReporters7d.size >= 3) {
+    return {
+      tone: 'success',
+      label: `${businessReporters7d.size} reporters`,
+      title: 'Good inspection lead',
+      detail: `${businessReporters7d.size} separate reporters complained about this business.`,
+    };
+  }
+
+  if (sameBusiness7d.length > 1) {
+    return {
+      tone: 'info',
+      label: `${sameBusiness7d.length} complaints`,
+      title: 'Same business again',
+      detail: `${sameBusiness7d.length} recent complaints for this business.`,
+    };
+  }
+
+  return {
+    tone: 'neutral',
+    label: 'Single complaint',
+    title: 'Review normally',
+    detail: 'No unusual pattern in the loaded queue.',
+  };
+}
+
+function QueueSignalPill({ signal }) {
+  const styles = {
+    warning: { bg: '#fffbeb', border: '#f59e0b', color: '#92400e' },
+    success: { bg: '#f0fdf4', border: '#22c55e', color: '#166534' },
+    info: { bg: '#eff6ff', border: '#2563eb', color: '#1d4ed8' },
+    neutral: { bg: '#f8fafc', border: '#cbd5e1', color: '#334155' },
+  };
+  const style = styles[signal?.tone] || styles.neutral;
+  return (
+    <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+      <span
+        className="status-badge"
+        style={{
+          width: 'fit-content',
+          background: style.bg,
+          border: `1px solid ${style.border}`,
+          color: style.color,
+          fontWeight: 900,
+          fontSize: 12,
+          padding: '6px 10px',
+          borderRadius: 999,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {signal.label}
+      </span>
+      <div style={{ color: '#0f172a', fontWeight: 900, fontSize: 13 }}>{signal.title}</div>
+      <div style={{ color: '#64748b', fontWeight: 700, fontSize: 12, lineHeight: 1.35 }}>{signal.detail}</div>
+    </div>
+  );
+}
+
+function buildQueueSections(items, allComplaints) {
+  const sections = [
+    {
+      key: 'inspection-ready',
+      title: '3 or More Separate Complaints',
+      subtitle: 'Good inspection leads from different reporters.',
+      tone: 'success',
+      rows: [],
+    },
+    {
+      key: 'normal',
+      title: 'Single and Same-Business Complaints',
+      subtitle: 'Review normally unless the details look weak.',
+      tone: 'neutral',
+      rows: [],
+    },
+    {
+      key: 'possible-spam',
+      title: 'Possible Spam or Reporter Pattern',
+      subtitle: 'Check carefully before accepting.',
+      tone: 'warning',
+      rows: [],
+    },
+  ];
+
+  const byKey = new Map(sections.map((section) => [section.key, section]));
+
+  (items || []).forEach((complaint) => {
+    const signal = getQueueDecisionSignal(complaint, allComplaints);
+    const sectionKey = getQueueSectionKeyForSignal(signal);
+    byKey.get(sectionKey)?.rows.push({ complaint, signal });
+  });
+
+  return sections.filter((section) => section.rows.length > 0);
+}
+
+function getQueueSectionKeyForSignal(signal) {
+  if (signal?.tone === 'success') return 'inspection-ready';
+  if (signal?.tone === 'warning') return 'possible-spam';
+  return 'normal';
+}
+
+function getQueueSectionStyle(tone) {
+  if (tone === 'success') {
+    return {
+      band: '#f8fafc',
+      border: '#0f766e',
+      title: '#0f172a',
+      chipBg: '#f0fdfa',
+      chipText: '#0f766e',
+      rowBg: '#ffffff',
+    };
+  }
+  if (tone === 'warning') {
+    return {
+      band: '#f8fafc',
+      border: '#b45309',
+      title: '#0f172a',
+      chipBg: '#fffbeb',
+      chipText: '#92400e',
+      rowBg: '#ffffff',
+    };
+  }
+  return {
+    band: '#f8fafc',
+    border: '#64748b',
+    title: '#0f172a',
+    chipBg: '#f1f5f9',
+    chipText: '#334155',
+    rowBg: '#ffffff',
+  };
+}
+
+function getComplaintInfoBadges(complaint) {
+  const tags = Array.isArray(complaint?.tags) ? complaint.tags.map((tag) => String(tag || '').toLowerCase()) : [];
+  const hasReporterLocation = complaint?.reporter_lat != null && complaint?.reporter_lng != null;
+
+  const locationBadge = (() => {
+    if (tags.includes('location verified')) {
+      return { label: 'Location verified', detail: 'Reporter location matched', tone: 'success' };
+    }
+    if (tags.includes('failed location verification')) {
+      return { label: 'Location not verified', detail: 'Reporter may be away from site', tone: 'warning' };
+    }
+    if (tags.includes('verification unavailable')) {
+      return { label: 'Location unavailable', detail: 'No reliable location check', tone: 'neutral' };
+    }
+    if (hasReporterLocation) {
+      return { label: 'Location captured', detail: complaint?.reporter_accuracy ? `Accuracy ${Math.round(Number(complaint.reporter_accuracy))}m` : 'Reporter shared GPS', tone: 'info' };
+    }
+    return { label: 'No location check', detail: 'Review address details manually', tone: 'neutral' };
+  })();
+
+  const evidenceCount = (Array.isArray(complaint?.image_urls) ? complaint.image_urls.length : 0)
+    + (Array.isArray(complaint?.document_urls) ? complaint.document_urls.length : 0);
+
+  return [
+    locationBadge,
+    {
+      label: complaint?.email_verified ? 'Email verified' : 'Email not verified',
+      detail: complaint?.email_verified ? 'Reporter confirmed email' : 'Reporter email pending',
+      tone: complaint?.email_verified ? 'success' : 'neutral',
+    },
+    {
+      label: `${evidenceCount} attachment${evidenceCount === 1 ? '' : 's'}`,
+      detail: evidenceCount > 0 ? 'Evidence attached' : 'No uploaded evidence',
+      tone: evidenceCount > 0 ? 'info' : 'neutral',
+    },
+  ];
+}
+
+function QueueComplaintCard({ complaint, signal, sectionStyle, onOpen }) {
+  const pillStyles = {
+    warning: { bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
+    success: { bg: '#f0fdfa', border: '#99f6e4', color: '#0f766e' },
+    info: { bg: '#f8fafc', border: '#cbd5e1', color: '#334155' },
+    neutral: { bg: '#f8fafc', border: '#cbd5e1', color: '#334155' },
+  };
+  const pillStyle = pillStyles[signal?.tone] || pillStyles.neutral;
+  const infoBadges = getComplaintInfoBadges(complaint);
+
+  return (
+    <article
+      className="queue-complaint-card"
+      onClick={onOpen}
+      style={{
+        background: '#ffffff',
+        border: '1px solid #d1d5db',
+        borderLeft: `4px solid ${sectionStyle.border}`,
+        borderRadius: 8,
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.08)',
+        padding: 18,
+        cursor: 'pointer',
+        display: 'grid',
+        gap: 10,
+        transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
+      }}
+    >
+      <span
+        className="status-badge"
+        style={{
+          width: 'fit-content',
+          background: pillStyle.bg,
+          border: `1px solid ${pillStyle.border}`,
+          color: pillStyle.color,
+          fontWeight: 900,
+          fontSize: 12,
+          padding: '5px 10px',
+          borderRadius: 999,
+          textTransform: 'none',
+        }}
+      >
+        {signal.label}
+      </span>
+
+      <div style={{ display: 'grid', gap: 5 }}>
+        <div style={{ color: '#0f172a', fontWeight: 1000, fontSize: 18, lineHeight: 1.2 }}>
+          {complaint.business_name || 'Untitled complaint'}
+        </div>
+        <div style={{ color: '#334155', fontWeight: 700, fontSize: 14, lineHeight: 1.35 }}>
+          {complaint.business_address || 'No address provided'}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {infoBadges.map((badge) => {
+          const badgeStyle = pillStyles[badge.tone] || pillStyles.neutral;
+          return (
+            <span
+              key={badge.label}
+              className="status-badge"
+              title={badge.detail}
+              style={{
+                background: badgeStyle.bg,
+                color: badgeStyle.color,
+                border: `1px solid ${badgeStyle.border}`,
+                fontWeight: 850,
+                fontSize: 11,
+                padding: '5px 9px',
+                borderRadius: 4,
+                textTransform: 'none',
+              }}
+            >
+              {badge.label}
+            </span>
+          );
+        })}
+        <span style={{ color: '#475569', fontWeight: 800, fontSize: 12 }}>
+          {complaint.reporter_email || 'No email'}
+        </span>
+      </div>
+
+      <div style={{ color: '#64748b', fontWeight: 800, fontSize: 12 }}>
+        {formatDateNoSeconds(complaint.created_at)}
+      </div>
+
+      <div style={{ color: '#475569', fontWeight: 900, fontSize: 12, marginTop: 2 }}>
+        Open complaint for review
+      </div>
+    </article>
+  );
+}
+
 export default function DashboardDirector() {
   // Initialize tab from URL query parameter, default to 'queue'
   // Note: Director view no longer supports the 'general' (dashboard) tab.
@@ -333,6 +656,8 @@ export default function DashboardDirector() {
   const [missionOrders, setMissionOrders] = useState([]);
   const [missionOrdersLoadedTab, setMissionOrdersLoadedTab] = useState('');
   const [auditComplaint, setAuditComplaint] = useState(null);
+  const [queueSearch, setQueueSearch] = useState('');
+  const [queueFilter, setQueueFilter] = useState('all');
   const [complaintHistorySearch, setComplaintHistorySearch] = useState('');
   const [missionOrderHistorySearch, setMissionOrderHistorySearch] = useState('');
   const [complaintHistoryFilters, setComplaintHistoryFilters] = useState({
@@ -431,7 +756,7 @@ export default function DashboardDirector() {
     try {
       let query = supabase
         .from('complaints')
-        .select('id, business_pk, status, created_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, approved_by, approved_at, declined_by, declined_at, tags')
+        .select('id, business_pk, status, created_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, document_urls, approved_by, approved_at, declined_by, declined_at, tags, email_verified, reporter_lat, reporter_lng, reporter_accuracy, reporter_location_timestamp, certification_accepted')
         .order('created_at', { ascending: false })
         .limit(200);
 
@@ -1165,6 +1490,29 @@ export default function DashboardDirector() {
 
   const filteredComplaints = useMemo(() => {
     const currentTabComplaints = complaintsLoadedTab === tab ? complaints : [];
+    if (tab === 'queue') {
+      const q = queueSearch.trim().toLowerCase();
+      return currentTabComplaints.filter((c) => {
+        const signal = getQueueDecisionSignal(c, currentTabComplaints);
+        if (queueFilter !== 'all' && getQueueSectionKeyForSignal(signal) !== queueFilter) {
+          return false;
+        }
+        if (!q) return true;
+
+        const searchable = [
+          c?.business_name,
+          c?.business_address,
+          c?.reporter_email,
+          c?.complaint_description,
+          signal?.label,
+          signal?.title,
+          ...(Array.isArray(c?.tags) ? c.tags : []),
+        ].map((value) => String(value || '').toLowerCase()).join(' ');
+
+        return searchable.includes(q);
+      });
+    }
+
     // If a field filter is active, don't apply client-side filtering (backend already filtered)
     const hasFieldFilter = complaintHistoryFilters.businessName || complaintHistoryFilters.address || complaintHistoryFilters.reporterEmail;
     if (hasFieldFilter) {
@@ -1185,7 +1533,7 @@ export default function DashboardDirector() {
         emailStr.includes(q)
       );
     });
-  }, [complaints, complaintsLoadedTab, tab, complaintHistorySearch, complaintHistoryFilters]);
+  }, [complaints, complaintsLoadedTab, tab, queueSearch, queueFilter, complaintHistorySearch, complaintHistoryFilters]);
 
   const filteredMissionOrders = useMemo(() => {
     const currentTabMissionOrders = missionOrdersLoadedTab === tab ? missionOrders : [];
@@ -1407,7 +1755,7 @@ export default function DashboardDirector() {
     try {
       const { data, error } = await supabase
         .from('complaints')
-        .select('id, status, created_at, updated_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, approved_by, approved_at, declined_by, declined_at, tags')
+        .select('id, status, created_at, updated_at, authenticity_level, business_name, business_address, reporter_email, complaint_description, image_urls, document_urls, approved_by, approved_at, declined_by, declined_at, tags, email_verified, reporter_lat, reporter_lng, reporter_accuracy, reporter_location_timestamp, certification_accepted')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -1744,6 +2092,23 @@ export default function DashboardDirector() {
     if (declined) closeDeclineConfirm();
   };
 
+  const approveQueueComplaint = async (complaint, event) => {
+    event?.stopPropagation();
+    if (!complaint?.id || loading) return;
+    await updateComplaintStatus(complaint.id, 'approved');
+  };
+
+  const requestQueueDecline = (complaint, signal, event) => {
+    event?.stopPropagation();
+    if (!complaint?.id || loading) return;
+    setFullComplaint(complaint);
+    setFullViewId(null);
+    setDeclineComment(signal?.declineHint || 'Declined after Director review: insufficient basis to proceed.');
+    setDeclineCommentError('');
+    setDeclineConfirmAcknowledged(false);
+    setDeclineConfirmOpen(true);
+  };
+
   const handleSendSpecialComplaintFormLink = async (event) => {
     event.preventDefault();
     setError('');
@@ -1766,6 +2131,8 @@ export default function DashboardDirector() {
       setSendingSpecialFormLink(false);
     }
   };
+
+  const queueDecisionRows = tab === 'queue' && complaintsLoadedTab === tab ? complaints : filteredComplaints;
 
   return (
     <div className="dash-container">
@@ -2933,94 +3300,135 @@ export default function DashboardDirector() {
                         )}
                       </div>
 
-                      {/* Table for this day */}
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                          <thead>
-                            <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                              {tab === 'queue' ? (
-                                <>
-                                  <th style={{ width: 160, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Urgency</th>
-                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
-                                  <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
-                                </>
-                              ) : (
-                                <>
-                                  <th style={{ width: 180, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaint Status</th>
-                                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
-                                  <th style={{ width: 220, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Reporter Email</th>
-                                  <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
-                                </>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {dayGroup.items.map((c) => {
-                              const urgencyStyle = tab === 'queue' ? getUrgencyStyle(c?.authenticity_level, c?.tags) : null;
-                              const urgencyColor = tab === 'queue' ? (() => {
-                                if (hasSpecialComplaintTag(c?.tags)) return '#ec4899';
-                                const u = Number(c?.authenticity_level);
-                                if (u > 50) return '#22c55e'; // green
-                                if (u === 50) return '#eab308'; // yellow
-                                if (u < 50) return '#ef4444'; // red
-                                return '#cbd5e1'; // gray
-                              })() : null;
-                              return (
+                      {tab === 'queue' ? (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                <th style={{ width: 280, padding: '14px 16px', textAlign: 'left', fontWeight: 900, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>What to Notice</th>
+                                <th style={{ padding: '14px 16px', textAlign: 'left', fontWeight: 900, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                                <th style={{ width: 180, padding: '14px 16px', textAlign: 'left', fontWeight: 900, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
+                                <th style={{ width: 220, padding: '14px 16px', textAlign: 'left', fontWeight: 900, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Decision</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dayGroup.items.map((c) => {
+                                const queueSignal = getQueueDecisionSignal(c, queueDecisionRows);
+                                const urgencyStyle = getUrgencyStyle(c?.authenticity_level, c?.tags);
+                                const urgencyColor = (() => {
+                                  if (hasSpecialComplaintTag(c?.tags)) return '#ec4899';
+                                  const u = Number(c?.authenticity_level);
+                                  if (u > 50) return '#22c55e';
+                                  if (u === 50) return '#eab308';
+                                  if (u < 50) return '#ef4444';
+                                  return '#cbd5e1';
+                                })();
+
+                                return (
+                                  <tr
+                                    key={c.id}
+                                    onClick={() => window.location.assign(`/complaint/review?id=${c.id}&source=${tab}`)}
+                                    style={{
+                                      cursor: 'pointer',
+                                      borderBottom: '1px solid #e2e8f0',
+                                      transition: 'background-color 0.2s ease, box-shadow 0.2s ease, border-left 0.2s ease',
+                                      position: 'relative',
+                                      borderLeft: '4px solid transparent',
+                                      background: '#ffffff',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.background = '#f8fafc';
+                                      e.currentTarget.style.borderLeft = `4px solid ${urgencyColor}`;
+                                      if (urgencyStyle) {
+                                        e.currentTarget.style.boxShadow = urgencyStyle.hover.boxShadow;
+                                      }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.background = '#ffffff';
+                                      e.currentTarget.style.borderLeft = '4px solid transparent';
+                                      e.currentTarget.style.boxShadow = 'none';
+                                    }}
+                                  >
+                                    <td style={{ padding: '16px' }}>
+                                      <QueueSignalPill signal={queueSignal} />
+                                    </td>
+                                    <td style={{ padding: '16px' }}>
+                                      <div className="dash-cell-title" style={{ fontSize: 16 }}>{c.business_name || '—'}</div>
+                                      <div className="dash-cell-sub" style={{ marginTop: 4 }}>{c.business_address || ''}</div>
+                                      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 900, fontSize: 11, padding: '5px 10px', borderRadius: 999, display: 'inline-block', whiteSpace: 'nowrap', border: '1px solid rgba(0,0,0,0.08)' }}>
+                                          {getUrgencyText(c?.authenticity_level, c?.tags)}
+                                        </span>
+                                        <span style={{ color: '#64748b', fontWeight: 900, fontSize: 12 }}>{c.reporter_email || '—'}</span>
+                                      </div>
+                                    </td>
+                                    <td style={{ padding: '16px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
+                                    <td style={{ padding: '16px' }}>
+                                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                                        <button
+                                          type="button"
+                                          className="dash-btn dash-btn-primary"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            window.location.assign(`/complaint/review?id=${c.id}&source=${tab}`);
+                                          }}
+                                          disabled={loading}
+                                          style={{ borderRadius: 999, minWidth: 118, height: 40, padding: '0 18px', textTransform: 'none', fontWeight: 900 }}
+                                        >
+                                          View Details
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+                                <th style={{ width: 180, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaint Status</th>
+                                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Business & Address</th>
+                                <th style={{ width: 220, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Reporter Email</th>
+                                <th style={{ width: 200, padding: '12px', textAlign: 'left', fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Submitted</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dayGroup.items.map((c) => (
                                 <tr
                                   key={c.id}
                                   onClick={() => window.location.assign(`/complaint/review?id=${c.id}&source=${tab}`)}
                                   style={{
                                     cursor: 'pointer',
                                     borderBottom: '1px solid #e2e8f0',
-                                    transition: 'background-color 0.2s ease, box-shadow 0.2s ease, border-left 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                    transition: 'background-color 0.2s ease',
                                     position: 'relative',
-                                    borderLeft: tab === 'queue' ? '4px solid transparent' : 'none',
                                   }}
                                   onMouseEnter={(e) => {
                                     e.currentTarget.style.background = '#f8fafc';
-                                    if (tab === 'queue') {
-                                      e.currentTarget.style.borderLeft = `4px solid ${urgencyColor}`;
-                                    }
-                                    if (urgencyStyle) {
-                                      e.currentTarget.style.boxShadow = urgencyStyle.hover.boxShadow;
-                                    }
                                   }}
                                   onMouseLeave={(e) => {
                                     e.currentTarget.style.background = '#ffffff';
-                                    e.currentTarget.style.borderLeft = tab === 'queue' ? '4px solid transparent' : 'none';
-                                    e.currentTarget.style.boxShadow = 'none';
                                   }}
                                 >
-                                  {tab === 'queue' ? (
-                                    <>
-                                      <td style={{ padding: '12px' }}>
-                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 800, fontSize: 12, padding: '6px 10px', borderRadius: 999, display: 'inline-block', whiteSpace: 'nowrap', border: '1px solid rgba(0,0,0,0.08)' }}>{getUrgencyText(c?.authenticity_level, c?.tags)}</span>
-                                      </td>
-                                      <td style={{ padding: '12px' }}>
-                                        <div className="dash-cell-title">{c.business_name || '—'}</div>
-                                        <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                      </td>
-                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
-                                    </>
-                                  ) : tab === 'history' ? (
-                                    <>
-                                      <td style={{ padding: '12px' }}>
-                                        <span className={statusBadgeClass(getComplaintDecisionStatus(c))}>{formatStatus(getComplaintDecisionStatus(c))}</span>
-                                      </td>
-                                      <td style={{ padding: '12px' }}>
-                                        <div className="dash-cell-title">{c.business_name || '—'}</div>
-                                        <div className="dash-cell-sub">{c.business_address || ''}</div>
-                                      </td>
-                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c.reporter_email || '—'}</td>
-                                      <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
-                                    </>
-                                  ) : null}
+                                  <td style={{ padding: '12px' }}>
+                                    <span className={statusBadgeClass(getComplaintDecisionStatus(c))}>{formatStatus(getComplaintDecisionStatus(c))}</span>
+                                  </td>
+                                  <td style={{ padding: '12px' }}>
+                                    <div className="dash-cell-title">{c.business_name || '—'}</div>
+                                    <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                  </td>
+                                  <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{c.reporter_email || '—'}</td>
+                                  <td style={{ padding: '12px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
                                 </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   );
                 })

@@ -158,6 +158,140 @@ function getPublicComplaintId(complaint) {
   return '—';
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function normalizeReviewKey(value) {
+  return String(value || '').toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function getBusinessKey(complaint) {
+  if (complaint?.business_pk !== null && complaint?.business_pk !== undefined) return `pk:${complaint.business_pk}`;
+  return `text:${normalizeReviewKey(complaint?.business_name)}|${normalizeReviewKey(complaint?.business_address)}`;
+}
+
+function getSimpleReviewGuidance(complaint, relatedComplaints, relatedMissionOrders) {
+  if (!complaint) {
+    return { tone: 'neutral', title: 'Review Needed', summary: 'Open the complaint details before deciding.', suggestedStep: 'Check the description, evidence, and reporter details.', notes: [] };
+  }
+
+  const anchorTime = complaint.created_at ? new Date(complaint.created_at).getTime() : Date.now();
+  const reporterEmail = normalizeReviewKey(complaint.reporter_email);
+  const complaintBusinessKey = getBusinessKey(complaint);
+  const sameReporter = (relatedComplaints || []).filter((row) => normalizeReviewKey(row.reporter_email) === reporterEmail);
+  const sameBusiness = (relatedComplaints || []).filter((row) => getBusinessKey(row) === complaintBusinessKey);
+
+  const reporter24h = sameReporter.filter((row) => {
+    const t = row.created_at ? new Date(row.created_at).getTime() : 0;
+    return t <= anchorTime && t > anchorTime - DAY_MS;
+  });
+  const reporter7d = sameReporter.filter((row) => {
+    const t = row.created_at ? new Date(row.created_at).getTime() : 0;
+    return t <= anchorTime && t > anchorTime - (7 * DAY_MS);
+  });
+  const business7d = sameBusiness.filter((row) => {
+    const t = row.created_at ? new Date(row.created_at).getTime() : 0;
+    return t <= anchorTime && t > anchorTime - (7 * DAY_MS);
+  });
+
+  const reporterBusinesses7d = new Set(reporter7d.map(getBusinessKey));
+  const businessReporters7d = new Set(business7d.map((row) => normalizeReviewKey(row.reporter_email)).filter(Boolean));
+  const activeStatuses = new Set(['draft', 'issued', 'for inspection', 'for_inspection', 'awaiting_signature']);
+  const activeMissionOrder = (relatedMissionOrders || []).find((mo) => activeStatuses.has(normalizeReviewKey(mo.status)));
+  const notes = [];
+
+  if (reporter24h.length > 5 || normalizeReviewKey(complaint.status) === 'on_hold') {
+    notes.push(`This email submitted ${reporter24h.length} complaints in 24 hours. Check for repeated or abusive submissions.`);
+  }
+  if (reporterBusinesses7d.size >= 10) {
+    notes.push(`This reporter contacted ${reporterBusinesses7d.size} different establishments in 7 days. Review for a possible pattern.`);
+  }
+  if (businessReporters7d.size >= 3) {
+    notes.push(`${businessReporters7d.size} different reporters complained about this establishment within 7 days.`);
+  } else {
+    notes.push(`${business7d.length} recent complaint${business7d.length === 1 ? '' : 's'} for this establishment from ${businessReporters7d.size} reporter${businessReporters7d.size === 1 ? '' : 's'}.`);
+  }
+  if (activeMissionOrder) {
+    notes.push(`This establishment already has an active mission order (${String(activeMissionOrder.id).slice(0, 8)}...).`);
+  }
+
+  if (activeMissionOrder) {
+    return {
+      tone: 'info',
+      title: 'Already Under Review',
+      summary: 'There is already an active mission order for this establishment.',
+      suggestedStep: 'If the complaint is valid, approve it so it can be handled with the existing case. Decline only if it is abusive, repetitive, or clearly invalid.',
+      notes,
+    };
+  }
+  if (reporter24h.length > 5 || reporterBusinesses7d.size >= 10) {
+    return {
+      tone: 'warning',
+      title: 'Check Reporter Pattern',
+      summary: 'The reporter activity is unusually high.',
+      suggestedStep: 'Review the evidence and description carefully. Decline if it looks repetitive, abusive, or spam-related; otherwise continue normal review.',
+      notes,
+    };
+  }
+  if (businessReporters7d.size >= 3) {
+    return {
+      tone: 'success',
+      title: 'Eligible for Inspection Review',
+      summary: 'Several different reporters complained about the same establishment within 7 days.',
+      suggestedStep: 'If the complaint details are valid, approval is appropriate so inspection processing can continue.',
+      notes,
+    };
+  }
+  return {
+    tone: 'neutral',
+    title: 'Monitor and Review Normally',
+    summary: 'This complaint does not yet meet the multi-reporter inspection threshold.',
+    suggestedStep: 'Review the complaint on its own merits. Approval or decline should be based on the details and evidence shown here.',
+    notes,
+  };
+}
+
+function ReviewGuidanceCard({ guidance, loading }) {
+  const toneStyles = {
+    success: { border: '#22c55e', bg: '#f0fdf4', title: '#166534', badge: 'Inspection-ready' },
+    warning: { border: '#f59e0b', bg: '#fffbeb', title: '#92400e', badge: 'Check carefully' },
+    info: { border: '#2563eb', bg: '#eff6ff', title: '#1d4ed8', badge: 'Existing case' },
+    neutral: { border: '#94a3b8', bg: '#f8fafc', title: '#0f172a', badge: 'Normal review' },
+  };
+  const style = toneStyles[guidance?.tone] || toneStyles.neutral;
+
+  return (
+    <div style={{ background: style.bg, border: `1px solid ${style.border}`, borderRadius: 12, padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Review Guidance</div>
+          <div style={{ marginTop: 5, color: style.title, fontWeight: 1000, fontSize: 18 }}>
+            {loading ? 'Checking related complaints...' : guidance.title}
+          </div>
+        </div>
+        <span className="status-badge" style={{ border: `1px solid ${style.border}`, background: '#ffffff', color: style.title, fontWeight: 900 }}>{style.badge}</span>
+      </div>
+      {!loading ? (
+        <>
+          <div style={{ marginTop: 10, color: '#0f172a', fontWeight: 800, lineHeight: 1.5 }}>{guidance.summary}</div>
+          <div style={{ marginTop: 8, color: '#334155', lineHeight: 1.55, fontSize: 14 }}>{guidance.suggestedStep}</div>
+          {guidance.notes?.length ? (
+            <div style={{ marginTop: 12, display: 'grid', gap: 7 }}>
+              {guidance.notes.slice(0, 4).map((note) => (
+                <div key={note} style={{ display: 'flex', gap: 8, color: '#334155', fontSize: 13, lineHeight: 1.4 }}>
+                  <span aria-hidden="true" style={{ color: style.title, fontWeight: 1000 }}>•</span>
+                  <span>{note}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div style={{ marginTop: 10, color: '#64748b', fontWeight: 700 }}>Please wait while the system checks recent reporter and establishment activity.</div>
+      )}
+    </div>
+  );
+}
+
 export default function ComplaintReview() {
   const complaintId = useMemo(() => getComplaintIdFromQuery(), []);
 
@@ -168,6 +302,9 @@ export default function ComplaintReview() {
   const [toast, setToast] = useState('');
 
   const [complaint, setComplaint] = useState(null);
+  const [relatedComplaints, setRelatedComplaints] = useState([]);
+  const [relatedMissionOrders, setRelatedMissionOrders] = useState([]);
+  const [guidanceLoading, setGuidanceLoading] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [evidenceIndex, setEvidenceIndex] = useState(0);
 
@@ -266,11 +403,63 @@ export default function ComplaintReview() {
       setComplaint(data);
       setDeclineComment(data?.decline_comment || '');
       setEvidenceIndex(0);
+      loadReviewGuidance(data);
     } catch (e) {
       showError(e?.message || 'Failed to load complaint.');
       setComplaint(null);
+      setRelatedComplaints([]);
+      setRelatedMissionOrders([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadReviewGuidance = async (baseComplaint) => {
+    if (!baseComplaint?.created_at) {
+      setRelatedComplaints([]);
+      setRelatedMissionOrders([]);
+      return;
+    }
+
+    setGuidanceLoading(true);
+    try {
+      const anchor = new Date(baseComplaint.created_at);
+      const start = new Date(anchor.getTime() - (7 * DAY_MS));
+      const end = new Date(anchor.getTime() + 1000);
+
+      const { data: complaintRows = [], error: complaintError } = await supabase
+        .from('complaints')
+        .select('id, business_pk, business_name, business_address, reporter_email, status, created_at')
+        .gte('created_at', start.toISOString())
+        .lte('created_at', end.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1000);
+
+      if (complaintError) throw complaintError;
+
+      const businessKey = getBusinessKey(baseComplaint);
+      const sameBusinessRows = (complaintRows || []).filter((row) => getBusinessKey(row) === businessKey);
+      const sameBusinessIds = sameBusinessRows.map((row) => row.id).filter(Boolean);
+
+      const { data: missionRows = [], error: missionError } = sameBusinessIds.length
+        ? await supabase
+            .from('mission_orders')
+            .select('id, complaint_id, status, created_at, updated_at')
+            .in('complaint_id', sameBusinessIds)
+            .order('created_at', { ascending: false })
+            .limit(50)
+        : { data: [], error: null };
+
+      if (missionError) throw missionError;
+
+      setRelatedComplaints(complaintRows || []);
+      setRelatedMissionOrders(missionRows || []);
+    } catch (e) {
+      console.warn('Failed to load review guidance:', e);
+      setRelatedComplaints([baseComplaint]);
+      setRelatedMissionOrders([]);
+    } finally {
+      setGuidanceLoading(false);
     }
   };
 
@@ -309,6 +498,11 @@ export default function ComplaintReview() {
     const s = String(complaint?.status || '').toLowerCase();
     return ['submitted', 'pending', 'new'].includes(s);
   };
+
+  const reviewGuidance = useMemo(
+    () => getSimpleReviewGuidance(complaint, relatedComplaints, relatedMissionOrders),
+    [complaint, relatedComplaints, relatedMissionOrders]
+  );
 
   const updateComplaintStatus = async (newStatus) => {
     if (!complaintId) return;
@@ -939,6 +1133,8 @@ export default function ComplaintReview() {
 
                   {/* RIGHT COLUMN */}
                   <div style={{ display: 'grid', gap: 16, alignSelf: 'start', position: 'sticky', top: 14 }}>
+                    <ReviewGuidanceCard guidance={reviewGuidance} loading={guidanceLoading} />
+
                     {/* Comments */}
                     <div style={{
                       background: 'transparent',

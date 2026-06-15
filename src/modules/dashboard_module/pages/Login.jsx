@@ -52,6 +52,10 @@ export default function Login() {
 
           removeSupabaseAuthKeys(window.localStorage);
           removeSupabaseAuthKeys(window.sessionStorage);
+          window.localStorage.removeItem('auth:role');
+          window.localStorage.removeItem('auth:userId');
+          window.sessionStorage.removeItem('auth:role');
+          window.sessionStorage.removeItem('auth:userId');
         } catch {
           // ignore
         }
@@ -79,7 +83,7 @@ export default function Login() {
     const role = user?.app_metadata?.role || user?.user_metadata?.role;
 
     if (role) {
-      navigateToDashboard(role);
+      navigateToDashboard(role, user?.id);
       return;
     }
 
@@ -93,7 +97,7 @@ export default function Login() {
       if (error) throw error;
 
       if (data?.role) {
-        navigateToDashboard(data.role);
+        navigateToDashboard(data.role, user?.id);
         return;
       }
     } catch (e) {
@@ -105,8 +109,18 @@ export default function Login() {
     );
   };
 
-  const navigateToDashboard = (roleValue) => {
+  const navigateToDashboard = (roleValue, userId = null) => {
     const role = String(roleValue).toLowerCase();
+    try {
+      const normalizedRole =
+        role === 'head inspector' || role === 'head_inspector' || role === 'headinspector'
+          ? 'head_inspector'
+          : role;
+      localStorage.setItem('auth:role', normalizedRole);
+      if (userId) localStorage.setItem('auth:userId', userId);
+    } catch {
+      // ignore cache write failures
+    }
 
     if (role === 'director') {
       window.location.href = '/dashboard/director';

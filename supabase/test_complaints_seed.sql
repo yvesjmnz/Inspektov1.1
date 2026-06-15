@@ -1,0 +1,481 @@
+-- Test complaints for Director complaint review guidance.
+-- Run this in the Supabase SQL editor for a development/test database.
+-- It does not modify stored procedures.
+--
+-- Cleanup:
+--   Re-run this file safely; it removes and recreates only these fixed test rows.
+
+begin;
+
+delete from public.mission_orders
+where id = '99999999-9999-4999-8999-999999999901';
+
+delete from public.complaints
+where id in (
+  '99999999-0000-4000-8000-000000000001',
+  '99999999-0000-4000-8000-000000000101',
+  '99999999-0000-4000-8000-000000000102',
+  '99999999-0000-4000-8000-000000000103',
+  '99999999-0000-4000-8000-000000000104',
+  '99999999-0000-4000-8000-000000000105',
+  '99999999-0000-4000-8000-000000000106',
+  '99999999-0000-4000-8000-000000000201',
+  '99999999-0000-4000-8000-000000000202',
+  '99999999-0000-4000-8000-000000000203',
+  '99999999-0000-4000-8000-000000000204',
+  '99999999-0000-4000-8000-000000000205',
+  '99999999-0000-4000-8000-000000000206',
+  '99999999-0000-4000-8000-000000000207',
+  '99999999-0000-4000-8000-000000000208',
+  '99999999-0000-4000-8000-000000000209',
+  '99999999-0000-4000-8000-000000000210',
+  '99999999-0000-4000-8000-000000000301',
+  '99999999-0000-4000-8000-000000000302',
+  '99999999-0000-4000-8000-000000000303',
+  '99999999-0000-4000-8000-000000000401'
+);
+
+insert into public.complaints (
+  id,
+  business_name,
+  business_address,
+  complaint_description,
+  reporter_email,
+  image_urls,
+  document_urls,
+  authenticity_level,
+  authenticity_tier,
+  tags,
+  status,
+  created_at,
+  email_verified,
+  email_verified_at,
+  certification_accepted,
+  certification_accepted_at
+) values
+-- Normal review: should show "Monitor and Review Normally".
+(
+  '99999999-0000-4000-8000-000000000001',
+  'Test DS - Normal Cafe',
+  '100 Normal Street, Manila',
+  'Test case: one ordinary complaint with enough details for normal review. The establishment allegedly operates with unclear posted permits.',
+  'normal.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  55,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '3 hours',
+  true,
+  now() - interval '3 hours',
+  true,
+  now() - interval '3 hours'
+),
+
+-- Per-email daily limit: 6 complaints from the same reporter in 24 hours.
+(
+  '99999999-0000-4000-8000-000000000101',
+  'Test DS - Daily Spam Store 1',
+  '201 Daily Limit Avenue, Manila',
+  'Test case: complaint 1 from the same email within 24 hours.',
+  'daily.spam@example.test',
+  array[]::text[],
+  array[]::text[],
+  45,
+  'Medium',
+  array['Violation: Missing Commerical Space Clearance'],
+  'Submitted',
+  now() - interval '6 hours',
+  true,
+  now() - interval '6 hours',
+  true,
+  now() - interval '6 hours'
+),
+(
+  '99999999-0000-4000-8000-000000000102',
+  'Test DS - Daily Spam Store 2',
+  '202 Daily Limit Avenue, Manila',
+  'Test case: complaint 2 from the same email within 24 hours.',
+  'daily.spam@example.test',
+  array[]::text[],
+  array[]::text[],
+  45,
+  'Medium',
+  array['Violation: Missing Commerical Space Clearance'],
+  'Submitted',
+  now() - interval '5 hours',
+  true,
+  now() - interval '5 hours',
+  true,
+  now() - interval '5 hours'
+),
+(
+  '99999999-0000-4000-8000-000000000103',
+  'Test DS - Daily Spam Store 3',
+  '203 Daily Limit Avenue, Manila',
+  'Test case: complaint 3 from the same email within 24 hours.',
+  'daily.spam@example.test',
+  array[]::text[],
+  array[]::text[],
+  45,
+  'Medium',
+  array['Violation: Missing Commerical Space Clearance'],
+  'Submitted',
+  now() - interval '4 hours',
+  true,
+  now() - interval '4 hours',
+  true,
+  now() - interval '4 hours'
+),
+(
+  '99999999-0000-4000-8000-000000000104',
+  'Test DS - Daily Spam Store 4',
+  '204 Daily Limit Avenue, Manila',
+  'Test case: complaint 4 from the same email within 24 hours.',
+  'daily.spam@example.test',
+  array[]::text[],
+  array[]::text[],
+  45,
+  'Medium',
+  array['Violation: Missing Commerical Space Clearance'],
+  'Submitted',
+  now() - interval '3 hours',
+  true,
+  now() - interval '3 hours',
+  true,
+  now() - interval '3 hours'
+),
+(
+  '99999999-0000-4000-8000-000000000105',
+  'Test DS - Daily Spam Store 5',
+  '205 Daily Limit Avenue, Manila',
+  'Test case: complaint 5 from the same email within 24 hours.',
+  'daily.spam@example.test',
+  array[]::text[],
+  array[]::text[],
+  45,
+  'Medium',
+  array['Violation: Missing Commerical Space Clearance'],
+  'Submitted',
+  now() - interval '2 hours',
+  true,
+  now() - interval '2 hours',
+  true,
+  now() - interval '2 hours'
+),
+(
+  '99999999-0000-4000-8000-000000000106',
+  'Test DS - Daily Spam Store 6',
+  '206 Daily Limit Avenue, Manila',
+  'Test case: complaint 6 from the same email within 24 hours. This should trigger the daily reporter warning.',
+  'daily.spam@example.test',
+  array[]::text[],
+  array[]::text[],
+  35,
+  'Low',
+  array['Violation: Missing Commerical Space Clearance'],
+  'Submitted',
+  now() - interval '1 hour',
+  true,
+  now() - interval '1 hour',
+  true,
+  now() - interval '1 hour'
+),
+
+-- Reporter pattern: same reporter targets 10 different establishments in 7 days.
+(
+  '99999999-0000-4000-8000-000000000201',
+  'Test DS - Pattern Business 1',
+  '301 Pattern Road, Manila',
+  'Test case: pattern complaint 1 against a different establishment.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '6 days',
+  true,
+  now() - interval '6 days',
+  true,
+  now() - interval '6 days'
+),
+(
+  '99999999-0000-4000-8000-000000000202',
+  'Test DS - Pattern Business 2',
+  '302 Pattern Road, Manila',
+  'Test case: pattern complaint 2 against a different establishment.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '5 days 12 hours',
+  true,
+  now() - interval '5 days 12 hours',
+  true,
+  now() - interval '5 days 12 hours'
+),
+(
+  '99999999-0000-4000-8000-000000000203',
+  'Test DS - Pattern Business 3',
+  '303 Pattern Road, Manila',
+  'Test case: pattern complaint 3 against a different establishment.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '5 days',
+  true,
+  now() - interval '5 days',
+  true,
+  now() - interval '5 days'
+),
+(
+  '99999999-0000-4000-8000-000000000204',
+  'Test DS - Pattern Business 4',
+  '304 Pattern Road, Manila',
+  'Test case: pattern complaint 4 against a different establishment.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '4 days 12 hours',
+  true,
+  now() - interval '4 days 12 hours',
+  true,
+  now() - interval '4 days 12 hours'
+),
+(
+  '99999999-0000-4000-8000-000000000205',
+  'Test DS - Pattern Business 5',
+  '305 Pattern Road, Manila',
+  'Test case: pattern complaint 5 against a different establishment.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '4 days',
+  true,
+  now() - interval '4 days',
+  true,
+  now() - interval '4 days'
+),
+(
+  '99999999-0000-4000-8000-000000000206',
+  'Test DS - Pattern Business 6',
+  '306 Pattern Road, Manila',
+  'Test case: pattern complaint 6 against a different establishment.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '3 days 12 hours',
+  true,
+  now() - interval '3 days 12 hours',
+  true,
+  now() - interval '3 days 12 hours'
+),
+(
+  '99999999-0000-4000-8000-000000000207',
+  'Test DS - Pattern Business 7',
+  '307 Pattern Road, Manila',
+  'Test case: pattern complaint 7 against a different establishment.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '3 days',
+  true,
+  now() - interval '3 days',
+  true,
+  now() - interval '3 days'
+),
+(
+  '99999999-0000-4000-8000-000000000208',
+  'Test DS - Pattern Business 8',
+  '308 Pattern Road, Manila',
+  'Test case: pattern complaint 8 against a different establishment.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '2 days',
+  true,
+  now() - interval '2 days',
+  true,
+  now() - interval '2 days'
+),
+(
+  '99999999-0000-4000-8000-000000000209',
+  'Test DS - Pattern Business 9',
+  '309 Pattern Road, Manila',
+  'Test case: pattern complaint 9 against a different establishment.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '1 day',
+  true,
+  now() - interval '1 day',
+  true,
+  now() - interval '1 day'
+),
+(
+  '99999999-0000-4000-8000-000000000210',
+  'Test DS - Pattern Business 10',
+  '310 Pattern Road, Manila',
+  'Test case: pattern complaint 10. Opening this one should show the 10-establishment reporter pattern warning.',
+  'pattern.reporter@example.test',
+  array[]::text[],
+  array[]::text[],
+  50,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '2 hours',
+  true,
+  now() - interval '2 hours',
+  true,
+  now() - interval '2 hours'
+),
+
+-- Inspection threshold: 3 different reporters for the same establishment in 7 days.
+(
+  '99999999-0000-4000-8000-000000000301',
+  'Test DS - Inspection Threshold Mart',
+  '400 Threshold Street, Manila',
+  'Test case: first complaint for the same establishment.',
+  'threshold.one@example.test',
+  array[]::text[],
+  array[]::text[],
+  65,
+  'High',
+  array['Violation: Selling Cigarettes to Minors'],
+  'Submitted',
+  now() - interval '2 days',
+  true,
+  now() - interval '2 days',
+  true,
+  now() - interval '2 days'
+),
+(
+  '99999999-0000-4000-8000-000000000302',
+  'Test DS - Inspection Threshold Mart',
+  '400 Threshold Street, Manila',
+  'Test case: second complaint from another reporter for the same establishment.',
+  'threshold.two@example.test',
+  array[]::text[],
+  array[]::text[],
+  65,
+  'High',
+  array['Violation: Selling Cigarettes to Minors'],
+  'Submitted',
+  now() - interval '1 day',
+  true,
+  now() - interval '1 day',
+  true,
+  now() - interval '1 day'
+),
+(
+  '99999999-0000-4000-8000-000000000303',
+  'Test DS - Inspection Threshold Mart',
+  '400 Threshold Street, Manila',
+  'Test case: third complaint from another reporter. Opening this should show inspection-ready guidance.',
+  'threshold.three@example.test',
+  array[]::text[],
+  array[]::text[],
+  65,
+  'High',
+  array['Violation: Selling Cigarettes to Minors'],
+  'Submitted',
+  now() - interval '1 hour',
+  true,
+  now() - interval '1 hour',
+  true,
+  now() - interval '1 hour'
+),
+
+-- Optional active mission order test: the DO block below creates an active MO only if a profile exists.
+(
+  '99999999-0000-4000-8000-000000000401',
+  'Test DS - Existing Case Store',
+  '500 Existing Case Lane, Manila',
+  'Test case: complaint for an establishment that already has an active mission order, if a profile exists for the seed to use.',
+  'existing.case@example.test',
+  array[]::text[],
+  array[]::text[],
+  60,
+  'Medium',
+  array['Violation: Operating Without a Valid Business Permit'],
+  'Submitted',
+  now() - interval '30 minutes',
+  true,
+  now() - interval '30 minutes',
+  true,
+  now() - interval '30 minutes'
+);
+
+do $$
+declare
+  v_creator uuid;
+begin
+  select id
+  into v_creator
+  from public.profiles
+  where role in ('director', 'head_inspector', 'head inspector')
+  order by created_at nulls last
+  limit 1;
+
+  if v_creator is not null then
+    insert into public.mission_orders (
+      id,
+      complaint_id,
+      created_by,
+      status,
+      title,
+      content,
+      created_at,
+      updated_at,
+      submitted_at
+    ) values (
+      '99999999-9999-4999-8999-999999999901',
+      '99999999-0000-4000-8000-000000000401',
+      v_creator,
+      'issued',
+      'Test DS - Existing Case Mission Order',
+      'Test mission order for existing-case review guidance.',
+      now() - interval '20 minutes',
+      now() - interval '20 minutes',
+      now() - interval '20 minutes'
+    )
+    on conflict (id) do nothing;
+  end if;
+end $$;
+
+commit;
