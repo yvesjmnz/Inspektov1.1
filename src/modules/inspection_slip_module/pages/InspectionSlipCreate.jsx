@@ -6,6 +6,16 @@ import Header from '../../../components/Header';
 import Footer from '../../../components/Footer';
 import XIconButton from '../../../components/XIconButton.jsx';
 import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '../../../lib/inspectionReports';
+import {
+  enqueueInspectionSync,
+  getOfflineBusinessAdditional,
+  getInspectionDraft,
+  getPendingInspectionSyncCount,
+  saveOfflineBusinessRecords,
+  saveInspectionDraft,
+  searchOfflineBusinesses,
+  syncPendingInspectionReports,
+} from '../../../lib/offlineInspectionSync';
 import { supabase } from '../../../lib/supabase';
 import { getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
 import './InspectionSlipCreate.css';
@@ -424,13 +434,20 @@ export default function InspectionSlipCreate() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
 
+  const getCachedSessionUser = async () => {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.user || null;
+  };
+
   const [missionOrder, setMissionOrder] = useState(null);
   const [complaint, setComplaint] = useState(null);
   const [signedAttachmentUrl, setSignedAttachmentUrl] = useState('');
+  const [signedAttachmentContentType, setSignedAttachmentContentType] = useState('');
   const [_signedAttachmentMeta, setSignedAttachmentMeta] = useState({
     uploadedAt: null,
     uploadedBy: null,
   });
+  const signedAttachmentBlobRef = useRef(null);
   const [assignedInspectors, setAssignedInspectors] = useState([]);
 
   const [inspectionReportId, setInspectionReportId] = useState(null);
@@ -441,6 +458,10 @@ export default function InspectionSlipCreate() {
   const [isCompleted, setIsCompleted] = useState(false);
   const [completionKnown, setCompletionKnown] = useState(false);
   const [inspectionStarted, setInspectionStarted] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine !== false);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [syncingOffline, setSyncingOffline] = useState(false);
+  const [offlineDraftLoaded, setOfflineDraftLoaded] = useState(false);
 
   const [businessSearch, setBusinessSearch] = useState('');
   const [businessResult, setBusinessResult] = useState(null);
@@ -731,6 +752,54 @@ export default function InspectionSlipCreate() {
   const [ownerSignature, setOwnerSignature] = useState('');
   const [inspectorSignaturePath, setInspectorSignaturePath] = useState(null);
   const [ownerSignaturePath, setOwnerSignaturePath] = useState(null);
+  const offlineInspectorSignatureBlobRef = useRef(null);
+  const offlineOwnerSignatureBlobRef = useRef(null);
+
+  const refreshPendingSyncCount = async () => {
+    try {
+      setPendingSyncCount(await getPendingInspectionSyncCount());
+    } catch {
+      setPendingSyncCount(0);
+    }
+  };
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      void runOfflineSync();
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    void refreshPendingSyncCount();
+    if (navigator.onLine !== false) void runOfflineSync();
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const runOfflineSync = async () => {
+    if (syncingOffline || navigator.onLine === false) return;
+    setSyncingOffline(true);
+    try {
+      const result = await syncPendingInspectionReports();
+      await refreshPendingSyncCount();
+      if (result.synced > 0) {
+        setToast(`${result.synced} offline inspection update${result.synced === 1 ? '' : 's'} synced.`);
+      }
+      if (result.failed > 0) {
+        setError(`${result.failed} offline inspection update${result.failed === 1 ? '' : 's'} could not sync yet.`);
+      }
+    } catch (e) {
+      setError(e?.message || 'Offline inspection sync failed.');
+    } finally {
+      setSyncingOffline(false);
+    }
+  };
 
   const configureCanvas = (canvas) => {
     if (!canvas) return;
@@ -782,6 +851,16 @@ export default function InspectionSlipCreate() {
       setLoading(true);
       setError('');
       try {
+        if (navigator.onLine === false) {
+          const draft = await getInspectionDraft(missionOrderId);
+          if (draft) {
+            applyOfflineDraft(draft);
+            setToast('Offline mode: showing the inspection slip prepared on this device.');
+            return;
+          }
+          throw new Error('This inspection slip was not prepared for offline use on this device.');
+        }
+
         const loadComplaintRecord = async (complaintId, options = {}) => {
           if (!complaintId) {
             setComplaint(null);
@@ -830,9 +909,8 @@ export default function InspectionSlipCreate() {
           return c;
         };
 
-        const { data: userData, error: userError } = await supabase.auth.getUser();
-        if (userError) throw userError;
-        const userId = userData?.user?.id;
+        const user = await getCachedSessionUser();
+        const userId = user?.id;
         if (!userId) throw new Error('Not authenticated. Please login again.');
         setCurrentInspectorId(userId);
 
@@ -870,6 +948,7 @@ export default function InspectionSlipCreate() {
 
         setMissionOrder(mo);
         setSignedAttachmentUrl(mo?.secretary_signed_attachment_url || '');
+        setSignedAttachmentContentType('');
         setSignedAttachmentMeta({
           uploadedAt: mo?.secretary_signed_attachment_uploaded_at || null,
           uploadedBy: mo?.secretary_signed_attachment_uploaded_by || null,
@@ -1208,12 +1287,31 @@ export default function InspectionSlipCreate() {
           setAutoFillMessage('');
         }
       } catch (e) {
-        setMissionOrder(null);
-        setComplaint(null);
-        setInspectionReportId(null);
-        setInspectionOwnerId(null);
-        setInspectionOwnerName('');
-        setError(e?.message || 'Failed to load mission order.');
+        let restored = false;
+        try {
+          const draft = await getInspectionDraft(missionOrderId);
+          if (draft) {
+            applyOfflineDraft(draft);
+            if (navigator.onLine === false) {
+              setError('');
+              setToast('Offline mode: showing the inspection slip prepared on this device.');
+            } else {
+              setError(e?.message || 'Showing the locally prepared inspection slip.');
+            }
+            restored = true;
+          }
+        } catch {
+          // If local restore also fails, fall through to the normal error state.
+        }
+
+        if (!restored) {
+          setMissionOrder(null);
+          setComplaint(null);
+          setInspectionReportId(null);
+          setInspectionOwnerId(null);
+          setInspectionOwnerName('');
+          setError(e?.message || 'Failed to load mission order.');
+        }
       } finally {
         setLoading(false);
       }
@@ -1316,9 +1414,11 @@ export default function InspectionSlipCreate() {
 
     const dataUrl = canvas.toDataURL('image/png');
     if (who === 'inspector') {
+      offlineInspectorSignatureBlobRef.current = null;
       setInspectorSignaturePath(null);
       setInspectorSignature(dataUrl);
     } else {
+      offlineOwnerSignatureBlobRef.current = null;
       setOwnerSignaturePath(null);
       setOwnerSignature(dataUrl);
     }
@@ -1331,9 +1431,11 @@ export default function InspectionSlipCreate() {
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (who === 'inspector') {
+      offlineInspectorSignatureBlobRef.current = null;
       setInspectorSignaturePath(null);
       setInspectorSignature('');
     } else {
+      offlineOwnerSignatureBlobRef.current = null;
       setOwnerSignaturePath(null);
       setOwnerSignature('');
     }
@@ -1447,20 +1549,29 @@ export default function InspectionSlipCreate() {
     try {
       const businessBin = String(b?.bin || bin || '').trim();
       const businessName = String(b?.business_name || '').trim();
-      const additionalQuery = supabase
-        .from('businesses_additional')
-        .select('line_of_business, total_employees, owner_name');
-
       let addRows = [];
       let addErr = null;
-      if (businessBin) {
-        const result = await additionalQuery.eq('bin', businessBin);
-        addRows = result.data || [];
-        addErr = result.error;
-      } else if (businessName) {
-        const result = await additionalQuery.eq('business_name', businessName);
-        addRows = result.data || [];
-        addErr = result.error;
+
+      if (navigator.onLine === false) {
+        addRows = await getOfflineBusinessAdditional({ bin: businessBin, businessName });
+      } else if (businessBin || businessName) {
+        const additionalQuery = supabase
+          .from('businesses_additional')
+          .select('line_of_business, total_employees, owner_name, bin, business_name');
+
+        if (businessBin) {
+          const result = await additionalQuery.eq('bin', businessBin);
+          addRows = result.data || [];
+          addErr = result.error;
+        } else {
+          const result = await additionalQuery.eq('business_name', businessName);
+          addRows = result.data || [];
+          addErr = result.error;
+        }
+
+        if (!addErr && addRows?.length) {
+          await saveOfflineBusinessRecords({ businesses: [b], additional: addRows });
+        }
       }
 
       if (addErr) throw addErr;
@@ -1519,6 +1630,8 @@ export default function InspectionSlipCreate() {
     }
 
     try {
+      if (navigator.onLine === false) return;
+
       let previousQuery = supabase
         .from('inspection_reports')
         .select(
@@ -1675,7 +1788,9 @@ export default function InspectionSlipCreate() {
   const inspectionLockMessage = inspectionLocked
     ? `This mission order already has an inspection slip started by ${inspectionOwnerName || 'another assigned inspector'}. Only one inspection slip is allowed per mission order.`
     : '';
-  const signedAttachmentIsPdf = /\.pdf(\?|#|$)/i.test(String(signedAttachmentUrl || ''));
+  const signedAttachmentIsPdf =
+    String(signedAttachmentContentType || '').toLowerCase().includes('pdf') ||
+    /\.pdf(\?|#|$)/i.test(String(signedAttachmentUrl || ''));
   const applyViolationFinding = (ordinanceLabel, nextStatus) => {
     const ordinanceLabels = inspectionViolationFindings.map((item) => item.ordinanceLabel);
     const shouldRestoreCommentCursor = !hasFreeformCommentText(additionalComments, ordinanceLabels);
@@ -1776,6 +1891,282 @@ export default function InspectionSlipCreate() {
     return await res.blob();
   };
 
+  const blobToObjectUrl = (blob) => {
+    if (!blob) return '';
+    try {
+      return URL.createObjectURL(blob);
+    } catch {
+      return '';
+    }
+  };
+
+  const normalizeEvidenceForDraft = (photos) =>
+    (photos || []).map((photo) => ({
+      blob: photo?.blob || null,
+      url: photo?.url || '',
+      ts: photo?.ts || Date.now(),
+      storagePath: photo?.storagePath || null,
+      contentType: photo?.blob?.type || 'image/jpeg',
+    }));
+
+  const createReportPayload = ({ attachmentUrls = null, inspectorSigPath = null, ownerSigPath = null } = {}) => ({
+    bin: businessDetails.bin || null,
+    business_name: ownerDetails.businessName || null,
+    owner_name: toOwnerNameString() || null,
+    business_address: businessDetails.address || null,
+
+    inspector_lat: inspectorLocation.lat,
+    inspector_lng: inspectorLocation.lng,
+    inspector_location_accuracy_m: inspectorLocation.accuracy,
+    inspector_location_captured_at: inspectorLocation.capturedAt,
+
+    business_permit_status: toDbStatus(checklist.business_permit),
+    cctv_status: toDbStatus(checklist.with_cctv),
+    signage_status: toDbStatus(checklist.signage_2sqm),
+    cctv_count: cctvCount ? Number(cctvCount) : 0,
+    signage_sqm: signage_sqm ? Number(signage_sqm) : 0,
+
+    inspection_comments: buildInspectionComments(complianceStatus, additionalComments),
+    lines_of_business: lineOfBusinessList.filter(Boolean),
+    no_of_employees: businessDetails.numberOfEmployees ? Number(businessDetails.numberOfEmployees) : null,
+    estimated_area_sqm: businessDetails.estimatedAreaSqm ? Number(businessDetails.estimatedAreaSqm) : null,
+    mobile_no: businessDetails.cellphone || null,
+    landline_no: businessDetails.landline || null,
+    email_address: businessDetails.email || null,
+    attachment_urls: attachmentUrls,
+    inspector_signature_url: inspectorSigPath || inspectorSignaturePath || null,
+    owner_signature_url: ownerSigPath || ownerSignaturePath || null,
+  });
+
+  const buildOfflineDraft = async ({ syncStatus = 'draft', completedAt = null } = {}) => {
+    let inspectorSignatureBlob = offlineInspectorSignatureBlobRef.current || null;
+    let ownerSignatureBlob = offlineOwnerSignatureBlobRef.current || null;
+    let signedAttachmentBlob = signedAttachmentBlobRef.current || null;
+
+    if (inspectorSignature && inspectorSignature.startsWith('data:image')) {
+      inspectorSignatureBlob = await dataUrlToBlob(inspectorSignature);
+    }
+    if (ownerSignature && ownerSignature.startsWith('data:image')) {
+      ownerSignatureBlob = await dataUrlToBlob(ownerSignature);
+    }
+    if (!signedAttachmentBlob && signedAttachmentUrl && signedAttachmentUrl.startsWith('blob:')) {
+      try {
+        signedAttachmentBlob = await (await fetch(signedAttachmentUrl)).blob();
+      } catch {
+        signedAttachmentBlob = null;
+      }
+    }
+
+    return {
+      missionOrderId,
+      inspectionReportId,
+      inspectorId: currentInspectorId,
+      complaintId: missionOrder?.complaint_id || complaint?.id || null,
+      completedAt,
+      syncStatus,
+      formState: {
+        ownerDetails,
+        businessDetails,
+        inspectorLocation,
+        ownerType,
+        lineOfBusinessList,
+        checklist,
+        cctvCount,
+        signage_sqm,
+        complianceStatus,
+        additionalComments,
+        inspectorSignature: inspectorSignatureBlob ? '' : inspectorSignature,
+        ownerSignature: ownerSignatureBlob ? '' : ownerSignature,
+        inspectorSignaturePath,
+        ownerSignaturePath,
+      },
+      evidencePhotos: normalizeEvidenceForDraft(evidencePhotos),
+      inspectorSignatureBlob,
+      inspectorSignatureContentType: inspectorSignatureBlob?.type || 'image/png',
+      ownerSignatureBlob,
+      ownerSignatureContentType: ownerSignatureBlob?.type || 'image/png',
+      inspectorSignaturePath,
+      ownerSignaturePath,
+      reportPayload: createReportPayload(),
+      missionOrderSnapshot: missionOrder,
+      complaintSnapshot: complaint,
+      assignedInspectorsSnapshot: assignedInspectors,
+      signedAttachmentBlob,
+      signedAttachmentContentType: signedAttachmentBlob?.type || signedAttachmentContentType || '',
+      signedAttachmentUrl: signedAttachmentBlob ? '' : signedAttachmentUrl,
+      signedAttachmentMeta: _signedAttachmentMeta,
+    };
+  };
+
+  const applyOfflineDraft = (draft) => {
+    const state = draft?.formState || {};
+    if (draft?.inspectorId) setCurrentInspectorId(draft.inspectorId);
+    const reportSnapshot = draft?.inspectionReportSnapshot || null;
+
+    if (Array.isArray(draft?.assignedInspectorsSnapshot)) {
+      setAssignedInspectors(draft.assignedInspectorsSnapshot);
+    }
+
+    if (draft?.signedAttachmentBlob) {
+      signedAttachmentBlobRef.current = draft.signedAttachmentBlob;
+      setSignedAttachmentContentType(draft.signedAttachmentContentType || draft.signedAttachmentBlob.type || '');
+      setSignedAttachmentUrl(blobToObjectUrl(draft.signedAttachmentBlob));
+    } else if (draft?.signedAttachmentUrl) {
+      setSignedAttachmentContentType(draft.signedAttachmentContentType || '');
+      setSignedAttachmentUrl(draft.signedAttachmentUrl);
+    }
+
+    if (draft?.signedAttachmentMeta) {
+      setSignedAttachmentMeta({
+        uploadedAt: draft.signedAttachmentMeta.uploadedAt || null,
+        uploadedBy: draft.signedAttachmentMeta.uploadedBy || null,
+      });
+    } else if (draft?.missionOrderSnapshot) {
+      setSignedAttachmentMeta({
+        uploadedAt: draft.missionOrderSnapshot.secretary_signed_attachment_uploaded_at || null,
+        uploadedBy: draft.missionOrderSnapshot.secretary_signed_attachment_uploaded_by || null,
+      });
+    }
+
+    if (state.ownerDetails) setOwnerDetails(state.ownerDetails);
+    if (state.businessDetails) setBusinessDetails(state.businessDetails);
+    if (state.inspectorLocation) setInspectorLocation(state.inspectorLocation);
+    if (state.ownerType) setOwnerType(state.ownerType);
+    if (Array.isArray(state.lineOfBusinessList)) setLineOfBusinessList(state.lineOfBusinessList.length ? state.lineOfBusinessList : ['']);
+    if (state.checklist) setChecklist(state.checklist);
+    setCctvCount(state.cctvCount || '');
+    setSignageSqm(state.signage_sqm || '');
+    setComplianceStatus(state.complianceStatus || '');
+    setAdditionalComments(state.additionalComments || '');
+    setInspectorSignaturePath(state.inspectorSignaturePath || draft.inspectorSignaturePath || null);
+    setOwnerSignaturePath(state.ownerSignaturePath || draft.ownerSignaturePath || null);
+
+    const restoredEvidence = (draft.evidencePhotos || []).map((photo) => ({
+      ...photo,
+      url: photo?.blob ? blobToObjectUrl(photo.blob) : photo?.url || '',
+    }));
+    if (restoredEvidence.length) setEvidencePhotos(restoredEvidence);
+
+    if (draft.inspectorSignatureBlob) {
+      offlineInspectorSignatureBlobRef.current = draft.inspectorSignatureBlob;
+      setInspectorSignature(blobToObjectUrl(draft.inspectorSignatureBlob));
+    } else if (state.inspectorSignature) {
+      setInspectorSignature(state.inspectorSignature);
+    }
+
+    if (draft.ownerSignatureBlob) {
+      offlineOwnerSignatureBlobRef.current = draft.ownerSignatureBlob;
+      setOwnerSignature(blobToObjectUrl(draft.ownerSignatureBlob));
+    } else if (state.ownerSignature) {
+      setOwnerSignature(state.ownerSignature);
+    }
+
+    if (draft.inspectionReportId) setInspectionReportId(draft.inspectionReportId);
+    if (draft.missionOrderSnapshot && !missionOrder) setMissionOrder(draft.missionOrderSnapshot);
+    if (draft.complaintSnapshot && !complaint) setComplaint(draft.complaintSnapshot);
+
+    let nextInspectionStarted = false;
+    let nextCompletionKnown = false;
+    let nextIsCompleted = false;
+
+    if (reportSnapshot?.id) {
+      setInspectionReportId(reportSnapshot.id);
+      setInspectionOwnerId(reportSnapshot.inspector_id || null);
+
+      const parsedComments = parseInspectionComments(reportSnapshot.inspection_comments);
+      setComplianceStatus(parsedComments.complianceStatus);
+      setAdditionalComments(parsedComments.remarks);
+
+      if (Array.isArray(reportSnapshot.lines_of_business) && reportSnapshot.lines_of_business.length) {
+        setLineOfBusinessList(reportSnapshot.lines_of_business);
+      }
+
+      setBusinessDetails((prev) => ({
+        ...prev,
+        bin: reportSnapshot.bin ?? prev.bin,
+        address: reportSnapshot.business_address ?? prev.address,
+        estimatedAreaSqm:
+          reportSnapshot.estimated_area_sqm != null ? String(reportSnapshot.estimated_area_sqm) : prev.estimatedAreaSqm,
+        numberOfEmployees:
+          reportSnapshot.no_of_employees != null ? String(reportSnapshot.no_of_employees) : prev.numberOfEmployees,
+        landline: reportSnapshot.landline_no ?? prev.landline,
+        cellphone: reportSnapshot.mobile_no ?? prev.cellphone,
+        email: reportSnapshot.email_address ?? prev.email,
+      }));
+
+      if (reportSnapshot.business_name || reportSnapshot.owner_name) {
+        setOwnerDetails((prev) => ({
+          ...prev,
+          businessName: reportSnapshot.business_name ?? prev.businessName,
+          fullName: reportSnapshot.owner_name ?? prev.fullName,
+        }));
+      }
+
+      setChecklist((prev) => ({
+        ...prev,
+        business_permit: fromDbStatus(reportSnapshot.business_permit_status) || prev.business_permit,
+        with_cctv: fromDbStatus(reportSnapshot.cctv_status) || prev.with_cctv,
+        signage_2sqm: fromDbStatus(reportSnapshot.signage_status) || prev.signage_2sqm,
+      }));
+      setCctvCount(reportSnapshot.cctv_count != null ? String(reportSnapshot.cctv_count) : '');
+      setSignageSqm(reportSnapshot.signage_sqm != null ? String(reportSnapshot.signage_sqm) : '');
+      setInspectorSignaturePath(reportSnapshot.inspector_signature_url || null);
+      setOwnerSignaturePath(reportSnapshot.owner_signature_url || null);
+
+      const workflowStatus = normalizeInspectionReportStatus(reportSnapshot);
+      nextIsCompleted = workflowStatus === 'completed';
+      nextInspectionStarted = workflowStatus === 'in progress' || workflowStatus === 'completed' || !!reportSnapshot.started_at;
+      nextCompletionKnown = workflowStatus !== 'pending inspection';
+      if (draft.syncStatus === 'prepared') {
+        nextIsCompleted = false;
+        nextInspectionStarted = false;
+        nextCompletionKnown = false;
+      }
+      setIsCompleted(nextIsCompleted);
+      setInspectionStarted(nextInspectionStarted);
+      setCompletionKnown(nextCompletionKnown);
+      if (workflowStatus === 'completed') {
+        setSummaryUnlocked(true);
+      }
+    }
+
+    if (draft.syncStatus === 'ready_to_sync' || draft.syncStatus === 'completed') {
+      setIsCompleted(true);
+      setSummaryUnlocked(true);
+      setInspectionStarted(true);
+      setCompletionKnown(true);
+    } else if (!reportSnapshot?.id) {
+      setIsCompleted(false);
+      setInspectionStarted(false);
+      setCompletionKnown(false);
+    } else {
+      setIsCompleted(nextIsCompleted);
+      setInspectionStarted(nextInspectionStarted);
+      setCompletionKnown(nextCompletionKnown);
+    }
+    setOfflineDraftLoaded(true);
+    setToast('Offline inspection draft restored.');
+  };
+
+  useEffect(() => {
+    if (!missionOrderId || offlineDraftLoaded) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const draft = await getInspectionDraft(missionOrderId);
+        if (!cancelled && draft) applyOfflineDraft(draft);
+      } catch {
+        // Local draft restore is best-effort; online loading still works without it.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missionOrderId, offlineDraftLoaded]);
+
   const toOwnerNameString = () => {
     // Prefer the new single-field full name.
     const full = String(ownerDetails.fullName || '').trim();
@@ -1840,6 +2231,25 @@ export default function InspectionSlipCreate() {
       return;
     }
 
+    if (navigator.onLine === false) {
+      setSaving(true);
+      setError('');
+      try {
+        const draft = await buildOfflineDraft({ syncStatus: 'draft' });
+        await saveInspectionDraft(draft);
+        if (inspectionReportId) {
+          await enqueueInspectionSync({ action: 'save', draft });
+        }
+        await refreshPendingSyncCount();
+        setToast(inspectionReportId ? 'Offline draft saved and queued to sync.' : 'Offline draft saved on this device.');
+      } catch (e) {
+        setError(e?.message || 'Failed to save offline draft.');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     setSaving(true);
     setError('');
 
@@ -1855,7 +2265,7 @@ export default function InspectionSlipCreate() {
             file,
             contentType: file.type,
           });
-          nextEvidence.push({ url: signedUrl, blob: null, ts: p.ts || Date.now(), storagePath: path });
+          nextEvidence.push({ url: signedUrl, blob: p.blob, ts: p.ts || Date.now(), storagePath: path });
         } else {
           nextEvidence.push(p);
         }
@@ -1890,37 +2300,11 @@ export default function InspectionSlipCreate() {
         .map((x) => x?.storagePath)
         .filter(Boolean);
 
-      const payload = {
-        bin: businessDetails.bin || null,
-        business_name: ownerDetails.businessName || null,
-        owner_name: toOwnerNameString() || null,
-        business_address: businessDetails.address || null,
-
-        // Inspector device location
-        inspector_lat: inspectorLocation.lat,
-        inspector_lng: inspectorLocation.lng,
-        inspector_location_accuracy_m: inspectorLocation.accuracy,
-        inspector_location_captured_at: inspectorLocation.capturedAt,
-
-        business_permit_status: toDbStatus(checklist.business_permit),
-        cctv_status: toDbStatus(checklist.with_cctv),
-        signage_status: toDbStatus(checklist.signage_2sqm),
-        cctv_count: cctvCount ? Number(cctvCount) : 0,
-        signage_sqm: signage_sqm ? Number(signage_sqm) : 0,
-
-        inspection_comments: buildInspectionComments(complianceStatus, additionalComments),
-        lines_of_business: lineOfBusinessList.filter(Boolean),
-        no_of_employees: businessDetails.numberOfEmployees ? Number(businessDetails.numberOfEmployees) : null,
-        estimated_area_sqm: businessDetails.estimatedAreaSqm ? Number(businessDetails.estimatedAreaSqm) : null,
-        mobile_no: businessDetails.cellphone || null,
-        landline_no: businessDetails.landline || null,
-        email_address: businessDetails.email || null,
-        attachment_urls: attachmentUrlsForDb.length ? attachmentUrlsForDb : null,
-
-        // Save signature storage paths into their dedicated columns
-        inspector_signature_url: inspectorSigPath || inspectorSignaturePath || null,
-        owner_signature_url: ownerSigPath || ownerSignaturePath || null,
-      };
+      const payload = createReportPayload({
+        attachmentUrls: attachmentUrlsForDb.length ? attachmentUrlsForDb : null,
+        inspectorSigPath,
+        ownerSigPath,
+      });
 
       const { error: upErr } = await supabase
         .from('inspection_reports')
@@ -1931,9 +2315,74 @@ export default function InspectionSlipCreate() {
 
       setToast('Inspection report saved.');
     } catch (e) {
-      setError(e?.message || 'Failed to save inspection report.');
+      if (navigator.onLine === false) {
+        try {
+          const draft = await buildOfflineDraft({ syncStatus: 'draft' });
+          await saveInspectionDraft(draft);
+          if (inspectionReportId) {
+            await enqueueInspectionSync({ action: 'save', draft });
+          }
+          await refreshPendingSyncCount();
+          setToast(inspectionReportId ? 'Connection dropped. Offline draft queued to sync.' : 'Connection dropped. Offline draft saved on this device.');
+        } catch (draftError) {
+          setError(draftError?.message || e?.message || 'Failed to save inspection report.');
+        }
+      } else {
+        setError(e?.message || 'Failed to save inspection report.');
+      }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const markInspectionCompleteInDashboardCache = (completedAt) => {
+    try {
+      const cached = JSON.parse(localStorage.getItem('inspekto.inspectorDashboardCache') || 'null');
+      if (!cached) return;
+
+      const assignedRows = Array.isArray(cached.assigned) ? cached.assigned : [];
+      const historyRows = Array.isArray(cached.history) ? cached.history : [];
+      const existing =
+        assignedRows.find((row) => row?.mission_order_id === missionOrderId) ||
+        historyRows.find((row) => row?.mission_order_id === missionOrderId) ||
+        null;
+
+      const completedRow = {
+        ...(existing || {}),
+        mission_order_id: missionOrderId,
+        mission_order_title: existing?.mission_order_title || missionOrder?.title || null,
+        mission_order_updated_at: completedAt,
+        date_of_inspection: existing?.date_of_inspection || missionOrder?.date_of_inspection || null,
+        complaint_id: existing?.complaint_id || missionOrder?.complaint_id || complaint?.id || null,
+        business_name: ownerDetails.businessName || complaint?.business_name || existing?.business_name || '',
+        business_address: businessDetails.address || complaint?.business_address || existing?.business_address || '',
+        complaint_status: 'completed',
+        inspection_report_id: inspectionReportId,
+        inspection_status: 'completed',
+        inspection_completed_at: completedAt,
+        inspection_owner_id: currentInspectorId || existing?.inspection_owner_id || null,
+        inspection_owned_by_current_user: true,
+        offline_prepared: true,
+        offline_sync_pending: true,
+      };
+
+      const nextAssigned = assignedRows.filter((row) => row?.mission_order_id !== missionOrderId);
+      const nextHistory = [
+        completedRow,
+        ...historyRows.filter((row) => row?.mission_order_id !== missionOrderId),
+      ];
+
+      localStorage.setItem(
+        'inspekto.inspectorDashboardCache',
+        JSON.stringify({
+          ...cached,
+          assigned: nextAssigned,
+          history: nextHistory,
+          savedAt: new Date().toISOString(),
+        })
+      );
+    } catch {
+      // Dashboard cache updates are best-effort.
     }
   };
 
@@ -2030,6 +2479,34 @@ export default function InspectionSlipCreate() {
       return;
     }
 
+    if (navigator.onLine === false) {
+      setSaving(true);
+      setError('');
+      try {
+        const completedAt = new Date().toISOString();
+        const draft = await buildOfflineDraft({ syncStatus: 'ready_to_sync', completedAt });
+        await enqueueInspectionSync({ action: 'submit', draft });
+        await refreshPendingSyncCount();
+        setToast('Inspection report queued. It will sync when this tablet is online.');
+        setIsCompleted(true);
+        setCompletionKnown(true);
+        setInspectionStarted(true);
+        setActiveTab('inspection_details');
+        markInspectionCompleteInDashboardCache(completedAt);
+        try {
+          sessionStorage.setItem('inspectionSource', 'inspection-history');
+        } catch {
+          // ignore
+        }
+        window.location.assign('/dashboard/inspector?tab=history');
+      } catch (e) {
+        setError(e?.message || 'Failed to queue inspection report for offline sync.');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     setSaving(true);
     setError('');
 
@@ -2102,15 +2579,65 @@ export default function InspectionSlipCreate() {
 
     try {
       const q = businessSearch.trim();
-      const { data, error: qError } = await supabase
-        .from('businesses')
-        .select('*')
-        .or(`bin.ilike.%${q}%,epermit_no.ilike.%${q}%,business_name.ilike.%${q}%`)
-        .limit(5);
+      if (navigator.onLine === false) {
+        const matches = await searchOfflineBusinesses(q, 5);
+        setBusinessResult({ matches });
+        if (matches.length === 0) {
+          setToast('No prepared offline business match found on this device.');
+        } else {
+          setToast('Showing prepared offline business matches.');
+        }
+        return;
+      }
 
-      if (qError) throw qError;
+      const matches = [];
+      const seenBusinessKeys = new Set();
+      const addMatches = (rows) => {
+        for (const item of rows || []) {
+          const key = String(item?.business_pk || item?.bin || item?.epermit_no || `${item?.business_name || ''}|${item?.business_address || ''}`);
+          if (seenBusinessKeys.has(key)) continue;
+          seenBusinessKeys.add(key);
+          matches.push(item);
+        }
+      };
 
-      setBusinessResult({ matches: data || [] });
+      for (const column of ['bin', 'epermit_no', 'business_name']) {
+        const { data: rows, error: qError } = await supabase
+          .from('businesses')
+          .select('*')
+          .ilike(column, `%${q}%`)
+          .limit(5);
+
+        if (qError) throw qError;
+        addMatches(rows);
+        if (matches.length >= 5) break;
+      }
+
+      const data = matches.slice(0, 5);
+      setBusinessResult({ matches: data });
+      if (data?.length) {
+        const bins = Array.from(new Set(data.map((item) => item?.bin).filter(Boolean)));
+        const names = Array.from(new Set(data.map((item) => item?.business_name).filter(Boolean)));
+        let additional = [];
+
+        if (bins.length) {
+          const { data: addRows, error: addErr } = await supabase
+            .from('businesses_additional')
+            .select('*')
+            .in('bin', bins);
+          if (!addErr) additional = addRows || [];
+        }
+
+        if (additional.length === 0 && names.length) {
+          const { data: addRows, error: addErr } = await supabase
+            .from('businesses_additional')
+            .select('*')
+            .in('business_name', names);
+          if (!addErr) additional = addRows || [];
+        }
+
+        await saveOfflineBusinessRecords({ businesses: data, additional });
+      }
       if (!data || data.length === 0) setToast('No matching business permit found.');
     } catch (e) {
       setError(e?.message || 'Failed to validate business permit.');
@@ -2141,15 +2668,32 @@ export default function InspectionSlipCreate() {
       return;
     }
 
+    if (navigator.onLine === false) {
+      try {
+        const draft = await getInspectionDraft(missionOrderId);
+        if (!draft) {
+          setError('This inspection slip was not prepared for offline use on this device.');
+          return;
+        }
+        applyOfflineDraft(draft);
+        setCompletionKnown(true);
+        setInspectionStarted(true);
+        setActiveTab('inspection');
+        setToast('Offline inspection started. Updates will be saved on this device.');
+      } catch (e) {
+        setError(e?.message || 'Failed to start this offline inspection.');
+      }
+      return;
+    }
+
     setError('');
     setSaving(true);
 
     try {
       let inspectorId = currentInspectorId;
       if (!inspectorId) {
-        const { data: userData, error: userError } = await supabase.auth.getUser();
-        if (userError) throw userError;
-        inspectorId = userData?.user?.id || null;
+        const user = await getCachedSessionUser();
+        inspectorId = user?.id || null;
         if (inspectorId) setCurrentInspectorId(inspectorId);
       }
 
@@ -2383,6 +2927,32 @@ export default function InspectionSlipCreate() {
           {toast ? <div className="mo-alert mo-alert-success">{toast}</div> : null}
           {error ? <div className="mo-alert mo-alert-error">{error}</div> : null}
           {inspectionLockMessage ? <div className="mo-alert mo-alert-error">{inspectionLockMessage}</div> : null}
+          {(!isOnline || pendingSyncCount > 0 || syncingOffline) ? (
+            <div className={`is-offline-banner ${isOnline ? 'is-online' : 'is-offline'}`}>
+              <div>
+                <div className="is-offline-title">
+                  {isOnline ? (syncingOffline ? 'Syncing offline inspections' : 'Offline updates pending') : 'Offline mode'}
+                </div>
+                <div className="is-offline-copy">
+                  {isOnline
+                    ? pendingSyncCount > 0
+                      ? `${pendingSyncCount} inspection update${pendingSyncCount === 1 ? '' : 's'} waiting to sync.`
+                      : 'Checking queued inspection updates.'
+                    : 'This tablet can save inspection work locally. Queued updates sync when connection returns.'}
+                </div>
+              </div>
+              {isOnline && pendingSyncCount > 0 ? (
+                <button
+                  type="button"
+                  className="mo-btn mo-btn-secondary"
+                  onClick={runOfflineSync}
+                  disabled={syncingOffline}
+                >
+                  {syncingOffline ? 'Syncing...' : 'Sync now'}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           {!missionOrderId ? (
             <div className="mo-meta">Open this page as /inspection-slip/create?missionOrderId=&lt;uuid&gt;</div>
@@ -2670,7 +3240,11 @@ export default function InspectionSlipCreate() {
                             </div>
                           </div>
 
-                          {!mapUrl ? (
+                          {!isOnline ? (
+                            <div className="mo-meta" style={{ marginTop: 12 }}>
+                              Map preview is unavailable offline. Address: {displayBusinessAddress}
+                            </div>
+                          ) : !mapUrl ? (
                             <div className="mo-meta">No address available for map preview.</div>
                           ) : (
                             <div
@@ -2851,7 +3425,11 @@ export default function InspectionSlipCreate() {
                           )}
                         </div>
 
-                        {inspectorLocation.lat != null && inspectorLocation.lng != null ? (
+                        {inspectorLocation.lat != null && inspectorLocation.lng != null && !isOnline ? (
+                          <div className="mo-meta" style={{ marginTop: 10 }}>
+                            Map tiles are unavailable offline. Captured coordinates: {inspectorLocation.lat}, {inspectorLocation.lng}
+                          </div>
+                        ) : inspectorLocation.lat != null && inspectorLocation.lng != null ? (
                           <div
                             className="map-box"
                             style={{

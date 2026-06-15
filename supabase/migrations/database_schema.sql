@@ -26,10 +26,34 @@ CREATE TABLE public.businesses_additional (
   male_emp text,
   female_emp text,
   total_employees bigint,
-  line_of_business text,
-  businesses_additional_pk integer GENERATED ALWAYS AS IDENTITY NOT NULL,
-  CONSTRAINT businesses_additional_pkey PRIMARY KEY (businesses_additional_pk),
-  CONSTRAINT businesses_additional_businesses_additional_pk_fkey FOREIGN KEY (businesses_additional_pk) REFERENCES public.businesses(business_pk)
+  line_of_business text
+);
+CREATE TABLE public.businesses_additional_realdata (
+  bin text NOT NULL,
+  business_name text,
+  owner_name text,
+  address text,
+  male_emp text,
+  female_emp text,
+  total_employees bigint,
+  line_of_business text
+);
+CREATE TABLE public.businesses_realdata (
+  bin text,
+  business_name text,
+  owner_name text,
+  esoa_no text,
+  eor_no text,
+  epermit_no text,
+  brgy_no text,
+  email text,
+  mobile_number text,
+  assessment_status text,
+  business_address text,
+  business_pk integer NOT NULL,
+  business_lat double precision CHECK (business_lat IS NULL OR business_lat >= '-90'::integer::double precision AND business_lat <= 90::double precision),
+  business_lng double precision CHECK (business_lng IS NULL OR business_lng >= '-180'::integer::double precision AND business_lng <= 180::double precision),
+  CONSTRAINT businesses_realdata_pkey PRIMARY KEY (business_pk)
 );
 CREATE TABLE public.complaints (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -41,7 +65,7 @@ CREATE TABLE public.complaints (
   document_urls ARRAY DEFAULT '{}'::text[],
   authenticity_level integer NOT NULL DEFAULT 100 CHECK (authenticity_level >= 0 AND authenticity_level <= 100),
   tags ARRAY DEFAULT '{}'::text[],
-  status text CHECK (status = ANY (ARRAY['Submitted'::character varying::text, 'pending'::character varying::text, 'approved'::character varying::text, 'declined'::character varying::text, 'on_hold'::character varying::text, 'cancelled'::character varying::text])),
+  status text CHECK (status = ANY (ARRAY['Submitted'::text, 'pending'::text, 'approved'::text, 'declined'::text, 'on_hold'::text, 'cancelled'::text, 'completed'::text])),
   created_at timestamp with time zone DEFAULT now(),
   email_verified boolean NOT NULL DEFAULT false,
   email_verified_at timestamp with time zone,
@@ -60,7 +84,7 @@ CREATE TABLE public.complaints (
   updated_at timestamp with time zone DEFAULT now(),
   decline_comment text,
   CONSTRAINT complaints_pkey PRIMARY KEY (id),
-  CONSTRAINT complaints_business_pk_fkey FOREIGN KEY (business_pk) REFERENCES public.businesses(business_pk),
+  CONSTRAINT complaints_business_pk_fkey FOREIGN KEY (business_pk) REFERENCES public.businesses_realdata(business_pk),
   CONSTRAINT complaints_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.profiles(id),
   CONSTRAINT complaints_declined_by_fkey FOREIGN KEY (declined_by) REFERENCES public.profiles(id)
 );
@@ -107,6 +131,10 @@ CREATE TABLE public.inspection_reports (
   inspector_lng double precision,
   inspector_location_accuracy_m double precision,
   inspector_location_captured_at timestamp with time zone,
+  generated_docx_url text,
+  generated_docx_created_at timestamp with time zone,
+  generated_docx_created_by uuid,
+  signage_sqm numeric DEFAULT 0,
   CONSTRAINT inspection_reports_pkey PRIMARY KEY (id),
   CONSTRAINT inspection_reports_mission_order_id_fkey FOREIGN KEY (mission_order_id) REFERENCES public.mission_orders(id),
   CONSTRAINT inspection_reports_inspector_id_fkey FOREIGN KEY (inspector_id) REFERENCES public.profiles(id)
@@ -136,7 +164,7 @@ CREATE TABLE public.mission_orders (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   complaint_id uuid NOT NULL,
   created_by uuid NOT NULL,
-  status text NOT NULL DEFAULT 'draft'::text CHECK (status = ANY (ARRAY['draft'::text, 'issued'::text, 'for inspection'::text, 'cancelled'::text, 'awaiting_signature'::text, 'complete'::text])),
+  status text NOT NULL DEFAULT 'draft'::text CHECK (status = ANY (ARRAY['draft'::text, 'issued'::text, 'for inspection'::text, 'awaiting_signature'::text, 'complete'::text, 'cancelled'::text, 'rejected'::text])),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   title text,
@@ -160,6 +188,8 @@ CREATE TABLE public.mission_orders (
   secretary_signed_attachment_url text,
   secretary_signed_attachment_uploaded_at timestamp with time zone,
   secretary_signed_attachment_uploaded_by uuid,
+  secretary_signed_attachment_verification_score bigint,
+  secretary_signed_attachment_verification_details text,
   CONSTRAINT mission_orders_pkey PRIMARY KEY (id),
   CONSTRAINT mission_orders_complaint_id_fkey FOREIGN KEY (complaint_id) REFERENCES public.complaints(id),
   CONSTRAINT mission_orders_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id),

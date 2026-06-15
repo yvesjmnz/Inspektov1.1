@@ -134,6 +134,49 @@
   font-size: 13px;
 }
 
+.is-offline-banner{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.is-offline-banner.is-offline{
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.is-offline-title{
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.is-offline-copy{
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+@media (max-width: 640px){
+  .is-offline-banner{
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .is-offline-banner .mo-btn{
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
 .is-match-card{
   border: 1px solid var(--is-border);
   border-radius: 12px;

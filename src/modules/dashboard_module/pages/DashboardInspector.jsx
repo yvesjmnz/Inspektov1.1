@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { normalizeInspectionReportStatus, pickPreferredInspectionReport } from '../../../lib/inspectionReports';
+import { saveInspectionDraft, saveOfflineBusinessRecords, syncPendingInspectionReports } from '../../../lib/offlineInspectionSync';
 import NotificationBell from '../../../components/NotificationBell';
 import MiniRefreshButton from '../components/MiniRefreshButton';
 import './Dashboard.css';
@@ -36,6 +37,34 @@ function statusBadgeClass(status) {
   return 'status-badge';
 }
 
+function getInspectionSlipHref(row) {
+  if (!row?.mission_order_id) return '';
+  return row.inspection_report_id && row.inspection_owned_by_current_user
+    ? `/inspection-slip/create?id=${row.inspection_report_id}&missionOrderId=${row.mission_order_id}`
+    : `/inspection-slip/create?missionOrderId=${row.mission_order_id}`;
+}
+
+function canOpenInspectionToday(row) {
+  const today = new Date();
+  const insp = row?.date_of_inspection ? new Date(row.date_of_inspection) : null;
+  const isToday =
+    !!insp &&
+    insp.getFullYear() === today.getFullYear() &&
+    insp.getMonth() === today.getMonth() &&
+    insp.getDate() === today.getDate();
+  const statusLower = String(row?.inspection_status || '').toLowerCase();
+  const isInProgress = statusLower === 'in progress' || statusLower === 'in_progress';
+  return isInProgress || isToday;
+}
+
+function isIosDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isStandaloneApp() {
+  return window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+
 export default function DashboardInspector() {
   const getInitialTab = () => {
     const params = new URLSearchParams(window.location.search);
@@ -53,16 +82,82 @@ export default function DashboardInspector() {
   const [history, setHistory] = useState([]);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [installPromptEvent, setInstallPromptEvent] = useState(null);
+  const [appInstalled, setAppInstalled] = useState(() => isStandaloneApp());
+  const [offlinePreparing, setOfflinePreparing] = useState(false);
+  const [offlineMessage, setOfflineMessage] = useState('');
+  const autoPrepareAttemptedRef = useRef(false);
+  const syncingOfflineRef = useRef(false);
+
+  const getCachedSessionUser = async () => {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.user || null;
+  };
+
+  const runPendingOfflineSync = async () => {
+    if (syncingOfflineRef.current || navigator.onLine === false) return;
+    syncingOfflineRef.current = true;
+    try {
+      const result = await syncPendingInspectionReports();
+      if (result.synced > 0) {
+        setOfflineMessage(`${result.synced} offline inspection update${result.synced === 1 ? '' : 's'} synced.`);
+        await loadAssigned();
+      } else if (result.failed > 0) {
+        setOfflineMessage(`${result.failed} offline inspection update${result.failed === 1 ? '' : 's'} could not sync yet.`);
+      }
+    } catch (e) {
+      setOfflineMessage(e?.message || 'Offline inspection sync failed.');
+    } finally {
+      syncingOfflineRef.current = false;
+    }
+  };
 
   // Get current user ID for notifications
   useEffect(() => {
     const getCurrentUser = async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      if (userData?.user?.id) {
-        setCurrentUserId(userData.user.id);
+      const user = await getCachedSessionUser();
+      if (user?.id) {
+        setCurrentUserId(user.id);
       }
     };
     getCurrentUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event) => {
+      event.preventDefault();
+      setInstallPromptEvent(event);
+    };
+    const handleInstalled = () => {
+      setAppInstalled(true);
+      setInstallPromptEvent(null);
+      setOfflineMessage('Inspection Slip is installed on this device.');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleInstalled);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      void runPendingOfflineSync();
+    };
+
+    window.addEventListener('online', handleOnline);
+    if (navigator.onLine !== false) {
+      void runPendingOfflineSync();
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleLogout = async () => {
@@ -87,9 +182,18 @@ export default function DashboardInspector() {
     setError('');
 
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      const user = userData?.user || null;
+      if (navigator.onLine === false) {
+        const cached = JSON.parse(localStorage.getItem('inspekto.inspectorDashboardCache') || 'null');
+        if (cached) {
+          setAssigned(Array.isArray(cached.assigned) ? cached.assigned : []);
+          setHistory(Array.isArray(cached.history) ? cached.history : []);
+          if (cached.userLabel) setUserLabel(cached.userLabel);
+          setError('Offline mode: showing the last prepared inspection list from this device.');
+          return;
+        }
+      }
+
+      const user = await getCachedSessionUser();
       const userId = user?.id;
       if (!userId) throw new Error('Not authenticated. Please login again.');
 
@@ -291,6 +395,19 @@ export default function DashboardInspector() {
 
       setAssigned(pendingList);
       setHistory(historyList);
+      try {
+        localStorage.setItem(
+          'inspekto.inspectorDashboardCache',
+          JSON.stringify({
+            assigned: pendingList,
+            history: historyList,
+            userLabel: String(profileName || fallbackName),
+            savedAt: new Date().toISOString(),
+          })
+        );
+      } catch {
+        // ignore cache write failures
+      }
 
       // Auto switch away from Assigned tab if it becomes empty but there is history.
       // This helps UX after submitting an inspection.
@@ -298,8 +415,25 @@ export default function DashboardInspector() {
         setTab('history');
       }
     } catch (e) {
-      setError(e?.message || 'Failed to load assigned inspections.');
-      setAssigned([]);
+      let restored = false;
+      if (navigator.onLine === false) {
+        try {
+          const cached = JSON.parse(localStorage.getItem('inspekto.inspectorDashboardCache') || 'null');
+          if (cached) {
+            setAssigned(Array.isArray(cached.assigned) ? cached.assigned : []);
+            setHistory(Array.isArray(cached.history) ? cached.history : []);
+            if (cached.userLabel) setUserLabel(cached.userLabel);
+            setError('Offline mode: showing the last prepared inspection list from this device.');
+            restored = true;
+          }
+        } catch {
+          // ignore cache restore failures
+        }
+      }
+      if (!restored) {
+        setError(e?.message || 'Failed to load assigned inspections.');
+        setAssigned([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -316,8 +450,10 @@ export default function DashboardInspector() {
     let reportChannel;
 
     (async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData?.user?.id;
+      if (navigator.onLine === false) return;
+
+      const user = await getCachedSessionUser();
+      const userId = user?.id;
       if (!userId) return;
 
       channel = supabase
@@ -359,6 +495,11 @@ export default function DashboardInspector() {
   }, []);
 
   const filteredAssigned = useMemo(() => assigned, [assigned]);
+  const offlineReadyCount = useMemo(
+    () => filteredAssigned.filter((row) => row.offline_prepared).length,
+    [filteredAssigned]
+  );
+  const allAssignedOfflineReady = filteredAssigned.length > 0 && offlineReadyCount === filteredAssigned.length;
 
   const filteredHistory = useMemo(() => history, [history]);
 
@@ -393,6 +534,331 @@ export default function DashboardInspector() {
   const handleRefresh = () => {
     loadAssigned();
   };
+
+  const handleInstallApp = async () => {
+    if (!installPromptEvent) {
+      if (isIosDevice()) {
+        setOfflineMessage('On iPhone or iPad: tap Share, then Add to Home Screen. It will install as Inspection Slip.');
+      } else {
+        setOfflineMessage('Use your browser menu to install Inspection Slip or add it to the home screen on this device.');
+      }
+      return;
+    }
+    try {
+      installPromptEvent.prompt();
+      const choice = await installPromptEvent.userChoice;
+      if (choice?.outcome === 'accepted') {
+        setAppInstalled(true);
+        setOfflineMessage('Inspection Slip is installed on this device.');
+      }
+      setInstallPromptEvent(null);
+    } catch (e) {
+      setOfflineMessage(e?.message || 'Install prompt could not be opened.');
+    }
+  };
+
+  const cacheInspectionSlipRoutes = async (rows) => {
+    if (!('caches' in window)) return;
+    const cache = await caches.open('inspekto-app-shell-v1');
+    const urls = ['/', '/index.html'];
+    await Promise.allSettled(urls.map((url) => cache.add(url)));
+
+    const indexResponse = await fetch('/index.html', { cache: 'reload' });
+    if (!indexResponse.ok) return;
+
+    const appRoutes = ['/dashboard/inspector', ...rows.map(getInspectionSlipHref).filter(Boolean)];
+    await Promise.allSettled(appRoutes.map((url) => cache.put(url, indexResponse.clone())));
+  };
+
+  const cacheOfflineBusinessData = async (row) => {
+    const searchParts = [row?.business_name, row?.business_address].map((value) => String(value || '').trim()).filter(Boolean);
+    if (searchParts.length === 0) return;
+
+    const businessRows = [];
+    const seenBusinessKeys = new Set();
+    const addBusinessRows = (rows) => {
+      for (const item of rows || []) {
+        const key = String(item?.business_pk || item?.bin || item?.epermit_no || `${item?.business_name || ''}|${item?.business_address || ''}`);
+        if (seenBusinessKeys.has(key)) continue;
+        seenBusinessKeys.add(key);
+        businessRows.push(item);
+      }
+    };
+
+    if (row?.business_name) {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('*')
+        .ilike('business_name', `%${String(row.business_name).trim()}%`)
+        .limit(10);
+      if (!error) addBusinessRows(data);
+    }
+
+    if (row?.business_address) {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('*')
+        .ilike('business_address', `%${String(row.business_address).trim()}%`)
+        .limit(10);
+      if (!error) addBusinessRows(data);
+    }
+
+    if (businessRows.length === 0) {
+      addBusinessRows([
+        {
+          business_name: row?.business_name || '',
+          business_address: row?.business_address || '',
+        },
+      ]);
+    }
+
+    const bins = Array.from(new Set(businessRows.map((item) => item?.bin).filter(Boolean)));
+    const names = Array.from(new Set(businessRows.map((item) => item?.business_name).filter(Boolean)));
+
+    let additional = [];
+    if (bins.length) {
+      const { data, error } = await supabase.from('businesses_additional').select('*').in('bin', bins);
+      if (!error) additional = data || [];
+    }
+
+    if (additional.length === 0 && names.length) {
+      const { data, error } = await supabase.from('businesses_additional').select('*').in('business_name', names);
+      if (!error) additional = data || [];
+    }
+
+    await saveOfflineBusinessRecords({ businesses: businessRows, additional });
+  };
+
+  const fetchSignedAttachmentBlob = async (url) => {
+    if (!url) return null;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      return {
+        blob,
+        contentType: blob.type || response.headers.get('content-type') || '',
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const loadOfflineInspectionSnapshot = async (preparedRow) => {
+    const { data: missionOrder } = await supabase
+      .from('mission_orders')
+      .select(
+        'id, title, content, status, complaint_id, created_at, updated_at, submitted_at, date_of_issuance, date_of_inspection, secretary_signed_attachment_url, secretary_signed_attachment_uploaded_at, secretary_signed_attachment_uploaded_by'
+      )
+      .eq('id', preparedRow.mission_order_id)
+      .maybeSingle();
+
+    const complaintId = missionOrder?.complaint_id || preparedRow.complaint_id;
+    const { data: complaint } = complaintId
+      ? await supabase.from('complaints').select('*').eq('id', complaintId).maybeSingle()
+      : { data: null };
+
+    const { data: assignmentRows } = await supabase
+      .from('mission_order_assignments')
+      .select('inspector_id, assigned_at')
+      .eq('mission_order_id', preparedRow.mission_order_id)
+      .order('assigned_at', { ascending: true });
+
+    const inspectorIds = Array.from(new Set((assignmentRows || []).map((item) => item?.inspector_id).filter(Boolean)));
+    const { data: profiles } = inspectorIds.length
+      ? await supabase.from('profiles').select('id, full_name').in('id', inspectorIds)
+      : { data: [] };
+
+    const nameById = new Map((profiles || []).map((profile) => [profile.id, profile.full_name]));
+    const inspectorNames = (assignmentRows || [])
+      .map((item) => nameById.get(item?.inspector_id))
+      .filter(Boolean)
+      .filter((value, index, arr) => arr.indexOf(value) === index);
+
+    const { data: reportRows } = await supabase
+      .from('inspection_reports')
+      .select('*')
+      .eq('mission_order_id', preparedRow.mission_order_id)
+      .order('updated_at', { ascending: false })
+      .limit(50);
+
+    const report = pickPreferredInspectionReport(reportRows || []) || null;
+    const attachment = await fetchSignedAttachmentBlob(missionOrder?.secretary_signed_attachment_url);
+
+    return {
+      missionOrder: missionOrder || null,
+      complaint: complaint || null,
+      assignedInspectors: inspectorNames,
+      assignmentRows: assignmentRows || [],
+      report,
+      signedAttachmentBlob: attachment?.blob || null,
+      signedAttachmentContentType: attachment?.contentType || '',
+    };
+  };
+
+  const handlePrepareOffline = async ({ silent = false, force = false } = {}) => {
+    if (!silent) setOfflineMessage('');
+
+    if (navigator.onLine === false) {
+      if (!silent) setOfflineMessage('Connect to the internet first, then prepare inspections for offline use.');
+      return;
+    }
+
+    const targetRows = filteredAssigned.filter((row) => force || !row.offline_prepared);
+    if (targetRows.length === 0) {
+      if (!silent) setOfflineMessage('All assigned inspections are ready for offline use.');
+      return;
+    }
+
+    setOfflinePreparing(true);
+    try {
+      const preparedRows = [];
+
+      for (const row of targetRows) {
+        let report = {
+          id: row.inspection_report_id,
+          inspector_id: row.inspection_owner_id || currentUserId,
+          status: row.inspection_status,
+        };
+
+        if (!row.inspection_report_id || !row.inspection_owned_by_current_user) {
+          const { data, error: claimError } = await supabase.rpc('claim_mission_order_inspection_report', {
+            p_mission_order_id: row.mission_order_id,
+          });
+          if (claimError) throw claimError;
+          report = data || report;
+        }
+
+        const preparedRow = {
+          ...row,
+          inspection_report_id: report?.id || row.inspection_report_id,
+          inspection_owner_id: report?.inspector_id || row.inspection_owner_id || currentUserId,
+          inspection_owned_by_current_user: true,
+          inspection_status: row.inspection_status || normalizeInspectionReportStatus(report || row) || 'pending inspection',
+          offline_prepared: true,
+        };
+        const snapshot = await loadOfflineInspectionSnapshot(preparedRow);
+        const missionOrderSnapshot = snapshot.missionOrder || {
+          id: preparedRow.mission_order_id,
+          complaint_id: preparedRow.complaint_id,
+          title: preparedRow.mission_order_title || null,
+          date_of_inspection: preparedRow.date_of_inspection || null,
+          updated_at: preparedRow.mission_order_updated_at || null,
+        };
+        const complaintSnapshot = snapshot.complaint || {
+          id: preparedRow.complaint_id,
+          business_name: preparedRow.business_name || '',
+          business_address: preparedRow.business_address || '',
+          status: preparedRow.complaint_status || null,
+          created_at: preparedRow.complaint_created_at || null,
+        };
+
+        const draft = {
+          missionOrderId: preparedRow.mission_order_id,
+          inspectionReportId: preparedRow.inspection_report_id,
+          inspectorId: preparedRow.inspection_owner_id || currentUserId,
+          complaintId: preparedRow.complaint_id || null,
+          syncStatus: 'prepared',
+          formState: {
+            ownerDetails: {
+              fullName: '',
+              lastName: '',
+              firstName: '',
+              middleName: '',
+              businessName: complaintSnapshot.business_name || preparedRow.business_name || '',
+            },
+            businessDetails: {
+              bin: '',
+              address: complaintSnapshot.business_address || preparedRow.business_address || '',
+              estimatedAreaSqm: '',
+              numberOfEmployees: '',
+              landline: '',
+              cellphone: '',
+              email: '',
+            },
+            inspectorLocation: {
+              lat: null,
+              lng: null,
+              accuracy: null,
+              capturedAt: null,
+            },
+            ownerType: 'sole',
+            lineOfBusinessList: [''],
+            checklist: {
+              business_permit: '',
+              with_cctv: '',
+              signage_2sqm: '',
+            },
+            cctvCount: '',
+            signage_sqm: '',
+            complianceStatus: '',
+            additionalComments: '',
+            inspectorSignature: '',
+            ownerSignature: '',
+            inspectorSignaturePath: null,
+            ownerSignaturePath: null,
+          },
+          evidencePhotos: [],
+          inspectorSignatureBlob: null,
+          ownerSignatureBlob: null,
+          inspectorSignaturePath: null,
+          ownerSignaturePath: null,
+          reportPayload: {},
+          missionOrderSnapshot,
+          complaintSnapshot,
+          assignedInspectorsSnapshot: snapshot.assignedInspectors || preparedRow.inspector_names || [],
+          inspectionReportSnapshot: snapshot.report || null,
+          signedAttachmentBlob: snapshot.signedAttachmentBlob || null,
+          signedAttachmentContentType: snapshot.signedAttachmentContentType || '',
+          signedAttachmentUrl: missionOrderSnapshot.secretary_signed_attachment_url || '',
+          signedAttachmentMeta: {
+            uploadedAt: missionOrderSnapshot.secretary_signed_attachment_uploaded_at || null,
+            uploadedBy: missionOrderSnapshot.secretary_signed_attachment_uploaded_by || null,
+          },
+        };
+
+        await saveInspectionDraft(draft);
+        await cacheOfflineBusinessData(preparedRow);
+        preparedRows.push(preparedRow);
+      }
+
+      await cacheInspectionSlipRoutes(preparedRows);
+      const nextAssigned = assigned.map((row) => preparedRows.find((prepared) => prepared.mission_order_id === row.mission_order_id) || row);
+      setAssigned(nextAssigned);
+      try {
+        localStorage.setItem(
+          'inspekto.inspectorDashboardCache',
+          JSON.stringify({
+            assigned: nextAssigned,
+            history,
+            userLabel,
+            savedAt: new Date().toISOString(),
+          })
+        );
+      } catch {
+        // ignore cache write failures
+      }
+      if (!silent) {
+        setOfflineMessage(`${preparedRows.length} inspection${preparedRows.length === 1 ? '' : 's'} prepared for offline use.`);
+      }
+    } catch (e) {
+      setOfflineMessage(e?.message || 'Failed to prepare inspections for offline use.');
+    } finally {
+      setOfflinePreparing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (autoPrepareAttemptedRef.current) return;
+    if (loading || offlinePreparing) return;
+    if (navigator.onLine === false) return;
+    if (!currentUserId || filteredAssigned.length === 0) return;
+    if (filteredAssigned.every((row) => row.offline_prepared)) return;
+
+    autoPrepareAttemptedRef.current = true;
+    void handlePrepareOffline({ silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, filteredAssigned.length, loading, offlinePreparing]);
 
   return (
     <div className="dash-container">
@@ -569,11 +1035,29 @@ export default function DashboardInspector() {
                   </p>
                 </div>
                 <div className="dash-actions">
+                  {!appInstalled ? (
+                    <button
+                      type="button"
+                      className="dash-btn dash-btn-secondary"
+                      onClick={handleInstallApp}
+                    >
+                      Install app
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="dash-btn dash-btn-primary"
+                    onClick={() => handlePrepareOffline({ force: true })}
+                    disabled={offlinePreparing || loading}
+                  >
+                    {offlinePreparing ? 'Preparing...' : allAssignedOfflineReady ? 'Offline ready' : 'Prepare offline'}
+                  </button>
                   <NotificationBell userId={currentUserId} />
                 </div>
               </div>
 
               {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
+              {offlineMessage ? <div className="dash-alert dash-alert-info">{offlineMessage}</div> : null}
 
               <div style={{ display: 'grid', gap: 20 }}>
                 {tab === 'assigned' ? (
@@ -636,10 +1120,7 @@ export default function DashboardInspector() {
                                 insp.getMonth() === today.getMonth() &&
                                 insp.getDate() === today.getDate();
 
-                              const href =
-                                r.inspection_report_id && r.inspection_owned_by_current_user
-                                  ? `/inspection-slip/create?id=${r.inspection_report_id}&missionOrderId=${r.mission_order_id}`
-                                  : `/inspection-slip/create?missionOrderId=${r.mission_order_id}`;
+                              const href = getInspectionSlipHref(r);
 
                               const statusLower = String(r.inspection_status || '').toLowerCase();
                               const isInProgress = statusLower === 'in progress' || statusLower === 'in_progress';
@@ -666,7 +1147,7 @@ export default function DashboardInspector() {
 
                               // Row should be clickable only on the scheduled inspection date,
                               // or when an inspection is already in progress.
-                              const isRowEnabled = isInProgress || isToday;
+                              const isRowEnabled = isInProgress || isToday || !!r.offline_prepared;
 
                               return (
                                 <tr

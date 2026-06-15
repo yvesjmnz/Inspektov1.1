@@ -22,6 +22,7 @@ import LandingPage from './LandingPage';
 import ComplaintView from './modules/complaints_module/pages/ComplaintView';
 import BatchGeocodingAdmin from './modules/dashboard_module/pages/BatchGeocodingAdmin';
 import { supabase } from './lib/supabase';
+import { getInspectionDraft } from './lib/offlineInspectionSync';
 import './App.css';
 
 function App() {
@@ -59,6 +60,50 @@ function App() {
     } catch (_e) {
       return null;
     }
+  };
+
+  const getCachedRole = () => {
+    try {
+      return normalizeRole(localStorage.getItem('auth:role'));
+    } catch {
+      return null;
+    }
+  };
+
+  const setCachedRole = (role) => {
+    const normalized = normalizeRole(role);
+    if (!normalized) return;
+    try {
+      localStorage.setItem('auth:role', normalized);
+    } catch {
+      // ignore cache write failures
+    }
+  };
+
+  const hasPreparedOfflineInspectorAccess = async (path) => {
+    if (navigator.onLine !== false) return false;
+
+    if (path === '/dashboard/inspector') {
+      try {
+        const cached = JSON.parse(localStorage.getItem('inspekto.inspectorDashboardCache') || 'null');
+        return !!cached && (Array.isArray(cached.assigned) || Array.isArray(cached.history));
+      } catch {
+        return false;
+      }
+    }
+
+    if (path === '/inspection-slip/create') {
+      const params = new URLSearchParams(window.location.search);
+      const missionOrderId = params.get('missionOrderId') || params.get('id');
+      if (!missionOrderId) return false;
+      try {
+        return !!(await getInspectionDraft(missionOrderId));
+      } catch {
+        return false;
+      }
+    }
+
+    return false;
   };
 
   const isAuthorizedForPath = (path, normalizedRole) => {
@@ -122,18 +167,23 @@ function App() {
       if (isProtected) {
         const { data } = await supabase.auth.getSession();
         const user = data?.session?.user || null;
+        const offlinePreparedInspectorAccess = await hasPreparedOfflineInspectorAccess(path);
 
         // If there is no session, redirect to login for protected routes.
-        if (!user) {
+        if (!user && !offlinePreparedInspectorAccess) {
           if (path !== '/login') {
             window.location.replace('/login?force=1');
             return;
           }
         }
 
-        normalizedRole = normalizeRole(getRoleFromUser(user));
+        normalizedRole = normalizeRole(getRoleFromUser(user)) || getCachedRole();
         if (!normalizedRole && user?.id) {
           normalizedRole = await getRoleFromProfiles(user.id);
+        }
+        if (normalizedRole) setCachedRole(normalizedRole);
+        if (!normalizedRole && offlinePreparedInspectorAccess) {
+          normalizedRole = 'inspector';
         }
 
         if (!mounted) return;
@@ -141,7 +191,7 @@ function App() {
         if (!isAuthorizedForPath(path, normalizedRole)) {
           // If user is not authorized for this route, send them to a safe page.
           // If not logged in -> login, else -> no-permission.
-          if (!user) {
+          if (!user && !offlinePreparedInspectorAccess) {
             window.location.replace('/login?force=1');
             return;
           }
