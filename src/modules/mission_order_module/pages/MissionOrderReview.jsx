@@ -18,6 +18,48 @@ function formatDateHuman(yyyyMmDd) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+async function uploadMissionOrderDetailsDocx({
+  missionOrderId,
+  templateUrl,
+  generateMissionOrderDetailsDocx,
+  inspectors,
+  date_of_inspection,
+  date_of_issuance,
+  business_name,
+  business_address,
+  complaint_details,
+}) {
+  if (!missionOrderId) throw new Error('Mission order id is required for details DOCX generation.');
+
+  const blob = await generateMissionOrderDetailsDocx({
+    templateUrl,
+    inspectors,
+    date_of_inspection,
+    date_of_issuance,
+    business_name,
+    business_address,
+    complaint_details,
+  });
+
+  const bucket = 'mission-orders';
+  const objectPath = `${missionOrderId}/MISSION-ORDER-DETAILS.docx`;
+
+  const { error: uploadErr } = await supabase.storage
+    .from(bucket)
+    .upload(objectPath, blob, {
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      cacheControl: '0',
+      upsert: true,
+    });
+  if (uploadErr) throw uploadErr;
+
+  const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+  const publicUrl = publicData?.publicUrl;
+  if (!publicUrl) throw new Error('Failed to get public URL for Mission Order details DOCX.');
+
+  return publicUrl;
+}
+
 function formatStatus(status) {
   if (!status) return 'Unknown';
   return String(status)
@@ -399,7 +441,19 @@ export default function MissionOrderReview() {
         if (!signedTemplate?.signedUrl) throw new Error('Failed to create signed URL for mission order template.');
 
         // Lazy import so we don’t pay docx bundle cost unless approving.
-        const { generateMissionOrderDocx } = await import('../lib/docx_template');
+        const { generateMissionOrderDetailsDocx, generateMissionOrderDocx } = await import('../lib/docx_template');
+
+        const missionOrderQrUrl = await uploadMissionOrderDetailsDocx({
+          missionOrderId: fresh.id,
+          templateUrl: signedTemplate.signedUrl,
+          generateMissionOrderDetailsDocx,
+          inspectors: assignedInspectorNames || '-',
+          date_of_inspection: fresh.date_of_inspection,
+          date_of_issuance: fresh.date_of_issuance,
+          business_name: c?.business_name,
+          business_address: c?.business_address,
+          complaint_details: complaintDetailsForDocx,
+        });
 
         const blob = await generateMissionOrderDocx({
           templateUrl: signedTemplate.signedUrl,
@@ -411,6 +465,8 @@ export default function MissionOrderReview() {
           business_address: c?.business_address,
           complaint_details: complaintDetailsForDocx,
           director_signature_url: directorSignatureUrl,
+          mission_order_qr_mode: 'generated',
+          mission_order_qr_url: missionOrderQrUrl,
         });
 
         const bucket = 'mission-orders';
@@ -420,6 +476,7 @@ export default function MissionOrderReview() {
           .from(bucket)
           .upload(objectPath, blob, {
             contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            cacheControl: '0',
             upsert: true,
           });
         if (uploadErr) throw uploadErr;
