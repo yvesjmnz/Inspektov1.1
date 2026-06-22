@@ -197,55 +197,6 @@ function hasSpecialComplaintTag(tags) {
   return Array.isArray(tags) && tags.some((tag) => String(tag || '').trim().toLowerCase() === 'special complaint');
 }
 
-function getUrgencyText(authenticityLevel, tags) {
-  if (hasSpecialComplaintTag(tags)) {
-    return 'Special Complaint';
-  }
-  const u = Number(authenticityLevel);
-  if (u < 50) {
-    return 'Monitoring and Records';
-  }
-  if (u === 50) {
-    return 'Scheduled Inspection';
-  }
-  if (u > 50) {
-    return 'Immediate Inspection';
-  }
-  return '—';
-}
-
-function getUrgencyStyle(urgency, tags) {
-  if (hasSpecialComplaintTag(tags)) {
-    return {
-      badge: { background: '#fce7f3', border: '1px solid #ec4899', color: '#9d174d' },
-      hover: { borderLeft: '4px solid #ec4899', boxShadow: '0 10px 24px rgba(236, 72, 153, 0.18)' }
-    };
-  }
-  const u = Number(urgency);
-  if (u > 50) {
-    return {
-      badge: { background: '#dcfce7', border: '1px solid #22c55e', color: '#166534' },
-      hover: { borderLeft: '4px solid #22c55e' }
-    };
-  }
-  if (u === 50) {
-    return {
-      badge: { background: '#fef3c7', border: '1px solid #eab308', color: '#854d0e' },
-      hover: { borderLeft: '4px solid #eab308' }
-    };
-  }
-  if (u < 50) {
-    return {
-      badge: { background: '#fee2e2', border: '1px solid #ef4444', color: '#991b1b' },
-      hover: { borderLeft: '4px solid #ef4444' }
-    };
-  }
-  return {
-    badge: { background: '#e2e8f0', border: '1px solid #cbd5e1', color: '#334155' },
-    hover: { borderLeft: '4px solid #cbd5e1' }
-  };
-}
-
 function formatDateNoSeconds(isoString) {
   if (!isoString) return '—';
   const date = new Date(isoString);
@@ -298,6 +249,18 @@ function getQueueDecisionSignal(complaint, allComplaints) {
   const email = normalizeQueueKey(complaint.reporter_email);
   const businessKey = getQueueBusinessKey(complaint);
   const rows = Array.isArray(allComplaints) ? allComplaints : [];
+  const tags = Array.isArray(complaint?.tags) ? complaint.tags.map((tag) => normalizeQueueKey(tag)) : [];
+  const isSpecialComplaint = hasSpecialComplaintTag(complaint?.tags);
+  const hasFailedLocationVerification = tags.includes('failed location verification');
+
+  if (isSpecialComplaint) {
+    return {
+      tone: 'special',
+      label: 'Special complaint',
+      title: 'Utmost priority',
+      detail: 'Filed by a special office or government office. Location verification is skipped.',
+    };
+  }
 
   const sameReporter = rows.filter((row) => normalizeQueueKey(row.reporter_email) === email);
   const reporter24h = sameReporter.filter((row) => {
@@ -316,12 +279,14 @@ function getQueueDecisionSignal(complaint, allComplaints) {
   });
   const businessReporters7d = new Set(sameBusiness7d.map((row) => normalizeQueueKey(row.reporter_email)).filter(Boolean));
 
-  if (reporter24h.length > 5 || reporterBusinesses7d.size >= 10 || normalizeQueueKey(complaint.status) === 'on_hold') {
+  if (hasFailedLocationVerification || reporter24h.length > 5 || reporterBusinesses7d.size >= 10 || normalizeQueueKey(complaint.status) === 'on_hold') {
     return {
       tone: 'warning',
-      label: 'Possible spam',
+      label: hasFailedLocationVerification ? 'Location mismatch' : 'Possible spam',
       title: 'Check before accepting',
-      detail: reporter24h.length > 5
+      detail: hasFailedLocationVerification
+        ? 'Reporter location did not match the establishment.'
+        : reporter24h.length > 5
         ? `${reporter24h.length} complaints from this email today.`
         : `${reporterBusinesses7d.size} establishments from this reporter this week.`,
       declineHint: 'Potential spam or repetitive complaint pattern.',
@@ -356,6 +321,7 @@ function getQueueDecisionSignal(complaint, allComplaints) {
 
 function QueueSignalPill({ signal }) {
   const styles = {
+    special: { bg: '#fdf2f8', border: '#ec4899', color: '#9d174d' },
     warning: { bg: '#fffbeb', border: '#f59e0b', color: '#92400e' },
     success: { bg: '#f0fdf4', border: '#22c55e', color: '#166534' },
     info: { bg: '#eff6ff', border: '#2563eb', color: '#1d4ed8' },
@@ -423,9 +389,98 @@ function buildQueueSections(items, allComplaints) {
 }
 
 function getQueueSectionKeyForSignal(signal) {
+  if (signal?.tone === 'special') return 'special';
   if (signal?.tone === 'success') return 'inspection-ready';
   if (signal?.tone === 'warning') return 'possible-spam';
   return 'normal';
+}
+
+function getQueueReviewBucketKey(complaint, allComplaints) {
+  const signal = getQueueDecisionSignal(complaint, allComplaints);
+  if (signal?.tone === 'special') return 'special';
+  if (signal?.tone === 'warning') return 'possible-spam';
+
+  const group = getSameEstablishmentComplaintGroup(complaint, allComplaints, { includeFuture: true });
+  if (group.uniqueReporterCount > 1) return 'multi-complainant';
+
+  return 'single';
+}
+
+function getQueueBusinessGroupKeyForBucket(complaint, allComplaints) {
+  const group = getSameEstablishmentComplaintGroup(complaint, allComplaints, { includeFuture: true });
+  const groupIds = group.complaints.map((row) => row?.id).filter(Boolean).sort();
+  return groupIds.length > 1 ? groupIds.join('|') : complaint?.id;
+}
+
+function isLatestQueueComplaintForBucket(complaint, allComplaints, bucketKey) {
+  if (!complaint?.id) return false;
+
+  const group = getSameEstablishmentComplaintGroup(complaint, allComplaints, { includeFuture: true });
+  const sameBucketGroup = group.complaints
+    .filter((row) => getQueueReviewBucketKey(row, allComplaints) === bucketKey)
+    .sort((a, b) => getQueueComplaintTime(b) - getQueueComplaintTime(a));
+
+  return (sameBucketGroup[0]?.id || complaint.id) === complaint.id;
+}
+
+function buildQueueReviewItems(items, allComplaints, bucketKey) {
+  const processedGroupIds = new Set();
+  const displayItems = [];
+
+  (items || []).forEach((complaint) => {
+    const group = getSameEstablishmentComplaintGroup(complaint, allComplaints, { includeFuture: true });
+    const currentBucketKey = getQueueReviewBucketKey(complaint, allComplaints);
+    if (currentBucketKey !== bucketKey) return;
+
+    const groupKey = getQueueBusinessGroupKeyForBucket(complaint, allComplaints);
+    if (processedGroupIds.has(groupKey)) return;
+    processedGroupIds.add(groupKey);
+
+    const groupedComplaints = group.complaints
+      .filter((row) => getQueueReviewBucketKey(row, allComplaints) === bucketKey)
+      .sort((a, b) => getQueueComplaintTime(b) - getQueueComplaintTime(a));
+
+    const primary = groupedComplaints[0] || complaint;
+    const reporterMap = new Map();
+    groupedComplaints.forEach((row) => {
+      const normalizedEmail = normalizeQueueKey(row?.reporter_email);
+      if (!normalizedEmail) return;
+      if (!reporterMap.has(normalizedEmail)) reporterMap.set(normalizedEmail, row?.reporter_email || normalizedEmail);
+    });
+
+    displayItems.push({
+      key: groupKey || primary.id,
+      complaint: primary,
+      signal: getQueueDecisionSignal(primary, allComplaints),
+      groupedComplaints,
+      uniqueReporterEmails: Array.from(reporterMap.values()),
+      visibleCount: groupedComplaints.length || 1,
+    });
+  });
+
+  return displayItems;
+}
+
+function getQueueReviewBucketCounts(items, allComplaints) {
+  const counts = {
+    special: 0,
+    'multi-complainant': 0,
+    single: 0,
+    'possible-spam': 0,
+  };
+  const processedGroups = new Set();
+
+  (items || []).forEach((complaint) => {
+    const bucketKey = getQueueReviewBucketKey(complaint, allComplaints);
+    const groupKey = `${bucketKey}:${getQueueBusinessGroupKeyForBucket(complaint, allComplaints) || complaint?.id}`;
+
+    if (processedGroups.has(groupKey)) return;
+    processedGroups.add(groupKey);
+
+    counts[bucketKey] += 1;
+  });
+
+  return counts;
 }
 
 function buildQueueDisplayItems(items, allComplaints) {
@@ -507,22 +562,17 @@ function getQueueSectionStyle(tone) {
 
 function getComplaintInfoBadges(complaint) {
   const tags = Array.isArray(complaint?.tags) ? complaint.tags.map((tag) => String(tag || '').toLowerCase()) : [];
-  const hasReporterLocation = complaint?.reporter_lat != null && complaint?.reporter_lng != null;
+  const isSpecialComplaint = hasSpecialComplaintTag(complaint?.tags);
 
   const locationBadge = (() => {
+    if (isSpecialComplaint) return null;
     if (tags.includes('location verified')) {
       return { label: 'Location verified', detail: 'Reporter location matched', tone: 'success' };
     }
     if (tags.includes('failed location verification')) {
-      return { label: 'Location not verified', detail: 'Reporter may be away from site', tone: 'warning' };
+      return { label: 'Location verification check failed', detail: 'Reporter may be away from site', tone: 'warning' };
     }
-    if (tags.includes('verification unavailable')) {
-      return { label: 'Location unavailable', detail: 'No reliable location check', tone: 'neutral' };
-    }
-    if (hasReporterLocation) {
-      return { label: 'Location captured', detail: complaint?.reporter_accuracy ? `Accuracy ${Math.round(Number(complaint.reporter_accuracy))}m` : 'Reporter shared GPS', tone: 'info' };
-    }
-    return { label: 'No location check', detail: 'Review address details manually', tone: 'neutral' };
+    return { label: 'Location verification check failed', detail: 'No verified reporter location was recorded.', tone: 'warning' };
   })();
 
   const evidenceCount = (Array.isArray(complaint?.image_urls) ? complaint.image_urls.length : 0)
@@ -540,11 +590,12 @@ function getComplaintInfoBadges(complaint) {
       detail: evidenceCount > 0 ? 'Evidence attached' : 'No uploaded evidence',
       tone: evidenceCount > 0 ? 'info' : 'neutral',
     },
-  ];
+  ].filter(Boolean);
 }
 
 function QueueComplaintCard({ complaint, signal, sectionStyle, onOpen }) {
   const pillStyles = {
+    special: { bg: '#fdf2f8', border: '#f9a8d4', color: '#9d174d' },
     warning: { bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
     success: { bg: '#f0fdfa', border: '#99f6e4', color: '#0f766e' },
     info: { bg: '#f8fafc', border: '#cbd5e1', color: '#334155' },
@@ -705,6 +756,8 @@ export default function DashboardDirector() {
   const [auditComplaint, setAuditComplaint] = useState(null);
   const [queueSearch, setQueueSearch] = useState('');
   const [queueFilter, setQueueFilter] = useState('all');
+  const [queueReviewTab, setQueueReviewTab] = useState('special');
+  const [expandedQueueGroupKey, setExpandedQueueGroupKey] = useState(null);
   const [complaintHistorySearch, setComplaintHistorySearch] = useState('');
   const [missionOrderHistorySearch, setMissionOrderHistorySearch] = useState('');
   const [complaintHistoryFilters, setComplaintHistoryFilters] = useState({
@@ -1622,13 +1675,33 @@ export default function DashboardDirector() {
   const usesComplaintData = tab === 'queue' || tab === 'history';
   const complaintsReadyForTab = !usesComplaintData || complaintsLoadedTab === tab;
   const showHeaderRefresh = tab !== 'reports' && tab !== 'special-complaint-form' && tab !== 'naming-approvals';
+  const queueDecisionRows = tab === 'queue' && complaintsLoadedTab === tab ? complaints : filteredComplaints;
+  const queueReviewBucketCounts = useMemo(() => {
+    if (tab !== 'queue') {
+      return {
+        special: 0,
+        'multi-complainant': 0,
+        single: 0,
+        'possible-spam': 0,
+      };
+    }
+    return getQueueReviewBucketCounts(filteredComplaints, queueDecisionRows);
+  }, [filteredComplaints, queueDecisionRows, tab]);
+  const queueFilteredComplaints = useMemo(() => {
+    if (tab !== 'queue') return filteredComplaints;
+    return filteredComplaints.filter((complaint) => {
+      const bucketKey = getQueueReviewBucketKey(complaint, queueDecisionRows);
+      return bucketKey === queueReviewTab && isLatestQueueComplaintForBucket(complaint, queueDecisionRows, bucketKey);
+    });
+  }, [filteredComplaints, queueDecisionRows, queueReviewTab, tab]);
 
   // Group complaints by day for Review Complaints
   const complaintsByDay = useMemo(() => {
     // Group by day for both queue and history tabs
     if (tab === 'mission-orders' || tab === 'mission-orders-history') return { groups: {}, sortedKeys: [] };
     const groups = {};
-    for (const c of filteredComplaints) {
+    const sourceComplaints = tab === 'queue' ? queueFilteredComplaints : filteredComplaints;
+    for (const c of sourceComplaints) {
       const d = c.created_at ? new Date(c.created_at) : null;
       const key = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10) : 'unknown';
       if (!groups[key]) {
@@ -1648,7 +1721,7 @@ export default function DashboardDirector() {
     }
     const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1)); // desc by date key YYYY-MM-DD
     return { groups, sortedKeys };
-  }, [filteredComplaints, tab]);
+  }, [filteredComplaints, queueFilteredComplaints, tab]);
 
   // Group mission orders by day for Mission Order History (match Head Inspector behavior)
   const missionOrdersByDay = useMemo(() => {
@@ -2191,7 +2264,7 @@ export default function DashboardDirector() {
     }
   };
 
-  const queueDecisionRows = tab === 'queue' && complaintsLoadedTab === tab ? complaints : filteredComplaints;
+  const displayedComplaintCount = tab === 'queue' ? queueFilteredComplaints.length : filteredComplaints.length;
 
   return (
     <div className="dash-container">
@@ -3280,7 +3353,60 @@ export default function DashboardDirector() {
             </div>
           ) : (
             <div style={{ display: 'grid', gap: 20 }}>
-              {filteredComplaints.length === 0 ? (
+              {tab === 'queue' ? (
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {[
+                    { key: 'special', label: 'Special Complaints', count: queueReviewBucketCounts.special },
+                    { key: 'multi-complainant', label: 'Multiple Complainants', count: queueReviewBucketCounts['multi-complainant'] },
+                    { key: 'single', label: 'Single Complaints', count: queueReviewBucketCounts.single },
+                    { key: 'possible-spam', label: 'Possible Spam', count: queueReviewBucketCounts['possible-spam'] },
+                  ].map((item) => {
+                    const active = queueReviewTab === item.key;
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setQueueReviewTab(item.key)}
+                        style={{
+                          minHeight: 42,
+                          padding: '0 16px',
+                          borderRadius: 999,
+                          border: active ? '1px solid #0b2249' : '1px solid #cbd5e1',
+                          background: active ? '#0b2249' : '#ffffff',
+                          color: active ? '#ffffff' : '#334155',
+                          fontWeight: 900,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          boxShadow: active ? '0 8px 18px rgba(11, 34, 73, 0.18)' : '0 2px 6px rgba(15, 23, 42, 0.05)',
+                        }}
+                      >
+                        <span>{item.label}</span>
+                        <span
+                          style={{
+                            minWidth: 24,
+                            height: 24,
+                            padding: '0 7px',
+                            borderRadius: 999,
+                            background: active ? '#F2B705' : '#f1f5f9',
+                            color: active ? '#0b2249' : '#475569',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 12,
+                            fontWeight: 950,
+                          }}
+                        >
+                          {item.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {displayedComplaintCount === 0 ? (
                 <div style={{ textAlign: 'center', padding: 32, color: '#475569', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
                   {loading || !complaintsReadyForTab ? 'Loading…' : 'No records found.'}
                 </div>
@@ -3371,16 +3497,23 @@ export default function DashboardDirector() {
                               </tr>
                             </thead>
                             <tbody>
-                              {buildQueueDisplayItems(dayGroup.items, queueDecisionRows).map((queueItem) => {
+                              {buildQueueReviewItems(dayGroup.items, queueDecisionRows, queueReviewTab).map((queueItem) => {
                                 const c = queueItem.complaint;
                                 const queueSignal = queueItem.signal;
-                                const urgencyStyle = getUrgencyStyle(c?.authenticity_level, c?.tags);
-                                const urgencyColor = (() => {
-                                  if (hasSpecialComplaintTag(c?.tags)) return '#ec4899';
-                                  const u = Number(c?.authenticity_level);
-                                  if (u > 50) return '#22c55e';
-                                  if (u === 50) return '#eab308';
-                                  if (u < 50) return '#ef4444';
+                                const fannedComplaints = queueItem.groupedComplaints.filter((row) => row?.id !== c?.id);
+                                const isGroupExpanded = expandedQueueGroupKey === queueItem.key;
+                                const locationBadge = getComplaintInfoBadges(c).find((badge) => String(badge?.label || '').toLowerCase().startsWith('location'));
+                                const locationBadgeStyle = (() => {
+                                  if (locationBadge?.tone === 'success') return { background: '#f0fdf4', border: '#86efac', color: '#166534' };
+                                  if (locationBadge?.tone === 'warning') return { background: '#fffbeb', border: '#f59e0b', color: '#92400e' };
+                                  if (locationBadge?.tone === 'info') return { background: '#eff6ff', border: '#93c5fd', color: '#1d4ed8' };
+                                  return { background: '#f8fafc', border: '#cbd5e1', color: '#475569' };
+                                })();
+                                const rowAccentColor = (() => {
+                                  if (queueSignal?.tone === 'special') return '#ec4899';
+                                  if (queueSignal?.tone === 'warning') return '#f59e0b';
+                                  if (queueSignal?.tone === 'success') return '#22c55e';
+                                  if (queueSignal?.tone === 'info') return '#2563eb';
                                   return '#cbd5e1';
                                 })();
 
@@ -3398,10 +3531,7 @@ export default function DashboardDirector() {
                                     }}
                                     onMouseEnter={(e) => {
                                       e.currentTarget.style.background = '#f8fafc';
-                                      e.currentTarget.style.borderLeft = `4px solid ${urgencyColor}`;
-                                      if (urgencyStyle) {
-                                        e.currentTarget.style.boxShadow = urgencyStyle.hover.boxShadow;
-                                      }
+                                      e.currentTarget.style.borderLeft = `4px solid ${rowAccentColor}`;
                                     }}
                                     onMouseLeave={(e) => {
                                       e.currentTarget.style.background = '#ffffff';
@@ -3416,17 +3546,95 @@ export default function DashboardDirector() {
                                       <div className="dash-cell-title" style={{ fontSize: 16 }}>{c.business_name || '—'}</div>
                                       <div className="dash-cell-sub" style={{ marginTop: 4 }}>{c.business_address || ''}</div>
                                       <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                                        <span className="status-badge" style={{ ...urgencyStyle.badge, fontWeight: 900, fontSize: 11, padding: '5px 10px', borderRadius: 999, display: 'inline-block', whiteSpace: 'nowrap', border: '1px solid rgba(0,0,0,0.08)' }}>
-                                          {getUrgencyText(c?.authenticity_level, c?.tags)}
-                                        </span>
                                         <span style={{ color: '#64748b', fontWeight: 900, fontSize: 12 }}>{c.reporter_email || '—'}</span>
+                                        {locationBadge ? (
+                                          <span
+                                            title={locationBadge.detail || ''}
+                                            style={{
+                                              background: locationBadgeStyle.background,
+                                              border: `1px solid ${locationBadgeStyle.border}`,
+                                              color: locationBadgeStyle.color,
+                                              fontWeight: 900,
+                                              fontSize: 11,
+                                              padding: '5px 9px',
+                                              borderRadius: 999,
+                                              whiteSpace: 'nowrap',
+                                            }}
+                                          >
+                                            {locationBadge.label}
+                                          </span>
+                                        ) : null}
                                       </div>
                                       {queueItem.groupedComplaints.length > 1 ? (
                                         <div style={{ marginTop: 8, color: '#475569', fontSize: 12, fontWeight: 800, lineHeight: 1.4 }}>
-                                          Grouped complaints: {queueItem.groupedComplaints.length} total from {queueItem.uniqueReporterEmails.length} reporter{queueItem.uniqueReporterEmails.length === 1 ? '' : 's'}
-                                          <div style={{ marginTop: 2, color: '#64748b', fontWeight: 700 }}>
-                                            {queueItem.uniqueReporterEmails.join(', ')}
-                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              setExpandedQueueGroupKey(isGroupExpanded ? null : queueItem.key);
+                                            }}
+                                            style={{
+                                              border: '1px solid #cbd5e1',
+                                              borderRadius: 999,
+                                              background: '#ffffff',
+                                              color: '#334155',
+                                              cursor: 'pointer',
+                                              fontWeight: 900,
+                                              fontSize: 12,
+                                              padding: '7px 11px',
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: 8,
+                                            }}
+                                          >
+                                            <span>{queueItem.groupedComplaints.length} complaints from {queueItem.uniqueReporterEmails.length} reporters</span>
+                                            <span aria-hidden="true">{isGroupExpanded ? 'Hide' : 'Show'}</span>
+                                          </button>
+                                          {isGroupExpanded ? (
+                                            <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+                                              {fannedComplaints.map((fannedComplaint) => (
+                                              <button
+                                                key={fannedComplaint.id || `${queueItem.key}-fanned`}
+                                                type="button"
+                                                onClick={(event) => {
+                                                  event.stopPropagation();
+                                                  window.location.assign(`/complaint/review?id=${fannedComplaint.id}&source=${tab}`);
+                                                }}
+                                                style={{
+                                                  width: '100%',
+                                                  border: '1px solid #dbeafe',
+                                                  borderRadius: 8,
+                                                  background: '#f8fafc',
+                                                  padding: '8px 10px 8px 22px',
+                                                  textAlign: 'left',
+                                                  cursor: 'pointer',
+                                                  color: '#334155',
+                                                  fontWeight: 800,
+                                                  position: 'relative',
+                                                }}
+                                              >
+                                                <span
+                                                  aria-hidden="true"
+                                                  style={{
+                                                    position: 'absolute',
+                                                    left: 9,
+                                                    top: 13,
+                                                    width: 6,
+                                                    height: 6,
+                                                    borderRadius: '50%',
+                                                    background: '#2563eb',
+                                                  }}
+                                                />
+                                                <span style={{ display: 'block', color: '#0f172a' }}>
+                                                  {fannedComplaint.business_name || c.business_name || 'Complaint'}
+                                                </span>
+                                                <span style={{ display: 'block', marginTop: 2, color: '#64748b', fontWeight: 700 }}>
+                                                  {fannedComplaint.reporter_email || 'No reporter email'} · {formatDateNoSeconds(fannedComplaint.created_at)}
+                                                </span>
+                                              </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
                                         </div>
                                       ) : null}
                                     </td>
