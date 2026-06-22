@@ -125,6 +125,8 @@ function statusBadgeClass(status) {
 const TEMPLATE_NAME = 'MISSION-ORDER-TEMPLATE';
 const MONTHLY_ASSIGNMENT_LIMIT = 2;
 const CANCELLED_MISSION_ORDER_STATUSES = new Set(['cancelled', 'canceled']);
+const DEFAULT_DIRECTOR_SIGNATURE_URL =
+  'https://nxmenhwpxtknrgvarioe.supabase.co/storage/v1/object/public/e-signature%20bucket/634074338_937186158874457_7418890435965105244_n-removebg-preview.png';
 
 function getCurrentMonthBounds(now = new Date()) {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -960,7 +962,13 @@ export default function MissionOrderEditor() {
         reviewed_at: nowIso,
         reviewed_by: userId,
         updated_at: nowIso,
-        ...(nextStatus === 'for inspection' ? { date_of_issuance: nowIso.slice(0, 10), director_preapproved_at: nowIso } : {}),
+        ...(nextStatus === 'for inspection'
+          ? {
+              date_of_issuance: nowIso.slice(0, 10),
+              director_preapproved_at: nowIso,
+              director_signature_url: missionOrder?.director_signature_url || DEFAULT_DIRECTOR_SIGNATURE_URL,
+            }
+          : {}),
       };
 
       const { error: updateError } = await supabase.from('mission_orders').update(patch).eq('id', missionOrderId);

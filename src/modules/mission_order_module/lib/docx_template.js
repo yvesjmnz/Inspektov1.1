@@ -169,11 +169,8 @@ async function createMissionOrderQrImage({
   return dataUrlToArrayBuffer(dataUrl);
 }
 
-function replaceTemplateQrImage(zip, imageBytes, shouldRequireImage) {
+function replaceTemplateQrImage(zip, imageBytes) {
   if (!zip.file(MISSION_ORDER_QR_IMAGE_PATH)) {
-    if (shouldRequireImage) {
-      throw new Error('Mission order template QR image placeholder was not found.');
-    }
     return;
   }
 
@@ -266,21 +263,35 @@ export async function generateMissionOrderDocx({
     mission_order_qr_mode,
     mission_order_qr_url,
   });
-  replaceTemplateQrImage(zip, qrImageBytes, mission_order_qr_mode === 'generated');
+  replaceTemplateQrImage(zip, qrImageBytes);
 
-  // Configure image module (resolves {{director_signature}} to an image if provided)
+  // Configure image module (resolves { director_signature } and { qr } to images if provided)
+  let directorSignatureBytes = null;
+  const imageTags = new Set(['director_signature', 'qr', 'qr_code', 'mission_order_qr']);
   const imageModule = new ImageModule({
     centered: false,
+    setParser: (tag) => {
+      const normalizedTag = String(tag || '').trim();
+      if (imageTags.has(normalizedTag)) {
+        return {
+          type: 'placeholder',
+          value: normalizedTag,
+          module: 'open-xml-templating/docxtemplater-image-module',
+          centered: false,
+        };
+      }
+      return null;
+    },
     getImage: (tag) => {
       // tag is the value provided in the data for the image placeholder
       if (!tag) return null;
-      // We pass bytes (ArrayBuffer) in director_signature.
-      if (tag instanceof ArrayBuffer) return tag;
+      if (tag === 'director_signature' && directorSignatureBytes) return directorSignatureBytes;
+      if (tag === 'mission_order_qr' && qrImageBytes) return qrImageBytes;
       return null;
     },
-    getSize: () => {
-      // Default size for e-signature (approx width=220px, height=90px)
-      return [220, 90];
+    getSize: (_img, tag) => {
+      if (tag === 'mission_order_qr') return [82, 82];
+      return [145, 58];
     },
   });
 
@@ -292,7 +303,6 @@ export async function generateMissionOrderDocx({
 
   // Pre-fetch signature bytes if provided.
   // This avoids the image module receiving an unresolved/unauthorized URL at render time.
-  let directorSignatureBytes = null;
   if (director_signature_url) {
     try {
       directorSignatureBytes = await fetchAsArrayBuffer(director_signature_url);
@@ -312,7 +322,10 @@ export async function generateMissionOrderDocx({
     complaint_details: safeText(complaint_details) || '—',
     // Image placeholder (if template includes {{director_signature}})
     // Image module expects either bytes or a resolvable value.
-    director_signature: directorSignatureBytes,
+    director_signature: directorSignatureBytes ? 'director_signature' : null,
+    qr: mission_order_qr_mode === 'generated' ? 'mission_order_qr' : null,
+    qr_code: mission_order_qr_mode === 'generated' ? 'mission_order_qr' : null,
+    mission_order_qr: mission_order_qr_mode === 'generated' ? 'mission_order_qr' : null,
   };
 
   doc.setData(data);

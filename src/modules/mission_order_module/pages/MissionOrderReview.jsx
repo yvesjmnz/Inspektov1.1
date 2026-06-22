@@ -60,6 +60,102 @@ async function uploadMissionOrderDetailsDocx({
   return publicUrl;
 }
 
+const DEFAULT_DIRECTOR_SIGNATURE_URL =
+  'https://nxmenhwpxtknrgvarioe.supabase.co/storage/v1/object/public/e-signature%20bucket/634074338_937186158874457_7418890435965105244_n-removebg-preview.png';
+const E_SIGNATURE_BUCKETS = ['e-signature bucket', 'e-signature'];
+
+async function createSignedStorageUrl(bucket, path) {
+  if (!bucket || !path) return null;
+
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+  if (error) return null;
+  return data?.signedUrl || null;
+}
+
+function isSignatureImageFile(entry) {
+  const name = String(entry?.name || '').toLowerCase();
+  const mimeType = String(entry?.metadata?.mimetype || entry?.metadata?.mimeType || '').toLowerCase();
+  return mimeType.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(name);
+}
+
+async function findFirstSignatureImagePath(bucket, folder = '', depth = 0) {
+  if (!bucket || depth > 2) return null;
+
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .list(folder, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } });
+  if (error) return null;
+
+  const entries = data || [];
+  const image = entries.find(isSignatureImageFile);
+  if (image?.name) {
+    return folder ? `${folder}/${image.name}` : image.name;
+  }
+
+  for (const entry of entries) {
+    const name = String(entry?.name || '').trim();
+    if (!name || isSignatureImageFile(entry)) continue;
+
+    const nextFolder = folder ? `${folder}/${name}` : name;
+    const nestedImagePath = await findFirstSignatureImagePath(bucket, nextFolder, depth + 1);
+    if (nestedImagePath) return nestedImagePath;
+  }
+
+  return null;
+}
+
+async function resolveDirectorSignatureUrl(existingValue, userId) {
+  const raw = String(existingValue || '').trim();
+
+  if (raw) {
+    if (/^https?:\/\//i.test(raw)) {
+      const privateMatch = raw.match(/\/storage\/v1\/object\/private\/([^/]+)\/(.+)$/i);
+      if (privateMatch) {
+        const signedUrl = await createSignedStorageUrl(privateMatch[1], decodeURIComponent(privateMatch[2]));
+        if (signedUrl) return signedUrl;
+      }
+      return raw;
+    }
+
+    for (const bucket of E_SIGNATURE_BUCKETS) {
+      const signedExistingPath = await createSignedStorageUrl(bucket, raw.replace(/^\/+/, ''));
+      if (signedExistingPath) return signedExistingPath;
+    }
+  }
+
+  if (DEFAULT_DIRECTOR_SIGNATURE_URL) return DEFAULT_DIRECTOR_SIGNATURE_URL;
+
+  const candidates = [
+    userId ? `${userId}.png` : null,
+    userId ? `${userId}.jpg` : null,
+    userId ? `${userId}/signature.png` : null,
+    userId ? `${userId}/signature.jpg` : null,
+    'director.png',
+    'director.jpg',
+    'director-signature.png',
+    'director-signature.jpg',
+    'signature.png',
+    'signature.jpg',
+  ].filter(Boolean);
+
+  for (const path of candidates) {
+    for (const bucket of E_SIGNATURE_BUCKETS) {
+      const signedUrl = await createSignedStorageUrl(bucket, path);
+      if (signedUrl) return signedUrl;
+    }
+  }
+
+  for (const bucket of E_SIGNATURE_BUCKETS) {
+    const existingImagePath = await findFirstSignatureImagePath(bucket);
+    if (!existingImagePath) continue;
+
+    const signedUrl = await createSignedStorageUrl(bucket, existingImagePath);
+    if (signedUrl) return signedUrl;
+  }
+
+  return null;
+}
+
 function formatStatus(status) {
   if (!status) return 'Unknown';
   return String(status)
@@ -343,6 +439,9 @@ export default function MissionOrderReview() {
       const userId = userData?.user?.id;
       if (!userId) throw new Error('Not authenticated. Please login again.');
 
+      const directorSignatureUrlForApproval = nextStatus === 'for inspection'
+        ? await resolveDirectorSignatureUrl(missionOrder?.director_signature_url, userId)
+        : null;
       const nowIso = new Date().toISOString();
       const patch = {
         status: nextStatus,
@@ -350,7 +449,13 @@ export default function MissionOrderReview() {
         reviewed_at: nowIso,
         reviewed_by: userId,
         updated_at: nowIso,
-        ...(nextStatus === 'for inspection' ? { date_of_issuance: nowIso.slice(0, 10), director_preapproved_at: nowIso } : {}),
+        ...(nextStatus === 'for inspection'
+          ? {
+              date_of_issuance: nowIso.slice(0, 10),
+              director_preapproved_at: nowIso,
+              director_signature_url: directorSignatureUrlForApproval,
+            }
+          : {}),
       };
 
       if (nextStatus === 'rejected' && !String(directorComment || '').trim()) {
@@ -415,22 +520,7 @@ export default function MissionOrderReview() {
 
         const complaintDetailsForDocx = `CITY ORDINANCES VIOLATED:\n${ordinancesText || '—'}`;
 
-        // If signature url points to private storage, attempt to sign. Best-effort.
-        let directorSignatureUrl = fresh?.director_signature_url || null;
-        try {
-          const u = String(directorSignatureUrl || '');
-          if (u && u.includes('/storage/v1/object/') && u.includes('/private/')) {
-            const m2 = u.match(/\/storage\/v1\/object\/private\/([^/]+)\/(.+)$/i);
-            if (m2) {
-              const bucket = m2[1];
-              const path = decodeURIComponent(m2[2]);
-              const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
-              if (signed?.signedUrl) directorSignatureUrl = signed.signedUrl;
-            }
-          }
-        } catch {
-          // ignore
-        }
+        const directorSignatureUrl = await resolveDirectorSignatureUrl(fresh?.director_signature_url, userId);
 
         // Signed template
         const templatePath = 'templates/MISSION-ORDER-TEMPLATE.docx';
