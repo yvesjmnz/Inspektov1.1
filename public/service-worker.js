@@ -10,42 +10,41 @@
 
 const CACHE_NAME = 'inspekto-app-shell-v1';
 const APP_SHELL_URLS = [
-  '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/bg.jpg',
-  '/CityHall.jpg',
   '/logo.png',
-  '/seal-manila.png',
-  '/manila.png',
-  '/bureau-permits.png',
-  '/cropped-bureau.png',
-  '/refresh.png',
-  '/ui_icons/Address.png',
-  '/ui_icons/Business.png',
   '/ui_icons/camera.png',
   '/ui_icons/Complaint%20Description.png',
   '/ui_icons/document.png',
-  '/ui_icons/history.png',
   '/ui_icons/image.png',
   '/ui_icons/inspection.png',
-  '/ui_icons/logout.png',
-  '/ui_icons/menu.png',
   '/ui_icons/mo.png',
-  '/ui_icons/queue.png',
-  '/ui_icons/revision.png',
-  '/ui_icons/special-clipboard-check.svg',
-  '/ui_icons/special-envelope.svg',
-  '/ui_icons/special-secure-envelope.svg',
-  '/ui_icons/special-shield-check.svg',
   '/ui_icons/switch-camera.png',
-  '/ui_icons/task.png',
-  '/ui_icons/user.png',
 ];
 
 async function cacheAppShell() {
   const cache = await caches.open(CACHE_NAME);
   await Promise.allSettled(APP_SHELL_URLS.map((url) => cache.add(url)));
+}
+
+function isInspectionSlipPath(pathname) {
+  return pathname === '/inspection-slip/create' || pathname === '/inspection-slip/review' || pathname.startsWith('/inspection-slip/');
+}
+
+function isInspectionSlipAssetRequest(req, url) {
+  if (isInspectionSlipPath(url.pathname)) return true;
+
+  const referrer = req.referrer ? new URL(req.referrer) : null;
+  const fromInspectionSlip = referrer && referrer.origin === self.location.origin && isInspectionSlipPath(referrer.pathname);
+  if (!fromInspectionSlip) return false;
+
+  return (
+    url.pathname === '/index.html' ||
+    url.pathname === '/manifest.webmanifest' ||
+    url.pathname.startsWith('/assets/') ||
+    url.pathname.startsWith('/ui_icons/') ||
+    url.pathname === '/logo.png'
+  );
 }
 
 // Listen for push notifications
@@ -206,6 +205,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (req.mode === 'navigate') {
+    if (!isInspectionSlipPath(url.pathname)) return;
+
     event.respondWith(
       fetch(req)
         .then((res) => {
@@ -228,6 +229,8 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
+
+  if (!isInspectionSlipAssetRequest(req, url)) return;
 
   event.respondWith(
     caches.match(req).then(async (cached) => {

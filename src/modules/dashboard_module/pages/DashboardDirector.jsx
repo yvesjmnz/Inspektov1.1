@@ -10,6 +10,7 @@ import HistorySearchBar from '../components/HistorySearchBar';
 import MiniRefreshButton from '../components/MiniRefreshButton';
 import BusinessNamingPanel from '../components/BusinessNamingPanel';
 import { enrichRowsWithBusinessDisplayNames } from '../../../lib/businessNames';
+import { getSameEstablishmentComplaintGroup } from '../../../lib/complaintGrouping';
 import './Dashboard.css';
 
 // Complaint category grouping (Director view) from tags like "Violation: <Sub>"
@@ -425,6 +426,52 @@ function getQueueSectionKeyForSignal(signal) {
   if (signal?.tone === 'success') return 'inspection-ready';
   if (signal?.tone === 'warning') return 'possible-spam';
   return 'normal';
+}
+
+function buildQueueDisplayItems(items, allComplaints) {
+  const processedGroupIds = new Set();
+  const visibleItemIds = new Set((items || []).map((item) => item?.id).filter(Boolean));
+  const displayItems = [];
+
+  (items || []).forEach((complaint) => {
+    const group = getSameEstablishmentComplaintGroup(complaint, allComplaints, { includeFuture: true });
+
+    if (group.eligibleForInspectionGroup) {
+      const groupIds = group.complaints.map((row) => row?.id).filter(Boolean);
+      const visibleGroupIds = groupIds.filter((id) => visibleItemIds.has(id));
+      const groupKey = groupIds.slice().sort().join('|');
+
+      if (processedGroupIds.has(groupKey)) return;
+      processedGroupIds.add(groupKey);
+
+      const primary =
+        group.complaints.find((row) => visibleItemIds.has(row?.id)) ||
+        group.complaints[0] ||
+        complaint;
+
+      displayItems.push({
+        key: groupKey || complaint.id,
+        complaint: primary,
+        signal: getQueueDecisionSignal(primary, allComplaints),
+        groupedComplaints: group.complaints,
+        uniqueReporterEmails: group.uniqueReporterEmails,
+        visibleCount: visibleGroupIds.length || 1,
+      });
+      return;
+    }
+
+    const signal = getQueueDecisionSignal(complaint, allComplaints);
+    displayItems.push({
+      key: complaint.id,
+      complaint,
+      signal,
+      groupedComplaints: [complaint],
+      uniqueReporterEmails: [complaint?.reporter_email].filter(Boolean),
+      visibleCount: 1,
+    });
+  });
+
+  return displayItems;
 }
 
 function getQueueSectionStyle(tone) {
@@ -2031,23 +2078,35 @@ export default function DashboardDirector() {
       // Explicitly touch updated_at to guarantee it changes on update.
       patch.updated_at = nowIso;
 
+      const targetComplaint = complaints.find((c) => c?.id === complaintId) || fullComplaint || null;
+      const approvalGroup = status === 'approved'
+        ? getSameEstablishmentComplaintGroup(targetComplaint, complaints, { includeFuture: true })
+        : null;
+      const approvalGroupIds = approvalGroup?.eligibleForInspectionGroup
+        ? approvalGroup.complaints
+            .filter((row) => !['declined', 'rejected', 'cancelled'].includes(String(row?.status || '').toLowerCase()))
+            .map((row) => row?.id)
+            .filter(Boolean)
+        : [complaintId];
+      const affectedComplaintIds = Array.from(new Set(approvalGroupIds.length ? approvalGroupIds : [complaintId]));
+
       const { error } = await supabase
         .from('complaints')
         .update(patch)
-        .eq('id', complaintId);
+        .in('id', affectedComplaintIds);
 
       if (error) throw error;
 
       // Optimistic update
       setComplaints((prev) =>
-        prev.map((c) => (c.id === complaintId ? { ...c, ...patch } : c))
+        prev.map((c) => (affectedComplaintIds.includes(c.id) ? { ...c, ...patch } : c))
       );
 
       // If in queue, remove items that are no longer in review state
       if (tab === 'queue') {
         setComplaints((prev) =>
           prev.filter((c) => {
-            if (c.id !== complaintId) return true;
+            if (!affectedComplaintIds.includes(c.id)) return true;
             return ['submitted', 'pending', 'new'].includes(String(status));
           })
         );
@@ -3312,8 +3371,9 @@ export default function DashboardDirector() {
                               </tr>
                             </thead>
                             <tbody>
-                              {dayGroup.items.map((c) => {
-                                const queueSignal = getQueueDecisionSignal(c, queueDecisionRows);
+                              {buildQueueDisplayItems(dayGroup.items, queueDecisionRows).map((queueItem) => {
+                                const c = queueItem.complaint;
+                                const queueSignal = queueItem.signal;
                                 const urgencyStyle = getUrgencyStyle(c?.authenticity_level, c?.tags);
                                 const urgencyColor = (() => {
                                   if (hasSpecialComplaintTag(c?.tags)) return '#ec4899';
@@ -3326,7 +3386,7 @@ export default function DashboardDirector() {
 
                                 return (
                                   <tr
-                                    key={c.id}
+                                    key={queueItem.key}
                                     onClick={() => window.location.assign(`/complaint/review?id=${c.id}&source=${tab}`)}
                                     style={{
                                       cursor: 'pointer',
@@ -3361,6 +3421,14 @@ export default function DashboardDirector() {
                                         </span>
                                         <span style={{ color: '#64748b', fontWeight: 900, fontSize: 12 }}>{c.reporter_email || '—'}</span>
                                       </div>
+                                      {queueItem.groupedComplaints.length > 1 ? (
+                                        <div style={{ marginTop: 8, color: '#475569', fontSize: 12, fontWeight: 800, lineHeight: 1.4 }}>
+                                          Grouped complaints: {queueItem.groupedComplaints.length} total from {queueItem.uniqueReporterEmails.length} reporter{queueItem.uniqueReporterEmails.length === 1 ? '' : 's'}
+                                          <div style={{ marginTop: 2, color: '#64748b', fontWeight: 700 }}>
+                                            {queueItem.uniqueReporterEmails.join(', ')}
+                                          </div>
+                                        </div>
+                                      ) : null}
                                     </td>
                                     <td style={{ padding: '16px', color: '#0f172a', fontSize: 13 }}>{formatDateNoSeconds(c.created_at)}</td>
                                     <td style={{ padding: '16px' }}>

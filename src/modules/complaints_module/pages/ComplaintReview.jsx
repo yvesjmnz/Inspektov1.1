@@ -6,6 +6,7 @@ import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications
 import {
   DECLINE_TEMPLATES,
 } from '../../../lib/complaints/decisionSupport';
+import { getSameEstablishmentComplaintGroup } from '../../../lib/complaintGrouping';
 import '../../dashboard_module/pages/Dashboard.css';
 
 // Complaint Category grouping (derive from tags like "Violation: <Sub>")
@@ -195,6 +196,13 @@ function getSimpleReviewGuidance(complaint, relatedComplaints, relatedMissionOrd
 
   const reporterBusinesses7d = new Set(reporter7d.map(getBusinessKey));
   const businessReporters7d = new Set(business7d.map((row) => normalizeReviewKey(row.reporter_email)).filter(Boolean));
+  const businessReporterLabels7d = Array.from(
+    new Map(
+      business7d
+        .map((row) => [normalizeReviewKey(row.reporter_email), row.reporter_email])
+        .filter(([key]) => Boolean(key))
+    ).values()
+  );
   const activeStatuses = new Set(['draft', 'issued', 'for inspection', 'for_inspection', 'awaiting_signature']);
   const activeMissionOrder = (relatedMissionOrders || []).find((mo) => activeStatuses.has(normalizeReviewKey(mo.status)));
   const notes = [];
@@ -206,7 +214,7 @@ function getSimpleReviewGuidance(complaint, relatedComplaints, relatedMissionOrd
     notes.push(`This reporter contacted ${reporterBusinesses7d.size} different establishments in 7 days. Review for a possible pattern.`);
   }
   if (businessReporters7d.size >= 3) {
-    notes.push(`${businessReporters7d.size} different reporters complained about this establishment within 7 days.`);
+    notes.push(`${businessReporters7d.size} different reporters complained about this establishment within 7 days: ${businessReporterLabels7d.join(', ')}.`);
   } else {
     notes.push(`${business7d.length} recent complaint${business7d.length === 1 ? '' : 's'} for this establishment from ${businessReporters7d.size} reporter${businessReporters7d.size === 1 ? '' : 's'}.`);
   }
@@ -425,7 +433,7 @@ export default function ComplaintReview() {
     try {
       const anchor = new Date(baseComplaint.created_at);
       const start = new Date(anchor.getTime() - (7 * DAY_MS));
-      const end = new Date(anchor.getTime() + 1000);
+      const end = new Date(anchor.getTime() + (7 * DAY_MS));
 
       const { data: complaintRows = [], error: complaintError } = await supabase
         .from('complaints')
@@ -551,10 +559,20 @@ export default function ComplaintReview() {
 
       patch.updated_at = nowIso;
 
+      const approvalGroup = status === 'approved'
+        ? getSameEstablishmentComplaintGroup(complaint, relatedComplaints, { includeFuture: true })
+        : null;
+      const approvalGroupIds = approvalGroup?.eligibleForInspectionGroup
+        ? approvalGroup.complaints
+            .filter((row) => !['declined', 'rejected', 'cancelled'].includes(String(row?.status || '').toLowerCase()))
+            .map((row) => row?.id)
+            .filter(Boolean)
+        : [complaintId];
+
       const { error: updateError } = await supabase
         .from('complaints')
         .update(patch)
-        .eq('id', complaintId);
+        .in('id', Array.from(new Set(approvalGroupIds)));
 
       if (updateError) throw updateError;
 
@@ -571,7 +589,13 @@ export default function ComplaintReview() {
         }
       }
 
-      setToast(status === 'approved' ? 'Complaint approved.' : 'Complaint declined.');
+      setToast(
+        status === 'approved' && approvalGroupIds.length > 1
+          ? `${approvalGroupIds.length} grouped complaints approved for one inspection workflow.`
+          : status === 'approved'
+            ? 'Complaint approved.'
+            : 'Complaint declined.'
+      );
       await load();
       return true;
     } catch (e) {

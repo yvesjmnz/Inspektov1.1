@@ -566,7 +566,7 @@ export default function DashboardInspector() {
     const indexResponse = await fetch('/index.html', { cache: 'reload' });
     if (!indexResponse.ok) return;
 
-    const appRoutes = ['/dashboard/inspector', ...rows.map(getInspectionSlipHref).filter(Boolean)];
+    const appRoutes = rows.map(getInspectionSlipHref).filter(Boolean);
     await Promise.allSettled(appRoutes.map((url) => cache.put(url, indexResponse.clone())));
   };
 

@@ -9,6 +9,7 @@ import HistorySearchBar from '../components/HistorySearchBar';
 import MiniRefreshButton from '../components/MiniRefreshButton';
 import BusinessNamingPanel from '../components/BusinessNamingPanel';
 import { enrichRowsWithBusinessDisplayNames } from '../../../lib/businessNames';
+import { getComplaintBusinessGroupKey, getSameEstablishmentComplaintGroup, isMissingMissionOrderComplaintsTable } from '../../../lib/complaintGrouping';
 import './Dashboard.css';
 import { getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
 
@@ -238,24 +239,6 @@ export default function DashboardHeadInspector() {
     };
   }, [tab]);
 
-  const rejectedMissionOrders = useMemo(
-    () =>
-      complaints.filter((c) => {
-        const s = String(c.mission_order_status || '').toLowerCase();
-        return s === 'rejected';
-      }),
-    [complaints]
-  );
-
-  const preApprovedMissionOrders = useMemo(
-    () =>
-      complaints.filter((c) => {
-        const s = String(c.mission_order_status || '').toLowerCase();
-        return s === 'for inspection' || s === 'for_inspection';
-      }),
-    [complaints]
-  );
-
   const [creatingForId, setCreatingForId] = useState(null);
   const [toast, setToast] = useState('');
   const [expandedComplaintId, setExpandedComplaintId] = useState(null);
@@ -321,7 +304,7 @@ export default function DashboardHeadInspector() {
       const displayComplaintRows = await enrichRowsWithBusinessDisplayNames(supabase, complaintRows || []);
       const complaintIds = Array.from(new Set((displayComplaintRows || []).map((c) => c.id).filter(Boolean)));
 
-      const { data: missionOrders, error: moError } = complaintIds.length
+      const { data: directMissionOrders, error: moError } = complaintIds.length
         ? await supabase
             .from('mission_orders')
             .select('id, complaint_id, status, created_at, date_of_inspection, updated_at, secretary_signed_at, director_preapproved_at')
@@ -332,12 +315,50 @@ export default function DashboardHeadInspector() {
 
       if (moError) throw moError;
 
+      const { data: linkedComplaintRows, error: linkedComplaintError } = complaintIds.length
+        ? await supabase
+            .from('mission_order_complaints')
+            .select('mission_order_id, complaint_id, linked_at')
+            .in('complaint_id', complaintIds)
+        : { data: [], error: null };
+
+      if (linkedComplaintError && !isMissingMissionOrderComplaintsTable(linkedComplaintError)) throw linkedComplaintError;
+      const safeLinkedComplaintRows = linkedComplaintError ? [] : (linkedComplaintRows || []);
+
+      const linkedMissionOrderIds = Array.from(
+        new Set(safeLinkedComplaintRows.map((row) => row?.mission_order_id).filter(Boolean))
+      );
+
+      const { data: linkedMissionOrders, error: linkedMissionOrderError } = linkedMissionOrderIds.length
+        ? await supabase
+            .from('mission_orders')
+            .select('id, complaint_id, status, created_at, date_of_inspection, updated_at, secretary_signed_at, director_preapproved_at')
+            .in('id', linkedMissionOrderIds)
+            .order('created_at', { ascending: false })
+            .limit(500)
+        : { data: [], error: null };
+
+      if (linkedMissionOrderError) throw linkedMissionOrderError;
+
+      const missionOrders = [...(directMissionOrders || []), ...(linkedMissionOrders || [])];
+      const missionOrderById = new Map(missionOrders.map((mo) => [mo.id, mo]));
+
       // Keep the latest MO per complaint.
       const latestMoByComplaintId = new Map();
       (missionOrders || []).forEach((mo) => {
         if (!mo?.complaint_id) return;
         if (!latestMoByComplaintId.has(mo.complaint_id)) {
           latestMoByComplaintId.set(mo.complaint_id, mo);
+        }
+      });
+      safeLinkedComplaintRows.forEach((link) => {
+        const mo = missionOrderById.get(link?.mission_order_id);
+        if (!link?.complaint_id || !mo) return;
+        const existingMo = latestMoByComplaintId.get(link.complaint_id);
+        const existingTime = existingMo?.created_at ? new Date(existingMo.created_at).getTime() : 0;
+        const linkedTime = mo?.created_at ? new Date(mo.created_at).getTime() : 0;
+        if (!existingMo || linkedTime >= existingTime) {
+          latestMoByComplaintId.set(link.complaint_id, mo);
         }
       });
 
@@ -444,6 +465,8 @@ export default function DashboardHeadInspector() {
             : null;
         return {
           complaint_id: c.id,
+          id: c.id,
+          business_pk: c.business_pk,
           business_name: c.business_name,
           business_address: c.business_address,
           reporter_email: c.reporter_email,
@@ -487,24 +510,101 @@ export default function DashboardHeadInspector() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  const loadApprovedComplaintGroup = async (complaintId) => {
+    const { data: baseComplaint, error: baseError } = await supabase
+      .from('complaints')
+      .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at')
+      .eq('id', complaintId)
+      .single();
+
+    if (baseError) throw baseError;
+    if (!baseComplaint?.created_at) return [baseComplaint].filter(Boolean);
+
+    const anchorTime = new Date(baseComplaint.created_at).getTime();
+    const start = new Date(anchorTime - (7 * 24 * 60 * 60 * 1000));
+    const end = new Date(anchorTime + (7 * 24 * 60 * 60 * 1000));
+
+    const { data: candidates, error: candidateError } = await supabase
+      .from('complaints')
+      .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at')
+      .in('status', ['approved', 'Approved', 'completed', 'Completed'])
+      .gte('created_at', start.toISOString())
+      .lte('created_at', end.toISOString())
+      .limit(1000);
+
+    if (candidateError) throw candidateError;
+
+    const sameBusinessRows = (candidates || []).filter(
+      (row) => getComplaintBusinessGroupKey(row) === getComplaintBusinessGroupKey(baseComplaint)
+    );
+    const group = getSameEstablishmentComplaintGroup(baseComplaint, sameBusinessRows, { includeFuture: true });
+
+    return group.eligibleForInspectionGroup ? group.complaints : [baseComplaint];
+  };
+
+  const linkComplaintsToMissionOrder = async (missionOrderId, complaintRows, primaryComplaintId, linkedBy) => {
+    const uniqueComplaintIds = Array.from(new Set((complaintRows || []).map((row) => row?.id).filter(Boolean)));
+    if (!missionOrderId || uniqueComplaintIds.length === 0) return;
+
+    const rows = uniqueComplaintIds.map((complaintId) => ({
+      mission_order_id: missionOrderId,
+      complaint_id: complaintId,
+      is_primary: complaintId === primaryComplaintId,
+      linked_by: linkedBy || null,
+    }));
+
+    const { error } = await supabase
+      .from('mission_order_complaints')
+      .upsert(rows, { onConflict: 'mission_order_id,complaint_id' });
+
+    if (error && isMissingMissionOrderComplaintsTable(error)) return;
+    if (error) throw error;
+  };
+
   const getOrCreateMissionOrderId = async (complaintId) => {
-    // 1) Try to find existing mission order for this complaint
-    const { data: existing, error: existingError } = await supabase
-      .from('mission_orders')
-      .select('id, status, created_at')
-      .eq('complaint_id', complaintId)
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (existingError) throw existingError;
-    if (existing && existing.length > 0) return existing[0].id;
-
-    // 2) Create a new draft mission order
     const { data: userData, error: userError } = await supabase.auth.getUser();
     if (userError) throw userError;
     const userId = userData?.user?.id;
     if (!userId) throw new Error('Not authenticated. Please login again.');
 
+    const complaintGroup = await loadApprovedComplaintGroup(complaintId);
+    const complaintIds = Array.from(new Set((complaintGroup || []).map((row) => row?.id).filter(Boolean)));
+
+    // 1) Reuse an existing linked mission order for any complaint in the group.
+    const { data: linkedRows, error: linkedError } = complaintIds.length
+      ? await supabase
+          .from('mission_order_complaints')
+          .select('mission_order_id, complaint_id, linked_at')
+          .in('complaint_id', complaintIds)
+          .order('linked_at', { ascending: false })
+          .limit(20)
+      : { data: [], error: null };
+
+    if (linkedError && !isMissingMissionOrderComplaintsTable(linkedError)) throw linkedError;
+    const safeLinkedRows = linkedError ? [] : (linkedRows || []);
+    if (safeLinkedRows.length > 0) {
+      const missionOrderId = safeLinkedRows[0].mission_order_id;
+      await linkComplaintsToMissionOrder(missionOrderId, complaintGroup, complaintId, userId);
+      return missionOrderId;
+    }
+
+    // 2) Try to find an existing direct mission order for any complaint in this group.
+    const { data: existing, error: existingError } = complaintIds.length
+      ? await supabase
+          .from('mission_orders')
+          .select('id, status, created_at, complaint_id')
+          .in('complaint_id', complaintIds)
+          .order('created_at', { ascending: false })
+          .limit(1)
+      : { data: [], error: null };
+
+    if (existingError) throw existingError;
+    if (existing && existing.length > 0) {
+      await linkComplaintsToMissionOrder(existing[0].id, complaintGroup, existing[0].complaint_id || complaintId, userId);
+      return existing[0].id;
+    }
+
+    // 3) Create a new draft mission order for the selected complaint, then link the group.
     const { data: created, error: createError } = await supabase
       .from('mission_orders')
       .insert([
@@ -517,6 +617,7 @@ export default function DashboardHeadInspector() {
       .single();
 
     if (createError) throw createError;
+    await linkComplaintsToMissionOrder(created.id, complaintGroup, complaintId, userId);
     return created.id;
   };
 
@@ -709,6 +810,44 @@ export default function DashboardHeadInspector() {
       const userId = userData?.user?.id;
       if (!userId) throw new Error('Not authenticated. Please login again.');
 
+      const complaintGroup = await loadApprovedComplaintGroup(complaintId);
+      const complaintIds = Array.from(new Set((complaintGroup || []).map((item) => item?.id).filter(Boolean)));
+
+      const { data: linkedRows, error: linkedError } = complaintIds.length
+        ? await supabase
+            .from('mission_order_complaints')
+            .select('mission_order_id, complaint_id, linked_at')
+            .in('complaint_id', complaintIds)
+            .order('linked_at', { ascending: false })
+            .limit(20)
+        : { data: [], error: null };
+
+      if (linkedError && !isMissingMissionOrderComplaintsTable(linkedError)) throw linkedError;
+      const safeLinkedRows = linkedError ? [] : (linkedRows || []);
+      if (safeLinkedRows.length > 0) {
+        const missionOrderId = safeLinkedRows[0].mission_order_id;
+        await linkComplaintsToMissionOrder(missionOrderId, complaintGroup, complaintId, userId);
+        window.location.assign(`/mission-order?id=${missionOrderId}#${currentTab || 'todo'}`);
+        return;
+      }
+
+      const { data: existingMissionOrders, error: existingMissionOrderError } = complaintIds.length
+        ? await supabase
+            .from('mission_orders')
+            .select('id, complaint_id, created_at')
+            .in('complaint_id', complaintIds)
+            .order('created_at', { ascending: false })
+            .limit(1)
+        : { data: [], error: null };
+
+      if (existingMissionOrderError) throw existingMissionOrderError;
+      if (existingMissionOrders && existingMissionOrders.length > 0) {
+        const missionOrderId = existingMissionOrders[0].id;
+        await linkComplaintsToMissionOrder(missionOrderId, complaintGroup, existingMissionOrders[0].complaint_id || complaintId, userId);
+        window.location.assign(`/mission-order?id=${missionOrderId}#${currentTab || 'todo'}`);
+        return;
+      }
+
       // Fetch the complaint details from the source table to build MO content.
       // Include tags so we can derive ordinance citations for the preview text.
       const { data: complaint, error: complaintError } = await supabase
@@ -810,6 +949,7 @@ export default function DashboardHeadInspector() {
         .single();
 
       if (error) throw error;
+      await linkComplaintsToMissionOrder(data.id, complaintGroup, complaintId, userId);
 
       // Use assign to force navigation even if other listeners or state updates exist.
       window.location.assign(`/mission-order?id=${data.id}`);
@@ -862,11 +1002,90 @@ export default function DashboardHeadInspector() {
     });
   }, [complaints, revisionsFilters.address, revisionsFilters.businessName, revisionsFilters.inspectorName, revisionsSearch, tab]);
 
+  const buildGroupedWorkflowRows = (rows) => {
+    const processedKeys = new Set();
+    const output = [];
+
+    for (const row of rows || []) {
+      const group = getSameEstablishmentComplaintGroup(row, rows, { includeFuture: true });
+      if (group.eligibleForInspectionGroup) {
+        const groupIds = group.complaints.map((item) => item?.complaint_id || item?.id).filter(Boolean);
+        const groupKey = `business:${groupIds.slice().sort().join('|')}`;
+        if (processedKeys.has(groupKey)) continue;
+        processedKeys.add(groupKey);
+
+        const primary = group.complaints.find((item) => item?.mission_order_id) || group.complaints[0] || row;
+        output.push({
+          ...primary,
+          grouped_complaints: group.complaints,
+          grouped_reporters: group.uniqueReporterEmails,
+          grouped_complaint_count: group.complaints.length,
+        });
+        continue;
+      }
+
+      if (row?.mission_order_id) {
+        const missionOrderKey = `mo:${row.mission_order_id}`;
+        if (processedKeys.has(missionOrderKey)) continue;
+        const linkedRows = (rows || []).filter((candidate) => candidate?.mission_order_id === row.mission_order_id);
+        processedKeys.add(missionOrderKey);
+        output.push({
+          ...row,
+          grouped_complaints: linkedRows,
+          grouped_reporters: Array.from(new Set(linkedRows.map((item) => item?.reporter_email).filter(Boolean))),
+          grouped_complaint_count: linkedRows.length,
+        });
+        continue;
+      }
+
+      output.push({
+        ...row,
+        grouped_complaints: [row],
+        grouped_reporters: [row?.reporter_email].filter(Boolean),
+        grouped_complaint_count: 1,
+      });
+    }
+
+    return output;
+  };
+
+  const groupedWorkflowComplaints = useMemo(() => {
+    if (!['todo', 'results', 'for-inspection', 'revisions'].includes(tab)) {
+      return filteredComplaints;
+    }
+    return buildGroupedWorkflowRows(filteredComplaints);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredComplaints, tab]);
+
+  const rejectedMissionOrders = useMemo(
+    () => {
+      const rows = (complaints || []).filter((c) => {
+        const s = String(c.mission_order_status || '').toLowerCase();
+        return s === 'rejected';
+      });
+      return buildGroupedWorkflowRows(rows);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [complaints]
+  );
+
+  const preApprovedMissionOrders = useMemo(
+    () => {
+      const rows = (complaints || []).filter((c) => {
+        const s = String(c.mission_order_status || '').toLowerCase();
+        return s === 'for inspection' || s === 'for_inspection';
+      });
+      return buildGroupedWorkflowRows(rows);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [complaints]
+  );
+
   // Group approved complaints by day for easier review.
   const complaintsByDay = useMemo(() => {
     const groups = {};
 
-    for (const c of filteredComplaints) {
+    for (const c of groupedWorkflowComplaints) {
       // Bucket rows by the most relevant timestamp for the current view.
       // - for inspection (Secretary Approval): group by mission_order_created_at (Pre-Approval date)
       // - issued/revisions/todo: group by MO created_at when present, else complaint approval/created
@@ -890,7 +1109,7 @@ export default function DashboardHeadInspector() {
     // Newest day first.
     const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
     return { groups, sortedKeys };
-  }, [filteredComplaints, tab]);
+  }, [groupedWorkflowComplaints, tab]);
 
   const [inspectionHistory, setInspectionHistory] = useState([]);
 
@@ -1394,6 +1613,12 @@ export default function DashboardHeadInspector() {
                                       <td onClick={() => createMissionOrder(c.complaint_id, 'todo')}>
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
                                         <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                        {c.grouped_complaint_count > 1 ? (
+                                          <div style={{ marginTop: 8, color: '#475569', fontSize: 12, fontWeight: 800, lineHeight: 1.4 }}>
+                                            Grouped case: {c.grouped_complaint_count} complaints from {c.grouped_reporters?.length || 0} unique reporter{(c.grouped_reporters?.length || 0) === 1 ? '' : 's'}
+                                            <div style={{ color: '#64748b', fontWeight: 700 }}>{(c.grouped_reporters || []).join(', ')}</div>
+                                          </div>
+                                        ) : null}
                                       </td>
                                     </tr>
                                     {expandedComplaintId === c.complaint_id && (
@@ -1557,6 +1782,12 @@ export default function DashboardHeadInspector() {
                                   <td onClick={() => createMissionOrder(c.complaint_id, 'results')}>
                                     <div className="dash-cell-title">{c.business_name || '—'}</div>
                                     <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                    {c.grouped_complaint_count > 1 ? (
+                                      <div style={{ marginTop: 8, color: '#475569', fontSize: 12, fontWeight: 800, lineHeight: 1.4 }}>
+                                        Grouped case: {c.grouped_complaint_count} complaints from {c.grouped_reporters?.length || 0} unique reporter{(c.grouped_reporters?.length || 0) === 1 ? '' : 's'}
+                                        <div style={{ color: '#64748b', fontWeight: 700 }}>{(c.grouped_reporters || []).join(', ')}</div>
+                                      </div>
+                                    ) : null}
                                   </td>
                                   <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
                                     {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
@@ -1735,6 +1966,12 @@ export default function DashboardHeadInspector() {
                                   <td onClick={() => createMissionOrder(c.complaint_id, 'results')}>
                                     <div className="dash-cell-title">{c.business_name || '—'}</div>
                                     <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                    {c.grouped_complaint_count > 1 ? (
+                                      <div style={{ marginTop: 8, color: '#475569', fontSize: 12, fontWeight: 800, lineHeight: 1.4 }}>
+                                        Grouped case: {c.grouped_complaint_count} complaints from {c.grouped_reporters?.length || 0} unique reporter{(c.grouped_reporters?.length || 0) === 1 ? '' : 's'}
+                                        <div style={{ color: '#64748b', fontWeight: 700 }}>{(c.grouped_reporters || []).join(', ')}</div>
+                                      </div>
+                                    ) : null}
                                   </td>
                                   <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
                                     {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
@@ -2189,6 +2426,12 @@ export default function DashboardHeadInspector() {
                                       <td onClick={() => createMissionOrder(c.complaint_id, 'for-inspection')}>
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
                                         <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                        {c.grouped_complaint_count > 1 ? (
+                                          <div style={{ marginTop: 8, color: '#475569', fontSize: 12, fontWeight: 800, lineHeight: 1.4 }}>
+                                            Grouped case: {c.grouped_complaint_count} complaints from {c.grouped_reporters?.length || 0} unique reporter{(c.grouped_reporters?.length || 0) === 1 ? '' : 's'}
+                                            <div style={{ color: '#64748b', fontWeight: 700 }}>{(c.grouped_reporters || []).join(', ')}</div>
+                                          </div>
+                                        ) : null}
                                       </td>
                                       <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
                                         {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
@@ -2441,6 +2684,12 @@ export default function DashboardHeadInspector() {
                                       <td onClick={() => createMissionOrder(c.complaint_id, 'revisions')}>
                                         <div className="dash-cell-title">{c.business_name || '—'}</div>
                                         <div className="dash-cell-sub">{c.business_address || ''}</div>
+                                        {c.grouped_complaint_count > 1 ? (
+                                          <div style={{ marginTop: 8, color: '#475569', fontSize: 12, fontWeight: 800, lineHeight: 1.4 }}>
+                                            Grouped case: {c.grouped_complaint_count} complaints from {c.grouped_reporters?.length || 0} unique reporter{(c.grouped_reporters?.length || 0) === 1 ? '' : 's'}
+                                            <div style={{ color: '#64748b', fontWeight: 700 }}>{(c.grouped_reporters || []).join(', ')}</div>
+                                          </div>
+                                        ) : null}
                                       </td>
                                       <td style={{ padding: '12px', fontSize: 14, color: '#1e293b' }}>
                                         {c.date_of_inspection ? new Date(c.date_of_inspection).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '—'}

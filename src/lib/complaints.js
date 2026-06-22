@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { isMissingMissionOrderComplaintsTable } from './complaintGrouping';
 
 const MANILA_CITY_BOUNDS = {
   minLat: 14.54,
@@ -129,13 +130,35 @@ export async function getComplaintTracking(complaintId) {
   // 1) Fetch base complaint
   const complaint = await getComplaintById(complaintId);
 
-  // 2) Fetch mission orders linked to complaint
-  const { data: missionOrders, error: moErr } = await supabase
+  // 2) Fetch mission orders directly or group-linked to complaint
+  const { data: directMissionOrders, error: moErr } = await supabase
     .from('mission_orders')
     .select('id, status, submitted_at, updated_at, created_at, director_preapproved_at')
     .eq('complaint_id', complaint.id)
     .order('created_at', { ascending: true });
   if (moErr) throw new Error(moErr.message);
+
+  const { data: linkedRows, error: linkErr } = await supabase
+    .from('mission_order_complaints')
+    .select('mission_order_id')
+    .eq('complaint_id', complaint.id);
+  if (linkErr && !isMissingMissionOrderComplaintsTable(linkErr)) throw new Error(linkErr.message);
+
+  const directIds = (directMissionOrders || []).map((m) => m.id).filter(Boolean);
+  const linkedIds = linkErr ? [] : (linkedRows || []).map((row) => row.mission_order_id).filter(Boolean);
+  const linkedOnlyIds = linkedIds.filter((id) => !directIds.includes(id));
+
+  const { data: linkedMissionOrders, error: linkedMoErr } = linkedOnlyIds.length
+    ? await supabase
+        .from('mission_orders')
+        .select('id, status, submitted_at, updated_at, created_at, director_preapproved_at')
+        .in('id', linkedOnlyIds)
+        .order('created_at', { ascending: true })
+    : { data: [], error: null };
+  if (linkedMoErr) throw new Error(linkedMoErr.message);
+
+  const missionOrders = [...(directMissionOrders || []), ...(linkedMissionOrders || [])]
+    .sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
 
   // 3) Fetch inspection reports potentially linked via mission orders
   let inspections = [];
