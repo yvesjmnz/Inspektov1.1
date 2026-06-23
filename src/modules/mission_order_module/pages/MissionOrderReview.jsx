@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import DashboardSidebar from '../../../components/DashboardSidebar';
 import { supabase } from '../../../lib/supabase';
+import { getActiveDocumentSignatory } from '../../../lib/documentSignatory';
 import { notifyHeadInspectorMissionOrderApproved, notifyHeadInspectorMissionOrderRejected, notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import '../../dashboard_module/pages/Dashboard.css';
 import '../pages/MissionOrderEditor.css';
@@ -520,7 +521,9 @@ export default function MissionOrderReview() {
 
         const complaintDetailsForDocx = `CITY ORDINANCES VIOLATED:\n${ordinancesText || '—'}`;
 
-        const directorSignatureUrl = await resolveDirectorSignatureUrl(fresh?.director_signature_url, userId);
+        const activeDocumentSignatory = await getActiveDocumentSignatory(60);
+        const directorSignatureUrl = activeDocumentSignatory?.signatureUrl
+          || await resolveDirectorSignatureUrl(fresh?.director_signature_url, userId);
 
         // Signed template
         const templatePath = 'templates/MISSION-ORDER-TEMPLATE.docx';
@@ -555,6 +558,8 @@ export default function MissionOrderReview() {
           business_address: c?.business_address,
           complaint_details: complaintDetailsForDocx,
           director_signature_url: directorSignatureUrl,
+          signatory_name: activeDocumentSignatory?.name || 'LEVI C. FACUNDO',
+          signatory_title: activeDocumentSignatory?.title || 'Director',
           mission_order_qr_mode: 'generated',
           mission_order_qr_url: missionOrderQrUrl,
         });

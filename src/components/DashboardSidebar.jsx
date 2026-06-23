@@ -101,6 +101,12 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           section: null,
         },
         {
+          label: 'OIC Review',
+          icon: '/ui_icons/special-shield-check.svg',
+          href: '/dashboard/director?tab=oic-review',
+          section: null,
+        },
+        {
           label: 'Reports',
           section: 'REPORTS',
         },
@@ -176,6 +182,13 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           href: '/dashboard/head-inspector',
           section: null,
           tabName: 'business-naming',
+        },
+        {
+          label: 'OIC Management',
+          icon: '/ui_icons/special-shield-check.svg',
+          href: '/dashboard/head-inspector',
+          section: null,
+          tabName: 'oic-management',
         },
         {
           label: 'Reports',
@@ -259,6 +272,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
         if (hash === 'inspection') return 'Inspections';
         if (hash === 'inspection-history') return 'Inspection History';
         if (hash === 'business-naming') return 'Business Naming';
+        if (hash === 'oic-management') return 'OIC Management';
         if (hash === 'reports') return 'Performance Report';
       return 'Draft'; // default to Draft
     }
@@ -291,6 +305,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'inspection') return 'Inspections';
       if (tab === 'inspection-history') return 'Inspection History';
       if (tab === 'naming-approvals') return 'Naming Approvals';
+      if (tab === 'oic-review') return 'OIC Review';
       if (tab === 'reports') return 'Performance Report';
       // Director dashboard overview tab was removed; default highlight to queue.
       return 'Review Complaints';
@@ -307,6 +322,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
         if (hash === 'inspection') return 'Inspections';
         if (hash === 'inspection-history') return 'Inspection History';
         if (hash === 'business-naming') return 'Business Naming';
+        if (hash === 'oic-management') return 'OIC Management';
       }
       if (tab === 'todo') return 'Draft';
       if (tab === 'results') return 'Director Approval';
@@ -316,6 +332,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'inspection') return 'Inspections';
       if (tab === 'inspection-history') return 'Inspection History';
       if (tab === 'business-naming') return 'Business Naming';
+      if (tab === 'oic-management') return 'OIC Management';
       return 'Draft';
     }
 

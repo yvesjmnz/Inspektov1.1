@@ -13,6 +13,37 @@ function safeText(v) {
   return String(v ?? '').trim();
 }
 
+function escapeSignatoryXmlText(value) {
+  return safeText(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function replaceGeneratedSignatoryIdentity(zip, signatoryName, signatoryTitle) {
+  const documentFile = zip.file('word/document.xml');
+  if (!documentFile) return;
+
+  const documentXml = documentFile.asText();
+  const namePattern = /(<w:t\b[^>]*>)LEVI C\. FACUNDO(<\/w:t>)/;
+  const nameMatch = namePattern.exec(documentXml);
+  if (!nameMatch) return;
+
+  const name = escapeSignatoryXmlText(signatoryName) || 'LEVI C. FACUNDO';
+  const title = escapeSignatoryXmlText(signatoryTitle) || 'Director';
+  let nextXml = documentXml.replace(namePattern, `$1${name}$2`);
+
+  const titleSearchStart = nameMatch.index + nameMatch[0].length;
+  const beforeTitle = nextXml.slice(0, titleSearchStart);
+  const afterName = nextXml.slice(titleSearchStart).replace(
+    /(<w:t\b[^>]*>)Director(<\/w:t>)/,
+    `$1${title}$2`
+  );
+  nextXml = `${beforeTitle}${afterName}`;
+
+  if (nextXml !== documentXml) zip.file('word/document.xml', nextXml);
+}
+
 function humanDateFromYmd(ymd) {
   const s = safeText(ymd);
   if (!s) return '—';
@@ -252,6 +283,8 @@ export async function generateMissionOrderDocx({
   business_address,
   complaint_details,
   director_signature_url,
+  signatory_name = 'LEVI C. FACUNDO',
+  signatory_title = 'Director',
   mission_order_qr_mode = 'blank',
   mission_order_qr_url,
 }) {
@@ -340,6 +373,8 @@ export async function generateMissionOrderDocx({
     console.error('Docx render failed', details);
     throw new Error('Failed to render mission order DOCX. Check template placeholders.');
   }
+
+  replaceGeneratedSignatoryIdentity(doc.getZip(), signatory_name, signatory_title);
 
   if (mission_order_qr_mode === 'generated') {
     adjustQrDrawingPlacement(doc.getZip());

@@ -9,6 +9,7 @@ import MissionOrderHistory from '../components/MissionOrderHistory';
 import HistorySearchBar from '../components/HistorySearchBar';
 import MiniRefreshButton from '../components/MiniRefreshButton';
 import BusinessNamingPanel from '../components/BusinessNamingPanel';
+import OicManagementPanel from '../components/OicManagementPanel';
 import { enrichRowsWithBusinessDisplayNames } from '../../../lib/businessNames';
 import { getSameEstablishmentComplaintGroup } from '../../../lib/complaintGrouping';
 import './Dashboard.css';
@@ -692,7 +693,7 @@ export default function DashboardDirector() {
   const getInitialTab = () => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
-    if (tabParam && ['queue', 'special-complaint-form', 'mission-orders', 'inspection', 'mission-orders-history', 'inspection-history', 'history', 'naming-approvals', 'reports'].includes(tabParam)) {
+    if (tabParam && ['queue', 'special-complaint-form', 'mission-orders', 'inspection', 'mission-orders-history', 'inspection-history', 'history', 'naming-approvals', 'oic-review', 'reports'].includes(tabParam)) {
       return tabParam;
     }
     return 'queue';
@@ -739,6 +740,10 @@ export default function DashboardDirector() {
       'naming-approvals': {
         title: 'Naming Approvals',
         subtitle: 'Review Head Inspector requests for public/common business names.',
+      },
+      'oic-review': {
+        title: 'OIC Request Review',
+        subtitle: 'Perform the first review and optionally apply the Director confirmation signature.',
       },
       reports: {
         title: 'Performance Report',
@@ -1674,7 +1679,7 @@ export default function DashboardDirector() {
   const missionOrdersReadyForTab = !usesMissionOrderRefresh || missionOrdersLoadedTab === tab;
   const usesComplaintData = tab === 'queue' || tab === 'history';
   const complaintsReadyForTab = !usesComplaintData || complaintsLoadedTab === tab;
-  const showHeaderRefresh = tab !== 'reports' && tab !== 'special-complaint-form' && tab !== 'naming-approvals';
+  const showHeaderRefresh = tab !== 'reports' && tab !== 'special-complaint-form' && tab !== 'naming-approvals' && tab !== 'oic-review';
   const queueDecisionRows = tab === 'queue' && complaintsLoadedTab === tab ? complaints : filteredComplaints;
   const queueReviewBucketCounts = useMemo(() => {
     if (tab !== 'queue') {
@@ -2378,6 +2383,14 @@ export default function DashboardDirector() {
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Naming Approvals</span>
                 </button>
               </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'oic-review' ? 'active' : ''}`} onClick={() => setTab('oic-review')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/special-shield-check.svg" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>OIC Review</span>
+                </button>
+              </li>
 
               <li className="dash-nav-section">
                 <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Reports</span>
@@ -2478,6 +2491,8 @@ export default function DashboardDirector() {
             )
           ) : tab === 'naming-approvals' ? (
             <BusinessNamingPanel mode="director" />
+          ) : tab === 'oic-review' ? (
+            <OicManagementPanel mode="director" />
           ) : tab === 'special-complaint-form' ? (
             <div style={{ display: 'grid', gap: 20 }}>
               <section

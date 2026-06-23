@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { saveAs } from 'file-saver';
 import DashboardSidebar from '../../../components/DashboardSidebar';
 import { supabase } from '../../../lib/supabase';
+import { getActiveDocumentSignatory } from '../../../lib/documentSignatory';
 import { notifyDirectorMissionOrderSubmitted, notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import { buildMissionOrderDocxFileName, generateMissionOrderDetailsDocx, generateMissionOrderDocx } from '../lib/docx_template';
 import { groupSubcategories, getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
@@ -1028,6 +1029,8 @@ export default function MissionOrderEditor() {
 
         const complaintDetailsForDocx = `CITY ORDINANCES VIOLATED:\n${ordinancesText || '-'}`;
 
+        const activeDocumentSignatory = await getActiveDocumentSignatory(60);
+
         // If signature url points to private storage, attempt to sign. Best-effort.
         let directorSignatureUrl = fresh?.director_signature_url || null;
         try {
@@ -1044,6 +1047,7 @@ export default function MissionOrderEditor() {
         } catch {
           // ignore
         }
+        directorSignatureUrl = activeDocumentSignatory?.signatureUrl || directorSignatureUrl;
 
         // Signed template
         const templatePath = 'templates/MISSION-ORDER-TEMPLATE.docx';
@@ -1074,6 +1078,8 @@ export default function MissionOrderEditor() {
           business_address: c?.business_address,
           complaint_details: complaintDetailsForDocx,
           director_signature_url: directorSignatureUrl,
+          signatory_name: activeDocumentSignatory?.name || 'LEVI C. FACUNDO',
+          signatory_title: activeDocumentSignatory?.title || 'Director',
           mission_order_qr_mode: 'generated',
           mission_order_qr_url: missionOrderQrUrl,
         });
@@ -1514,6 +1520,7 @@ export default function MissionOrderEditor() {
         .single();
       if (cErr) throw cErr;
 
+      const activeDocumentSignatory = await getActiveDocumentSignatory(60);
       let directorSignatureUrl = fresh?.director_signature_url || null;
       try {
         const u = String(directorSignatureUrl || '');
@@ -1529,6 +1536,7 @@ export default function MissionOrderEditor() {
       } catch {
         // ignore
       }
+      directorSignatureUrl = activeDocumentSignatory?.signatureUrl || directorSignatureUrl;
 
       // Template selection:
       // - Draft / Issued: UNSIGNED template
@@ -1641,6 +1649,8 @@ export default function MissionOrderEditor() {
         business_address: c?.business_address,
         complaint_details: complaintDetailsForDocx,
         director_signature_url: directorSignatureUrl,
+        signatory_name: activeDocumentSignatory?.name || 'LEVI C. FACUNDO',
+        signatory_title: activeDocumentSignatory?.title || 'Director',
         mission_order_qr_mode: shouldGenerateMissionOrderQr ? 'generated' : 'blank',
         mission_order_qr_url: missionOrderQrUrl,
       });

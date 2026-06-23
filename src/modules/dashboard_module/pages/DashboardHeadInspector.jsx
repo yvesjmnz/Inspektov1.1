@@ -8,6 +8,7 @@ import MissionOrderHistory from '../components/MissionOrderHistory';
 import HistorySearchBar from '../components/HistorySearchBar';
 import MiniRefreshButton from '../components/MiniRefreshButton';
 import BusinessNamingPanel from '../components/BusinessNamingPanel';
+import OicManagementPanel from '../components/OicManagementPanel';
 import { enrichRowsWithBusinessDisplayNames } from '../../../lib/businessNames';
 import { getComplaintBusinessGroupKey, getSameEstablishmentComplaintGroup, isMissingMissionOrderComplaintsTable } from '../../../lib/complaintGrouping';
 import './Dashboard.css';
@@ -88,7 +89,7 @@ function resolveInspectionWorkflowStatus(report) {
 
 function getInitialTab() {
   const hash = window.location.hash.slice(1);
-  const validTabs = ['todo', 'results', 'inspection', 'inspection-history', 'for-inspection', 'revisions', 'business-naming', 'reports'];
+  const validTabs = ['todo', 'results', 'inspection', 'inspection-history', 'for-inspection', 'revisions', 'business-naming', 'oic-management', 'reports'];
   return validTabs.includes(hash) ? hash : 'todo';
 }
 
@@ -230,6 +231,10 @@ export default function DashboardHeadInspector() {
       'business-naming': {
         title: 'Business Naming',
         subtitle: 'Propose public/common business names for Director approval.',
+      },
+      'oic-management': {
+        title: 'OIC and Signatory Management',
+        subtitle: 'Request and perform final validation of temporary OIC or signatory assignments.',
       },
     };
 
@@ -1314,7 +1319,7 @@ export default function DashboardHeadInspector() {
     return { groups, sortedKeys };
   }, [filteredInspectionHistory, tab]);
 
-  const showHeaderRefresh = tab !== 'reports' && tab !== 'business-naming';
+  const showHeaderRefresh = tab !== 'reports' && tab !== 'business-naming' && tab !== 'oic-management';
 
   const handleRefresh = () => {
     if (tab === 'inspection-history') {
@@ -1425,6 +1430,14 @@ export default function DashboardHeadInspector() {
                   <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Business Naming</span>
                 </button>
               </li>
+              <li>
+                <button type="button" className={`dash-nav-item ${tab === 'oic-management' ? 'active' : ''}`} onClick={() => setTab('oic-management')}>
+                  <span className="dash-nav-ico" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src="/ui_icons/special-shield-check.svg" alt="" style={{ width: 22, height: 22, objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(62%) sepia(94%) saturate(1456%) hue-rotate(7deg) brightness(88%) contrast(108%)' }} />
+                  </span>
+                  <span className="dash-nav-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>OIC Management</span>
+                </button>
+              </li>
 
               <li className="dash-nav-section">
                 <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Reports</span>
@@ -1506,6 +1519,8 @@ export default function DashboardHeadInspector() {
 
               {tab === 'business-naming' ? (
                 <BusinessNamingPanel mode="head_inspector" />
+              ) : tab === 'oic-management' ? (
+                <OicManagementPanel mode="head_inspector" />
               ) : tab === 'reports' ? (
                 <DirectorReports />
               ) : tab === 'todo' ? (
