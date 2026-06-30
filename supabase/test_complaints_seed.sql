@@ -457,7 +457,9 @@ insert into public.complaints (
   now() - interval '30 minutes'
 ),
 
--- Multiple-complainant group: 4 unique reporters for the same establishment with verified location on two reports.
+-- Multiple-complainant group: 4 unique reporters allege different violations
+-- against the same establishment. The grouped complaint should show the union
+-- of every "Violation:" tag below, regardless of which reporter submitted it.
 (
   '99999999-0000-4000-8000-000000000501',
   'Test DS - Multi Reporter Bakery',
@@ -480,13 +482,13 @@ insert into public.complaints (
   '99999999-0000-4000-8000-000000000502',
   'Test DS - Multi Reporter Bakery',
   '610 Multi Reporter Street, Manila',
-  'Test case: grouped complaint A2 from another reporter. Details match the same disposal issue.',
+  'Test case: grouped complaint A2 from another reporter. The bakery allegedly pours used cooking oil into a street drain.',
   'multi.bakery.two@example.test',
   array[]::text[],
   array[]::text[],
   68,
   'High',
-  array['Violation: Improper Waste Disposal or Segregation'],
+  array['Violation: Illegal Disposing of Cooking Oil'],
   'Submitted',
   now() - interval '3 hours 30 minutes',
   true,
@@ -498,13 +500,13 @@ insert into public.complaints (
   '99999999-0000-4000-8000-000000000503',
   'Test DS - Multi Reporter Bakery',
   '610 Multi Reporter Street, Manila',
-  'Test case: grouped complaint A3 from a third reporter. This should appear as a fanned complaint.',
+  'Test case: grouped complaint A3 from a third reporter. The bakery allegedly has unpaid garbage collection taxes.',
   'multi.bakery.three@example.test',
   array[]::text[],
   array[]::text[],
   72,
   'High',
-  array['Violation: Improper Waste Disposal or Segregation', 'Location verified'],
+  array['Violation: Unpaid Garbage Tax', 'Location verified'],
   'Submitted',
   now() - interval '3 hours',
   true,
@@ -516,13 +518,13 @@ insert into public.complaints (
   '99999999-0000-4000-8000-000000000504',
   'Test DS - Multi Reporter Bakery',
   '610 Multi Reporter Street, Manila',
-  'Test case: grouped complaint A4 from a fourth reporter. This gives the Multiple Complainants tab a larger fan-out.',
+  'Test case: grouped complaint A4 from a fourth reporter. Food handlers were allegedly working without proper hygiene controls and the menu had no required nutrition labels.',
   'multi.bakery.four@example.test',
   array[]::text[],
   array[]::text[],
   66,
   'High',
-  array['Violation: Improper Waste Disposal or Segregation'],
+  array['Violation: Poor Food-Handler Hygiene', 'Violation: Missing Menu Nutrition Labels'],
   'Submitted',
   now() - interval '2 hours 30 minutes',
   true,
@@ -531,7 +533,8 @@ insert into public.complaints (
   now() - interval '2 hours 30 minutes'
 ),
 
--- Smaller multi-complainant group: exactly 2 unique reporters, useful for the new "> 1 unique complainants" tab.
+-- Smaller multi-complainant group: exactly 2 unique reporters with different
+-- allegations, useful for the new "> 1 unique complainants" tab.
 (
   '99999999-0000-4000-8000-000000000601',
   'Test DS - Two Reporter Pharmacy',
@@ -554,13 +557,13 @@ insert into public.complaints (
   '99999999-0000-4000-8000-000000000602',
   'Test DS - Two Reporter Pharmacy',
   '720 Pair Street, Manila',
-  'Test case: two-reporter group B2. This should fan under the same complaint group even below the old 3-reporter threshold.',
+  'Test case: two-reporter group B2. The pharmacy allegedly has unregistered employees; it should still group with B1 despite the different allegation.',
   'pair.pharmacy.two@example.test',
   array[]::text[],
   array[]::text[],
   57,
   'Medium',
-  array['Violation: Operating Without a Valid Business Permit'],
+  array['Violation: Unregistered or Untaxed Employees'],
   'Submitted',
   now() - interval '4 hours 40 minutes',
   true,

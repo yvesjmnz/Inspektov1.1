@@ -6,7 +6,7 @@ import { notifyHeadInspectorComplaintApproved } from '../../../lib/notifications
 import {
   DECLINE_TEMPLATES,
 } from '../../../lib/complaints/decisionSupport';
-import { getSameEstablishmentComplaintGroup } from '../../../lib/complaintGrouping';
+import { getSameEstablishmentComplaintGroup, mergeComplaintGroupContent } from '../../../lib/complaintGrouping';
 import '../../dashboard_module/pages/Dashboard.css';
 
 // Complaint Category grouping (derive from tags like "Violation: <Sub>")
@@ -328,6 +328,12 @@ export default function ComplaintReview() {
   const [showRightCommentsEditor, setShowRightCommentsEditor] = useState(true);
   const commentInputRef = useRef(null);
 
+  const groupedComplaint = useMemo(() => {
+    if (!complaint) return null;
+    const group = getSameEstablishmentComplaintGroup(complaint, relatedComplaints, { includeFuture: true });
+    return mergeComplaintGroupContent(complaint, group.complaints);
+  }, [complaint, relatedComplaints]);
+
   // Determine which tab the user came from (queue or history)
   const [source, setSource] = useState('queue');
   useEffect(() => {
@@ -372,23 +378,23 @@ export default function ComplaintReview() {
 
   // Handle keyboard navigation in full-picture mode
   useEffect(() => {
-    if (!previewImage || !complaint?.image_urls) return;
+    if (!previewImage || !groupedComplaint?.image_urls) return;
 
     const handleKeyDown = (e) => {
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        const n = complaint.image_urls.length;
+        const n = groupedComplaint.image_urls.length;
         setEvidenceIndex((i) => (i - 1 + n) % n);
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        const n = complaint.image_urls.length;
+        const n = groupedComplaint.image_urls.length;
         setEvidenceIndex((i) => (i + 1) % n);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [previewImage, complaint?.image_urls]);
+  }, [previewImage, groupedComplaint?.image_urls]);
 
   const load = async () => {
     if (!complaintId) {
@@ -437,7 +443,7 @@ export default function ComplaintReview() {
 
       const { data: complaintRows = [], error: complaintError } = await supabase
         .from('complaints')
-        .select('id, business_pk, business_name, business_address, reporter_email, status, created_at')
+        .select('id, business_pk, business_name, business_address, reporter_email, status, created_at, image_urls, document_urls, tags')
         .gte('created_at', start.toISOString())
         .lte('created_at', end.toISOString())
         .order('created_at', { ascending: false })
@@ -951,7 +957,7 @@ export default function ComplaintReview() {
                         <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 13.5 }}>{formatDatePipe(complaint.created_at)}</div>
                         <div style={{ minWidth: 0, color: '#fff', fontWeight: 900, fontSize: 13.5 }}>
                           {(() => {
-                            const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
+                            const groups = groupComplaintCategoriesFromTags(groupedComplaint?.tags || []);
                             const total = groups.reduce((acc, g) => acc + (Array.isArray(g.subs) ? g.subs.length : 0), 0);
                             const cats = groups.length;
                             if (!total) return '—';
@@ -985,7 +991,7 @@ export default function ComplaintReview() {
                       {/* Violations: compact dropdown tags (full category names) */}
                       <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                         {(() => {
-                          const groups = groupComplaintCategoriesFromTags(complaint?.tags || []);
+                          const groups = groupComplaintCategoriesFromTags(groupedComplaint?.tags || []);
                           if (!groups.length) return null;
 
                           return groups.map((g) => (
@@ -1089,7 +1095,7 @@ export default function ComplaintReview() {
                         Submitted Evidence
                       </div>
                       <div style={{ marginTop: 12 }}>
-                        {Array.isArray(complaint.image_urls) && complaint.image_urls.length > 0 ? (
+                        {Array.isArray(groupedComplaint?.image_urls) && groupedComplaint.image_urls.length > 0 ? (
                           <div
                             style={{
                               display: 'grid',
@@ -1098,7 +1104,7 @@ export default function ComplaintReview() {
                               alignItems: 'start',
                             }}
                           >
-                            {complaint.image_urls.map((url, idx) => (
+                            {groupedComplaint.image_urls.map((url, idx) => (
                               <button
                                 key={url}
                                 type="button"
@@ -1487,13 +1493,13 @@ export default function ComplaintReview() {
             </button>
             
             {/* Left Arrow Button */}
-            {complaint?.image_urls && complaint.image_urls.length > 1 && (
+            {groupedComplaint?.image_urls && groupedComplaint.image_urls.length > 1 && (
               <button
                 type="button"
                 aria-label="Previous image"
                 onClick={(e) => {
                   e.stopPropagation();
-                  const n = complaint.image_urls.length;
+                  const n = groupedComplaint.image_urls.length;
                   setEvidenceIndex((i) => (i - 1 + n) % n);
                 }}
                 style={{
@@ -1533,13 +1539,13 @@ export default function ComplaintReview() {
             )}
 
             {/* Right Arrow Button */}
-            {complaint?.image_urls && complaint.image_urls.length > 1 && (
+            {groupedComplaint?.image_urls && groupedComplaint.image_urls.length > 1 && (
               <button
                 type="button"
                 aria-label="Next image"
                 onClick={(e) => {
                   e.stopPropagation();
-                  const n = complaint.image_urls.length;
+                  const n = groupedComplaint.image_urls.length;
                   setEvidenceIndex((i) => (i + 1) % n);
                 }}
                 style={{
@@ -1579,7 +1585,7 @@ export default function ComplaintReview() {
             )}
 
             {/* Image Counter */}
-            {complaint?.image_urls && complaint.image_urls.length > 1 && (
+            {groupedComplaint?.image_urls && groupedComplaint.image_urls.length > 1 && (
               <div style={{
                 position: 'absolute',
                 bottom: 20,
@@ -1592,11 +1598,11 @@ export default function ComplaintReview() {
                 fontSize: 14,
                 zIndex: 10,
               }}>
-                {evidenceIndex + 1} / {complaint.image_urls.length}
+                {evidenceIndex + 1} / {groupedComplaint.image_urls.length}
               </div>
             )}
 
-            <img src={complaint?.image_urls?.[evidenceIndex] || previewImage} alt="Evidence Preview" className="overlay-full-img" />
+            <img src={groupedComplaint?.image_urls?.[evidenceIndex] || previewImage} alt="Evidence Preview" className="overlay-full-img" />
           </div>
         </div>
       ) : null}

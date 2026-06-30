@@ -63,8 +63,8 @@ function groupComplaintCategoriesFromTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return result;
   const selectedSubs = tags
     .map((t) => String(t || ''))
-    .filter((t) => /^Violation:\\s*/i.test(t))
-    .map((t) => t.replace(/^Violation:\\s*/i, '').trim());
+    .filter((t) => /^Violation:\s*/i.test(t))
+    .map((t) => t.replace(/^Violation:\s*/i, '').trim());
   if (selectedSubs.length === 0) return result;
   const subToCat = new Map();
   for (const cat of GUIDED_CATEGORY_LABELS) {
@@ -82,6 +82,17 @@ function groupComplaintCategoriesFromTags(tags) {
     result.push({ category: cat, subs: Array.from(setSubs) });
   }
   return result;
+}
+
+function listAllegedViolations(tags) {
+  if (!Array.isArray(tags)) return [];
+  return Array.from(new Set(
+    tags
+      .map((tag) => String(tag || ''))
+      .filter((tag) => /^Violation:\s*/i.test(tag))
+      .map((tag) => tag.replace(/^Violation:\s*/i, '').trim())
+      .filter(Boolean)
+  ));
 }
 
 function formatStatus(status) {
@@ -415,6 +426,9 @@ function getQueueBusinessGroupKeyForBucket(complaint, allComplaints) {
 
 function isLatestQueueComplaintForBucket(complaint, allComplaints, bucketKey) {
   if (!complaint?.id) return false;
+  // Spam rows are collected by reporter in buildQueueReviewItems. Keep every
+  // matching complaint available here so the collection is complete.
+  if (bucketKey === 'possible-spam') return true;
 
   const group = getSameEstablishmentComplaintGroup(complaint, allComplaints, { includeFuture: true });
   const sameBucketGroup = group.complaints
@@ -429,15 +443,23 @@ function buildQueueReviewItems(items, allComplaints, bucketKey) {
   const displayItems = [];
 
   (items || []).forEach((complaint) => {
-    const group = getSameEstablishmentComplaintGroup(complaint, allComplaints, { includeFuture: true });
     const currentBucketKey = getQueueReviewBucketKey(complaint, allComplaints);
     if (currentBucketKey !== bucketKey) return;
 
-    const groupKey = getQueueBusinessGroupKeyForBucket(complaint, allComplaints);
+    const group = getSameEstablishmentComplaintGroup(complaint, allComplaints, { includeFuture: true });
+    const reporterKey = normalizeQueueKey(complaint?.reporter_email);
+    const groupKey = bucketKey === 'possible-spam'
+      ? `reporter:${reporterKey || complaint?.id}`
+      : getQueueBusinessGroupKeyForBucket(complaint, allComplaints);
     if (processedGroupIds.has(groupKey)) return;
     processedGroupIds.add(groupKey);
 
-    const groupedComplaints = group.complaints
+    const groupedComplaints = (bucketKey === 'possible-spam'
+      ? (items || []).filter((row) => reporterKey
+        ? normalizeQueueKey(row?.reporter_email) === reporterKey
+        : row?.id === complaint?.id)
+      : group.complaints
+    )
       .filter((row) => getQueueReviewBucketKey(row, allComplaints) === bucketKey)
       .sort((a, b) => getQueueComplaintTime(b) - getQueueComplaintTime(a));
 
@@ -473,7 +495,9 @@ function getQueueReviewBucketCounts(items, allComplaints) {
 
   (items || []).forEach((complaint) => {
     const bucketKey = getQueueReviewBucketKey(complaint, allComplaints);
-    const groupKey = `${bucketKey}:${getQueueBusinessGroupKeyForBucket(complaint, allComplaints) || complaint?.id}`;
+    const groupKey = bucketKey === 'possible-spam'
+      ? `${bucketKey}:reporter:${normalizeQueueKey(complaint?.reporter_email) || complaint?.id}`
+      : `${bucketKey}:${getQueueBusinessGroupKeyForBucket(complaint, allComplaints) || complaint?.id}`;
 
     if (processedGroups.has(groupKey)) return;
     processedGroups.add(groupKey);
@@ -1708,10 +1732,15 @@ export default function DashboardDirector() {
     const sourceComplaints = tab === 'queue' ? queueFilteredComplaints : filteredComplaints;
     for (const c of sourceComplaints) {
       const d = c.created_at ? new Date(c.created_at) : null;
-      const key = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10) : 'unknown';
+      const isSpamCollection = tab === 'queue' && queueReviewTab === 'possible-spam';
+      const key = isSpamCollection
+        ? 'reporter-activity'
+        : (d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10) : 'unknown');
       if (!groups[key]) {
         // Format as "MMMM D" (e.g., "February 17")
-        const label = d ? d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }) : 'Unknown Date';
+        const label = isSpamCollection
+          ? 'Reporter activity'
+          : (d ? d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }) : 'Unknown Date');
         groups[key] = { label, items: [] };
       }
       groups[key].items.push(c);
@@ -1726,7 +1755,7 @@ export default function DashboardDirector() {
     }
     const sortedKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1)); // desc by date key YYYY-MM-DD
     return { groups, sortedKeys };
-  }, [filteredComplaints, queueFilteredComplaints, tab]);
+  }, [filteredComplaints, queueFilteredComplaints, queueReviewTab, tab]);
 
   // Group mission orders by day for Mission Order History (match Head Inspector behavior)
   const missionOrdersByDay = useMemo(() => {
@@ -3430,6 +3459,10 @@ export default function DashboardDirector() {
                   const dayGroup = complaintsByDay.groups[dayKey];
                   const label = dayGroup?.label || dayKey;
                   const pendingCount = dayGroup?.items?.length || 0;
+                  const queueReviewItems = tab === 'queue'
+                    ? buildQueueReviewItems(dayGroup?.items || [], queueDecisionRows, queueReviewTab)
+                    : [];
+                  const isReporterActivityGroup = dayKey === 'reporter-activity';
                   
                   // Only render day block if there are items
                   if (pendingCount === 0) return null;
@@ -3467,7 +3500,7 @@ export default function DashboardDirector() {
                       >
                         <div>
                           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#ffffff' }}>
-                            {label}{dayKey !== 'unknown' ? `, ${new Date(dayKey).getFullYear()}` : ''}
+                            {label}{dayKey !== 'unknown' && !isReporterActivityGroup ? `, ${new Date(dayKey).getFullYear()}` : ''}
                           </h3>
                         </div>
                         {tab === 'history' ? (
@@ -3495,7 +3528,11 @@ export default function DashboardDirector() {
                           // Pending count for queue tab
                           <div style={{ fontSize: 13, fontWeight: 700, color: '#F2B705', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto' }}>
                             <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#F2B705', flexShrink: 0 }}></div>
-                            <span>{pendingCount} Pending {pendingCount === 1 ? 'Complaint' : 'Complaints'}</span>
+                            <span>
+                              {isReporterActivityGroup
+                                ? `${queueReviewItems.length} reporter ${queueReviewItems.length === 1 ? 'collection' : 'collections'} · ${pendingCount} complaints`
+                                : `${pendingCount} Pending ${pendingCount === 1 ? 'Complaint' : 'Complaints'}`}
+                            </span>
                           </div>
                         )}
                       </div>
@@ -3512,10 +3549,10 @@ export default function DashboardDirector() {
                               </tr>
                             </thead>
                             <tbody>
-                              {buildQueueReviewItems(dayGroup.items, queueDecisionRows, queueReviewTab).map((queueItem) => {
+                              {queueReviewItems.map((queueItem) => {
                                 const c = queueItem.complaint;
                                 const queueSignal = queueItem.signal;
-                                const fannedComplaints = queueItem.groupedComplaints.filter((row) => row?.id !== c?.id);
+                                const collectionComplaints = queueItem.groupedComplaints;
                                 const isGroupExpanded = expandedQueueGroupKey === queueItem.key;
                                 const locationBadge = getComplaintInfoBadges(c).find((badge) => String(badge?.label || '').toLowerCase().startsWith('location'));
                                 const locationBadgeStyle = (() => {
@@ -3602,12 +3639,18 @@ export default function DashboardDirector() {
                                               gap: 8,
                                             }}
                                           >
-                                            <span>{queueItem.groupedComplaints.length} complaints from {queueItem.uniqueReporterEmails.length} reporters</span>
+                                            <span>
+                                              {queueReviewTab === 'possible-spam'
+                                                ? `${queueItem.groupedComplaints.length} complaints from this reporter`
+                                                : `${queueItem.groupedComplaints.length} complaints from ${queueItem.uniqueReporterEmails.length} reporters`}
+                                            </span>
                                             <span aria-hidden="true">{isGroupExpanded ? 'Hide' : 'Show'}</span>
                                           </button>
                                           {isGroupExpanded ? (
                                             <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-                                              {fannedComplaints.map((fannedComplaint) => (
+                                              {collectionComplaints.map((fannedComplaint) => {
+                                                const allegedViolations = listAllegedViolations(fannedComplaint?.tags);
+                                                return (
                                               <button
                                                 key={fannedComplaint.id || `${queueItem.key}-fanned`}
                                                 type="button"
@@ -3646,8 +3689,35 @@ export default function DashboardDirector() {
                                                 <span style={{ display: 'block', marginTop: 2, color: '#64748b', fontWeight: 700 }}>
                                                   {fannedComplaint.reporter_email || 'No reporter email'} · {formatDateNoSeconds(fannedComplaint.created_at)}
                                                 </span>
+                                                {queueReviewTab === 'multi-complainant' ? (
+                                                  <span style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
+                                                    {allegedViolations.length > 0 ? allegedViolations.map((violation) => (
+                                                      <span
+                                                        key={violation}
+                                                        style={{
+                                                          maxWidth: 260,
+                                                          overflow: 'hidden',
+                                                          textOverflow: 'ellipsis',
+                                                          whiteSpace: 'nowrap',
+                                                          borderRadius: 999,
+                                                          background: '#eef2ff',
+                                                          color: '#3730a3',
+                                                          padding: '3px 7px',
+                                                          fontSize: 10,
+                                                          fontWeight: 850,
+                                                        }}
+                                                        title={violation}
+                                                      >
+                                                        {violation}
+                                                      </span>
+                                                    )) : (
+                                                      <span style={{ color: '#94a3b8', fontSize: 11 }}>No alleged violation tagged</span>
+                                                    )}
+                                                  </span>
+                                                ) : null}
                                               </button>
-                                              ))}
+                                                );
+                                              })}
                                             </div>
                                           ) : null}
                                         </div>

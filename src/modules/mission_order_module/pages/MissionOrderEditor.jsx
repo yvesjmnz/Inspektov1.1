@@ -6,6 +6,7 @@ import { getActiveDocumentSignatory } from '../../../lib/documentSignatory';
 import { notifyDirectorMissionOrderSubmitted, notifyInspectorsMissionOrderAssigned } from '../../../lib/notifications/notificationTriggers';
 import { buildMissionOrderDocxFileName, generateMissionOrderDetailsDocx, generateMissionOrderDocx } from '../lib/docx_template';
 import { groupSubcategories, getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
+import { isMissingMissionOrderComplaintsTable, mergeComplaintGroupContent } from '../../../lib/complaintGrouping';
 import '../../dashboard_module/pages/Dashboard.css';
 import './MissionOrderEditor.css';
 
@@ -591,8 +592,29 @@ export default function MissionOrderEditor() {
           .eq('id', mo.complaint_id)
           .single();
         if (cError) throw cError;
-        complaintForAutoPopulate = c;
-        setComplaint(c);
+
+        const { data: linkedRows, error: linkedError } = await supabase
+          .from('mission_order_complaints')
+          .select('complaint_id')
+          .eq('mission_order_id', missionOrderId);
+        if (linkedError && !isMissingMissionOrderComplaintsTable(linkedError)) throw linkedError;
+
+        const linkedComplaintIds = Array.from(new Set(
+          (linkedError ? [] : (linkedRows || []))
+            .map((row) => row?.complaint_id)
+            .filter((id) => id && id !== c.id)
+        ));
+        const { data: linkedComplaints, error: linkedComplaintsError } = linkedComplaintIds.length
+          ? await supabase
+              .from('complaints')
+              .select('id, complaint_code, business_pk, business_name, business_address, complaint_description, reporter_email, created_at, status, tags, image_urls, decline_comment')
+              .in('id', linkedComplaintIds)
+          : { data: [], error: null };
+        if (linkedComplaintsError) throw linkedComplaintsError;
+
+        const groupedComplaint = mergeComplaintGroupContent(c, [c, ...(linkedComplaints || [])]);
+        complaintForAutoPopulate = groupedComplaint;
+        setComplaint(groupedComplaint);
         setEvidencePreviewUrl('');
 
         // Load registered business details (used by smart inspector recommendations).
@@ -653,15 +675,16 @@ export default function MissionOrderEditor() {
         return prevLen === next.length ? prev : next;
       });
 
-      // Auto-populate ordinances from complaint violation tags (only for draft status with no assigned ordinances)
+      // Keep draft ordinances synchronized with every complaint linked to this
+      // mission order. Existing manual/automatic selections are preserved.
       const isCurrentlyDraft = String(mo?.status || '').toLowerCase() === 'draft';
-      const hasNoAssignedOrdinances = (assignedOrdRows || []).length === 0;
 
       const complaintTags = complaintForAutoPopulate?.tags;
 
-      if (isCurrentlyDraft && hasNoAssignedOrdinances && Array.isArray(complaintTags) && ordinancesData) {
+      if (isCurrentlyDraft && Array.isArray(complaintTags) && ordinancesData) {
         const selectedSubs = listSelectedSubcategories(complaintTags);
         if (selectedSubs.length > 0) {
+          const alreadyAssignedIds = new Set((assignedOrdRows || []).map((row) => row?.ordinance_id).filter(Boolean));
           const ordinancesToAdd = [];
 
           for (const sub of selectedSubs) {
@@ -669,7 +692,11 @@ export default function MissionOrderEditor() {
             for (const ord of ordinanceData) {
               // Find the ordinance record by code_number
               const ordinanceRecord = ordinancesData.find((o) => o.code_number === ord.code_number);
-              if (ordinanceRecord && !ordinancesToAdd.includes(ordinanceRecord.id)) {
+              if (
+                ordinanceRecord &&
+                !alreadyAssignedIds.has(ordinanceRecord.id) &&
+                !ordinancesToAdd.includes(ordinanceRecord.id)
+              ) {
                 ordinancesToAdd.push(ordinanceRecord.id);
               }
             }
@@ -685,8 +712,8 @@ export default function MissionOrderEditor() {
             const { error: insertError } = await supabase.from('mission_order_ordinances').insert(inserts);
 
             if (!insertError) {
-              setAssignedOrdinanceIds(ordinancesToAdd);
-              setToast(`${ordinancesToAdd.length} ordinance(s) auto-populated from complaint`);
+              setAssignedOrdinanceIds(Array.from(new Set([...alreadyAssignedIds, ...ordinancesToAdd])));
+              setToast(`${ordinancesToAdd.length} grouped complaint ordinance(s) added`);
             }
           }
         }

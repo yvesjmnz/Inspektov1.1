@@ -38,6 +38,9 @@ export function getSameEstablishmentComplaintGroup(anchorComplaint, rows, option
       const isWithinWindow = includeFuture
         ? Math.abs(time - anchorTime) <= windowMs
         : time <= anchorTime && time > anchorTime - windowMs;
+      // Allegations/tags are intentionally not part of the grouping key. Reports
+      // against the same establishment belong to one case even when each
+      // complainant observed a different violation.
       return (
         getComplaintBusinessGroupKey(row) === businessKey &&
         isWithinWindow
@@ -69,6 +72,40 @@ export function getComplaintGroupIds(anchorComplaint, rows, options = {}) {
     .complaints
     .map((row) => row?.id)
     .filter(Boolean);
+}
+
+function uniqueGroupValues(rows, field) {
+  const seen = new Set();
+  const values = [];
+
+  (rows || []).forEach((row) => {
+    const fieldValues = Array.isArray(row?.[field]) ? row[field] : [];
+    fieldValues.forEach((value) => {
+      const normalized = String(value || '').trim();
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      values.push(value);
+    });
+  });
+
+  return values;
+}
+
+/**
+ * Preserve the primary complaint while carrying all evidence and violation tags
+ * submitted by the complaints represented by a grouped workflow row.
+ */
+export function mergeComplaintGroupContent(primaryComplaint, groupedComplaints) {
+  const complaints = Array.isArray(groupedComplaints) && groupedComplaints.length > 0
+    ? groupedComplaints
+    : [primaryComplaint].filter(Boolean);
+
+  return {
+    ...(primaryComplaint || {}),
+    image_urls: uniqueGroupValues(complaints, 'image_urls'),
+    document_urls: uniqueGroupValues(complaints, 'document_urls'),
+    tags: uniqueGroupValues(complaints, 'tags'),
+  };
 }
 
 export function isMissingMissionOrderComplaintsTable(error) {

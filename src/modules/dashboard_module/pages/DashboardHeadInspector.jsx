@@ -10,7 +10,7 @@ import MiniRefreshButton from '../components/MiniRefreshButton';
 import BusinessNamingPanel from '../components/BusinessNamingPanel';
 import OicManagementPanel from '../components/OicManagementPanel';
 import { enrichRowsWithBusinessDisplayNames } from '../../../lib/businessNames';
-import { getComplaintBusinessGroupKey, getSameEstablishmentComplaintGroup, isMissingMissionOrderComplaintsTable } from '../../../lib/complaintGrouping';
+import { getComplaintBusinessGroupKey, getSameEstablishmentComplaintGroup, isMissingMissionOrderComplaintsTable, mergeComplaintGroupContent } from '../../../lib/complaintGrouping';
 import './Dashboard.css';
 import { getOrdinancesForSubcategory } from '../../../lib/violations/catalog';
 
@@ -292,7 +292,7 @@ export default function DashboardHeadInspector() {
       // Then attach the latest mission order per complaint (if any).
       let complaintQuery = supabase
         .from('complaints')
-        .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at')
+        .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at, image_urls, document_urls, tags')
         .in('status', ['approved', 'Approved', 'completed', 'Completed']);
 
       // Apply date range to the most relevant timestamp for this dashboard (approval date is primary)
@@ -518,7 +518,7 @@ export default function DashboardHeadInspector() {
   const loadApprovedComplaintGroup = async (complaintId) => {
     const { data: baseComplaint, error: baseError } = await supabase
       .from('complaints')
-      .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at')
+      .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at, complaint_description, image_urls, document_urls, tags')
       .eq('id', complaintId)
       .single();
 
@@ -531,7 +531,7 @@ export default function DashboardHeadInspector() {
 
     const { data: candidates, error: candidateError } = await supabase
       .from('complaints')
-      .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at')
+      .select('id, business_pk, business_name, business_address, reporter_email, status, approved_at, created_at, complaint_description, image_urls, document_urls, tags')
       .in('status', ['approved', 'Approved', 'completed', 'Completed'])
       .gte('created_at', start.toISOString())
       .lte('created_at', end.toISOString())
@@ -869,7 +869,8 @@ export default function DashboardHeadInspector() {
 
       // Prefer ordinance citations derived from violation tags (if present).
       // Falls back to complaint description when no violation tags exist.
-      const selectedSubs = listSelectedSubcategories(complaint?.tags);
+      const groupedContent = mergeComplaintGroupContent(complaint, complaintGroup);
+      const selectedSubs = listSelectedSubcategories(groupedContent.tags);
       const ordinancesFromTags = selectedSubs
         .flatMap((sub) => getOrdinancesForSubcategory(sub))
         .map((o) => {
@@ -1021,7 +1022,7 @@ export default function DashboardHeadInspector() {
 
         const primary = group.complaints.find((item) => item?.mission_order_id) || group.complaints[0] || row;
         output.push({
-          ...primary,
+          ...mergeComplaintGroupContent(primary, group.complaints),
           grouped_complaints: group.complaints,
           grouped_reporters: group.uniqueReporterEmails,
           grouped_complaint_count: group.complaints.length,
@@ -1035,7 +1036,7 @@ export default function DashboardHeadInspector() {
         const linkedRows = (rows || []).filter((candidate) => candidate?.mission_order_id === row.mission_order_id);
         processedKeys.add(missionOrderKey);
         output.push({
-          ...row,
+          ...mergeComplaintGroupContent(row, linkedRows),
           grouped_complaints: linkedRows,
           grouped_reporters: Array.from(new Set(linkedRows.map((item) => item?.reporter_email).filter(Boolean))),
           grouped_complaint_count: linkedRows.length,
