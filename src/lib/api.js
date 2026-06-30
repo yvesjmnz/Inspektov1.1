@@ -29,6 +29,23 @@ export async function verifyEmail(token) {
   return data;
 }
 
+export async function validateComplaintAccess(accessToken) {
+  const { data, error } = await supabase.functions.invoke('validate-complaint-access', {
+    body: { accessToken },
+  });
+  if (error) throw new Error(error.message || 'Complaint access is invalid or expired');
+  if (!data?.valid) throw new Error(data?.error || 'Complaint access is invalid or expired');
+  return data;
+}
+
+export async function getReporterBanStatus(email) {
+  const { data, error } = await supabase.rpc('get_reporter_ban_status', {
+    p_email: String(email || '').trim(),
+  });
+  if (error) throw new Error(error.message || 'Unable to validate reporter access');
+  return data || { banned: false };
+}
+
 export async function sendSpecialComplaintFormLink(email) {
   const { data, error } = await supabase.functions.invoke('send-special-complaint-form-link', {
     body: { email },

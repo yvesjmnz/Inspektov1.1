@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { submitComplaint, getBusinesses, uploadImage, resolveBusinessJurisdiction } from '../../../lib/complaints';
 import { getNearbyBusinesses } from '../../../lib/complaints/nearbyBusinesses';
-import { requestEmailVerification } from '../../../lib/api';
+import { getReporterBanStatus, requestEmailVerification } from '../../../lib/api';
 import { supabase } from '../../../lib/supabase';
 import Header from '../../../components/Header.jsx';
 import Footer from '../../../components/Footer.jsx';
@@ -67,7 +67,7 @@ function buildOutsideJurisdictionMessage(baseMessage, result) {
   return baseMessage;
 }
 
-export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEmail }) {
+export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEmail, accessToken }) {
   const [verifiedEmail, setVerifiedEmail] = useState(initialVerifiedEmail || null);
   const [showVerificationModal, setShowVerificationModal] = useState(!initialVerifiedEmail);
   const [step, setStep] = useState(1);
@@ -122,7 +122,6 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
   const [modalError, setModalError] = useState(null);
   const [modalSuccess, setModalSuccess] = useState(false);
   const [modalSubmitted, setModalSubmitted] = useState(false);
-  const [modalRedirecting, setModalRedirecting] = useState(false);
   const turnstileRef = useRef(null);
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [expandedGuided, setExpandedGuided] = useState({});
@@ -146,7 +145,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
 
     // Wait a tick for the DOM to update
     const timer = setTimeout(() => {
-      if (window.turnstile && !modalSubmitted && !modalRedirecting) {
+      if (window.turnstile && !modalSubmitted) {
         try {
           window.turnstile.render('#cf-turnstile-widget-special', {
             sitekey: import.meta.env.VITE_TURNSTILE_SITE_KEY,
@@ -159,53 +158,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [showVerificationModal, modalSubmitted, modalRedirecting]);
-
-  const checkForValidToken = async (emailToCheck) => {
-    try {
-      // Query email_verification_tokens table for valid tokens
-      const { data, error: queryError } = await supabase
-        .from('email_verification_tokens')
-        .select('email, expires_at, used_at')
-        .eq('email', emailToCheck.toLowerCase())
-        .is('used_at', null)
-        .order('expires_at', { ascending: false })
-        .limit(1);
-
-      if (queryError) {
-        return false;
-      }
-
-      if (data && data.length > 0) {
-        const token = data[0];
-        const expiresAt = new Date(token.expires_at);
-
-        // Check if token is still valid (not expired)
-        if (expiresAt > new Date()) {
-          // Valid token found, show redirecting message then proceed
-          setModalRedirecting(true);
-          setTimeout(() => {
-            setVerifiedEmail(emailToCheck);
-            setShowVerificationModal(false);
-            setModalEmail('');
-            setModalError(null);
-            setModalSuccess(false);
-            setModalSubmitted(false);
-            setModalRedirecting(false);
-            // Reset Turnstile widget
-            if (window.turnstile) {
-              window.turnstile.reset();
-            }
-          }, 1500);
-          return true;
-        }
-      }
-      return false;
-    } catch (err) {
-      console.error('Token check error:', err);
-      return false;
-    }
-  };
+  }, [showVerificationModal, modalSubmitted]);
 
   const handleVerificationSubmit = async (e) => {
     e.preventDefault();
@@ -213,12 +166,9 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
     setModalLoading(true);
 
     try {
-      // Check for valid token first
-      const hasValidToken = await checkForValidToken(modalEmail);
-
-      // If valid token found, checkForValidToken will handle the redirect
-      if (hasValidToken) {
-        return;
+      const banStatus = await getReporterBanStatus(modalEmail);
+      if (banStatus?.banned) {
+        throw new Error('This email address is not permitted to submit complaints.');
       }
 
       // Get Turnstile token from the widget
@@ -718,7 +668,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
         email_verified: !!verifiedEmail,
       };
 
-      const created = await submitComplaint(complaintPayload);
+      const created = await submitComplaint(complaintPayload, accessToken);
       const complaintReference = created?.complaint_code || created?.id || '';
 
       // Call send-complaint-confirmation edge function (best-effort)
@@ -761,7 +711,7 @@ export default function SpecialComplaintForm({ verifiedEmail: initialVerifiedEma
             </div>
             <div className="modal-divider"></div>
 
-            {modalRedirecting ? (
+            {false ? (
               <div className="modal-body success">
                 <div className="success-icon">&#10003;</div>
                 <h3>Great! We Found Your Verification</h3>

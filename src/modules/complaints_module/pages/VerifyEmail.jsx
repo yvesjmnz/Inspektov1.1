@@ -1,12 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { verifyEmail } from '../../../lib/api';
 import './VerifyEmail.css';
 
 export default function VerifyEmail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const verificationStartedRef = useRef(false);
 
   useEffect(() => {
+    // React Strict Mode runs effects twice in development. Verification tokens
+    // are single-use, so never issue a duplicate consume request.
+    if (verificationStartedRef.current) return;
+    verificationStartedRef.current = true;
+
     const handleVerify = async () => {
       const params = new URLSearchParams(window.location.search);
       const token = params.get('token');
@@ -24,9 +30,15 @@ export default function VerifyEmail() {
         // Use formType from API response for accuracy
         const redirectFormType = result.formType || formType;
         const redirectPath = redirectFormType === 'special-complaint' ? '/special-complaint' : '/complaint';
-        window.location.href = `${redirectPath}?email=${encodeURIComponent(result.email)}`;
+        if (!result.accessToken) throw new Error('Verification succeeded but form access was not granted');
+        window.location.replace(`${redirectPath}#access_token=${encodeURIComponent(result.accessToken)}`);
       } catch (err) {
-        setError(err.message);
+        const message = String(err?.message || '');
+        setError(
+          message.toLowerCase().includes('already used')
+            ? 'This verification link has already been used. Please request a new verification link.'
+            : message
+        );
         setLoading(false);
       }
     };

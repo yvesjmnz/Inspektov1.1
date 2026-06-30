@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { hashToken } from "../_shared/token.ts";
+import { generateToken, hashToken, nowPlusMinutes } from "../_shared/token.ts";
 
 type RequestBody = {
   token: string;
@@ -65,29 +65,69 @@ Deno.serve(async (req) => {
     return json(400, { error: "Token expired" });
   }
 
-  // Mark token used
-  const { error: useErr } = await supabase
+  const { data: banRow, error: banError } = await supabase
+    .from("reporter_bans")
+    .select("id")
+    .eq("active", true)
+    .eq("email", String(tokenRow.email || "").trim().toLowerCase())
+    .maybeSingle();
+  if (banError) return json(500, { error: "Unable to validate reporter access" });
+  if (banRow) {
+    return json(403, { error: "This email address is not permitted to submit complaints." });
+  }
+
+  const accessToken = generateToken(32);
+  const accessTokenHash = await hashToken(accessToken);
+  const accessTtlMinutes = Number(Deno.env.get("COMPLAINT_ACCESS_TTL_MINUTES") || "60");
+  const { data: accessRow, error: accessError } = await supabase
+    .from("complaint_access_tokens")
+    .insert({
+      email: String(tokenRow.email || "").trim().toLowerCase(),
+      token_hash: accessTokenHash,
+      form_type: tokenRow.form_type || "complaint",
+      expires_at: nowPlusMinutes(accessTtlMinutes).toISOString(),
+    })
+    .select("id")
+    .single();
+  if (accessError) return json(500, { error: "Failed to grant complaint form access" });
+
+  // Claim the verification token only after form access has been created. If
+  // this claim loses a race, remove the unused access row.
+  const { data: claimedToken, error: useErr } = await supabase
     .from("email_verification_tokens")
     .update({ used_at: new Date().toISOString() })
     .eq("id", tokenRow.id)
-    .is("used_at", null);
+    .is("used_at", null)
+    .select("id")
+    .maybeSingle();
 
-  if (useErr) return json(500, { error: "Failed to consume token" });
+  if (useErr || !claimedToken) {
+    await supabase.from("complaint_access_tokens").delete().eq("id", accessRow.id);
+    return json(useErr ? 500 : 400, {
+      error: useErr ? "Failed to consume token" : "Token already used",
+    });
+  }
 
-  // If complaint_id exists, mark complaint as verified
+  // Legacy tokens can reference an already-created complaint.
   if (tokenRow.complaint_id) {
     const { error: updErr } = await supabase
       .from("complaints")
       .update({ email_verified: true, email_verified_at: new Date().toISOString() })
       .eq("id", tokenRow.complaint_id);
 
-    if (updErr) return json(500, { error: "Failed to update complaint" });
+    if (updErr) {
+      await supabase.from("complaint_access_tokens").delete().eq("id", accessRow.id);
+      await supabase.from("email_verification_tokens").update({ used_at: null }).eq("id", tokenRow.id);
+      return json(500, { error: "Failed to update complaint" });
+    }
   }
 
   return json(200, { 
     success: true, 
     email: tokenRow.email, 
     complaintId: tokenRow.complaint_id ?? null,
-    formType: tokenRow.form_type || 'complaint'
+    formType: tokenRow.form_type || 'complaint',
+    accessToken,
+    accessExpiresInMinutes: accessTtlMinutes,
   });
 });

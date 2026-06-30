@@ -22,12 +22,14 @@ import LandingPage from './LandingPage';
 import ComplaintView from './modules/complaints_module/pages/ComplaintView';
 import BatchGeocodingAdmin from './modules/dashboard_module/pages/BatchGeocodingAdmin';
 import { supabase } from './lib/supabase';
+import { validateComplaintAccess } from './lib/api';
 import { getInspectionDraft } from './lib/offlineInspectionSync';
 import './App.css';
 
 function App() {
   const [currentPage, setCurrentPage] = useState(null);
   const [verifiedEmail, setVerifiedEmail] = useState(null);
+  const [complaintAccessToken, setComplaintAccessToken] = useState(null);
   const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
 
   const getRoleFromUser = (user) => {
@@ -57,7 +59,7 @@ function App() {
 
       if (error) throw error;
       return data?.role ? normalizeRole(data.role) : null;
-    } catch (_e) {
+    } catch {
       return null;
     }
   };
@@ -148,12 +150,6 @@ function App() {
 
     (async () => {
       const path = window.location.pathname;
-      const params = new URLSearchParams(window.location.search);
-      const email = params.get('email');
-
-      if (email) {
-        setVerifiedEmail(decodeURIComponent(email));
-      }
 
       // Determine if this is a protected route
       const isProtected =
@@ -218,29 +214,40 @@ function App() {
       } else if (path === '/request-verification') {
         setCurrentPage('request-verification');
       } else if (path === '/complaint') {
-        // Check for email parameter (from token verification)
-        const emailParam = params.get('email');
-
-        if (!mounted) return;
-
-        if (!emailParam) {
-          // No email parameter, redirect to request verification
-          window.location.href = '/request-verification';
+        const fragmentParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        const accessToken = fragmentParams.get('access_token');
+        if (!accessToken) {
+          window.location.replace('/request-verification');
           return;
         }
-
-        setVerifiedEmail(decodeURIComponent(emailParam));
+        try {
+          const access = await validateComplaintAccess(accessToken);
+          if (access.formType !== 'complaint') throw new Error('Invalid form access type');
+          if (!mounted) return;
+          setVerifiedEmail(access.email);
+          setComplaintAccessToken(accessToken);
+        } catch {
+          window.location.replace('/request-verification?error=invalid-access');
+          return;
+        }
         setCurrentPage('complaint');
       } else if (path === '/special-complaint') {
-        // Check for email parameter (from token verification)
-        const emailParam = params.get('email');
-
-        if (!mounted) return;
-
-        if (emailParam) {
-          setVerifiedEmail(decodeURIComponent(emailParam));
+        const fragmentParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        const accessToken = fragmentParams.get('access_token');
+        if (!accessToken) {
+          window.location.replace('/request-verification');
+          return;
         }
-
+        try {
+          const access = await validateComplaintAccess(accessToken);
+          if (access.formType !== 'special-complaint') throw new Error('Invalid form access type');
+          if (!mounted) return;
+          setVerifiedEmail(access.email);
+          setComplaintAccessToken(accessToken);
+        } catch {
+          window.location.replace('/request-verification?error=invalid-access');
+          return;
+        }
         setCurrentPage('special-complaint');
       } else if (path === '/complaint-confirmation') {
         setCurrentPage('complaint-confirmation');
@@ -294,9 +301,9 @@ function App() {
       case 'request-verification':
         return <RequestVerification />;
       case 'complaint':
-        return <ComplaintForm verifiedEmail={verifiedEmail} />;
+        return <ComplaintForm verifiedEmail={verifiedEmail} accessToken={complaintAccessToken} />;
       case 'special-complaint':
-        return <SpecialComplaintForm verifiedEmail={verifiedEmail} />;
+        return <SpecialComplaintForm verifiedEmail={verifiedEmail} accessToken={complaintAccessToken} />;
       case 'complaint-confirmation':
         return <ComplaintConfirmation />;
       case 'track-complaint':

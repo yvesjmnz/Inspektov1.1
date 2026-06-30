@@ -37,7 +37,7 @@ function buildOutsideJurisdictionMessage(baseMessage, result) {
   return baseMessage;
 }
 
-export default function ComplaintForm({ verifiedEmail }) {
+export default function ComplaintForm({ verifiedEmail, accessToken }) {
   const [step, setStep] = useState(1);
 
   const [formData, setFormData] = useState({
@@ -1180,7 +1180,7 @@ export default function ComplaintForm({ verifiedEmail }) {
         reporter_lng: formData.reporter_lng,
       };
 
-      const created = await submitComplaint(complaintPayload);
+      const created = await submitComplaint(complaintPayload, accessToken);
       const complaintReference = created?.complaint_code || created?.id || '';
 
       // Call send-complaint-confirmation edge function (best-effort)

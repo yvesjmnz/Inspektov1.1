@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { requestEmailVerification } from '../../../lib/api';
+import { getReporterBanStatus, requestEmailVerification } from '../../../lib/api';
 import './RequestVerification.css';
 
 export default function RequestVerification() {
+  const routeError = new URLSearchParams(window.location.search).get('error');
+  const hasInvalidAccess = routeError === 'invalid-access';
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -12,7 +14,7 @@ export default function RequestVerification() {
 
   // Render Turnstile widget when component mounts
   useEffect(() => {
-    if (!submitted && !success) {
+    if (!hasInvalidAccess && !submitted && !success) {
       const timer = setTimeout(() => {
         if (window.turnstile) {
           try {
@@ -28,7 +30,7 @@ export default function RequestVerification() {
 
       return () => clearTimeout(timer);
     }
-  }, [submitted, success]);
+  }, [hasInvalidAccess, submitted, success]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -44,6 +46,10 @@ export default function RequestVerification() {
         return;
       }
 
+      const banStatus = await getReporterBanStatus(email);
+      if (banStatus?.banned) {
+        throw new Error('This email address is not permitted to submit complaints.');
+      }
       await requestEmailVerification(email, null, turnstileToken, 'complaint');
       setSuccess(true);
       setSubmitted(true);
@@ -54,6 +60,24 @@ export default function RequestVerification() {
       setLoading(false);
     }
   };
+
+  if (hasInvalidAccess) {
+    return (
+      <div className="request-verification-container">
+        <div className="request-verification-card access-error" role="alert">
+          <div className="access-error-icon" aria-hidden="true">!</div>
+          <h1>Complaint Access Invalid</h1>
+          <p>
+            This complaint link is invalid, expired, or has already been used.
+            Return to the main page to request a new verification link.
+          </p>
+          <a href="/" className="btn btn-primary">
+            Go to Main Page
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   if (submitted && success) {
     return (

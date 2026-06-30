@@ -118,6 +118,17 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
+  const { data: banRow, error: banError } = await supabase
+    .from("reporter_bans")
+    .select("id")
+    .eq("active", true)
+    .eq("email", email)
+    .maybeSingle();
+  if (banError) return json(500, { error: "Unable to validate reporter access" });
+  if (banRow) {
+    return json(403, { error: "This email address is not permitted to submit complaints." });
+  }
+
   // Store token hash
   const formType = body.formType || 'complaint';
   const { error: insertErr } = await supabase

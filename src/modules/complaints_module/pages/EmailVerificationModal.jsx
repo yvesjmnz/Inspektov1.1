@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { requestEmailVerification } from '../../../lib/api';
-import { supabase } from '../../../lib/supabase';
+import { getReporterBanStatus, requestEmailVerification } from '../../../lib/api';
 import './EmailVerificationModal.css';
 
 export default function EmailVerificationModal({ isOpen, onClose }) {
@@ -9,44 +8,7 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [redirecting, setRedirecting] = useState(false);
   const turnstileRef = useRef(null);
-
-  const checkForValidToken = async (emailToCheck) => {
-    try {
-      // Query email_verification_tokens table for valid tokens
-      const { data, error: queryError } = await supabase
-        .from('email_verification_tokens')
-        .select('email, expires_at, used_at')
-        .eq('email', emailToCheck.toLowerCase())
-        .is('used_at', null)
-        .order('expires_at', { ascending: false })
-        .limit(1);
-
-      if (queryError) {
-        return false;
-      }
-
-      if (data && data.length > 0) {
-        const token = data[0];
-        const expiresAt = new Date(token.expires_at);
-
-        // Check if token is still valid (not expired)
-        if (expiresAt > new Date()) {
-          // Valid token found, show redirecting message then navigate
-          setRedirecting(true);
-          setTimeout(() => {
-            window.location.href = `/complaint?email=${encodeURIComponent(emailToCheck)}`;
-          }, 1500);
-          return true;
-        }
-      }
-      return false;
-    } catch (err) {
-      console.error('Token check error:', err);
-      return false;
-    }
-  };
 
   // Handle Escape key press
   useEffect(() => {
@@ -73,12 +35,9 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
     setLoading(true);
 
     try {
-      // Check for valid token first
-      const hasValidToken = await checkForValidToken(email);
-      
-      // If valid token found, checkForValidToken will redirect
-      if (hasValidToken) {
-        return;
+      const banStatus = await getReporterBanStatus(email);
+      if (banStatus?.banned) {
+        throw new Error('This email address is not permitted to submit complaints.');
       }
 
       // Get Turnstile token from the widget
@@ -167,7 +126,7 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
         </div>
         <div className="modal-divider"></div>
 
-        {redirecting ? (
+        {false ? (
           <div className="modal-body success">
             <div className="success-icon">✓</div>
             <h3>Great! We Found Your Verification</h3>

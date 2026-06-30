@@ -59,6 +59,12 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           section: null,
         },
         {
+          label: 'Reporter Access',
+          icon: '/ui_icons/special-shield-check.svg',
+          href: '/dashboard/director?tab=reporter-bans',
+          section: null,
+        },
+        {
           label: 'Mission Orders',
           section: 'MISSION ORDERS',
         },
@@ -306,6 +312,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'inspection-history') return 'Inspection History';
       if (tab === 'naming-approvals') return 'Naming Approvals';
       if (tab === 'oic-review') return 'OIC Review';
+      if (tab === 'reporter-bans') return 'Reporter Access';
       if (tab === 'reports') return 'Performance Report';
       // Director dashboard overview tab was removed; default highlight to queue.
       return 'Review Complaints';

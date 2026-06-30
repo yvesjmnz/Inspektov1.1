@@ -58,15 +58,19 @@ export async function getBusinessById(businessPk) {
   return data;
 }
 
-export async function submitComplaint(complaintData) {
-  const { data, error } = await supabase
-    .from('complaints')
-    .insert([complaintData])
-    .select()
-    .single();
+export async function submitComplaint(complaintData, accessToken) {
+  if (!accessToken) throw new Error('Verified complaint access is required.');
 
-  if (error) throw new Error(error.message);
-  return data;
+  const { data, error } = await supabase.functions.invoke('submit-complaint', {
+    body: {
+      accessToken,
+      complaint: complaintData,
+    },
+  });
+
+  if (error) throw new Error(error.message || 'Failed to submit complaint');
+  if (!data?.complaint) throw new Error(data?.error || 'Failed to submit complaint');
+  return data.complaint;
 }
 
 export async function checkComplaintCooldown({ business_pk, business_name, business_address } = {}) {
