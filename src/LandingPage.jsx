@@ -1,28 +1,19 @@
-import { useState } from 'react';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import './LandingPage.css';
 
 function LandingPage({ onOpenVerificationModal }) {
-  const [contactCategory, setContactCategory] = useState('permit');
+  const collageImages = [
+    { src: '/landing 2.jpg' },
+    { src: '/landing 3.jpg' },
+    { src: '/landing5.jpg' }
+  ];
+  const collageTrack = [...collageImages, ...collageImages];
 
   const handleSubmitComplaint = (e) => {
     e.preventDefault();
     // Open email verification modal
     onOpenVerificationModal();
-  };
-
-  const categoryContent = {
-    permit: {
-      title: "Have permit-related concerns?",
-      description: "For business permit applications, renewals, Go Manila access, account status, or inspection scheduling — contact the Bureau of Permits directly.",
-      showLink: true
-    },
-    special: {
-      title: "Special Complaints & Requests",
-      description: "For government-issued complaints, official agency-related concerns, and other special requests that require manual handling, please contact the Bureau of Permits directly.",
-      showLink: false
-    }
   };
 
   return (
@@ -40,14 +31,19 @@ function LandingPage({ onOpenVerificationModal }) {
               </div>
             </div>
             <div className="hero-col">
-              <div className="mock-card">
-                <div className="mock-top">
-                  <span className="b b1"></span><span className="b b2"></span><span className="b b3"></span>
+              <div className="hero-collage-shell" aria-hidden="true">
+                <div className="hero-collage-stage">
+                  <div className="hero-collage-track">
+                    {collageTrack.map((image, index) => (
+                      <figure
+                        key={`track-${index}`}
+                        className={`hero-collage-card tilt-${(index % 4) + 1}`}
+                      >
+                        <img src={image.src} alt="" loading="lazy" decoding="async" />
+                      </figure>
+                    ))}
+                  </div>
                 </div>
-                <div className="mock-lines"></div>
-                <div className="mock-upload">Upload Evidence</div>
-                <div className="mock-lines small"></div>
-                <div className="mock-cta">Ready to submit? <span className="mock-go">→</span></div>
               </div>
             </div>
           </div>
@@ -87,45 +83,46 @@ function LandingPage({ onOpenVerificationModal }) {
         <section className="band-light">
           <div className="band-wrap">
             <div className="contact-section">
-              <div className="contact-header">
-                <h2>Contact the Bureau of Permits</h2>
-                <div className="category-selector">
-                  <button
-                    className={`category-btn ${contactCategory === 'permit' ? 'active' : ''}`}
-                    onClick={() => setContactCategory('permit')}
-                  >
-                    Permit Concerns
-                  </button>
-                  <button
-                    className={`category-btn ${contactCategory === 'special' ? 'active' : ''}`}
-                    onClick={() => setContactCategory('special')}
-                  >
-                    Special Complaints & Requests
-                  </button>
+              <div className="contact-feature">
+                <div className="contact-media">
+                  <div className="contact-visual-pair">
+                    <figure className="contact-visual contact-visual-main">
+                      <img src="/manila.png" alt="Manila city view" loading="lazy" decoding="async" />
+                    </figure>
+                    <figure className="contact-visual contact-visual-secondary">
+                      <img src="/cropped-bureau.png" alt="Bureau of Permits office" loading="lazy" decoding="async" />
+                    </figure>
+                  </div>
                 </div>
-              </div>
 
-              <div className="contact-description">
-                <h3>{categoryContent[contactCategory].title}</h3>
-                <p>{categoryContent[contactCategory].description}</p>
-                {categoryContent[contactCategory].showLink && (
+                <div className="contact-content">
+                  <h2 className="contact-feature-title">Permit and Complaint Assistance</h2>
+                  <div className="contact-feature-rule" aria-hidden="true"></div>
+                  <p className="contact-feature-copy">
+                    For business permit applications, renewals, Go Manila access, account status, inspection scheduling,
+                    and other special complaints that require direct assistance, please contact the Bureau of Permits.
+                  </p>
+
                   <a className="text-link" href="https://www.facebook.com/bureauofpermitsmnl/" target="_blank" rel="noopener noreferrer">Visit Bureau of Permits →</a>
-                )}
-              </div>
 
-              <div className="contact-info-row">
-                <div className="contact-info-card">
-                  <div className="contact-info-label">Email us at</div>
-                  <div className="contact-info-value">permits@manila.gov.ph</div>
-                </div>
-                <div className="contact-info-card">
-                  <div className="contact-info-label">Call us at</div>
-                  <div className="contact-info-value">(02) 8527-0871</div>
-                </div>
-                <div className="contact-info-card">
-                  <div className="contact-info-label">Office Hours</div>
-                  <div className="contact-info-value">Monday – Friday, 8:00 AM – 5:00 PM</div>
-                  <div className="contact-info-sub">Except holidays</div>
+                  <div className="contact-detail-list">
+                    <div className="contact-detail-item contact-detail-item-email">
+                      <div className="contact-detail-label">Email</div>
+                      <div className="contact-detail-value">permits@manila.gov.ph</div>
+                    </div>
+                    <div className="contact-detail-item contact-detail-item-phone">
+                      <div className="contact-detail-label">Phone</div>
+                      <div className="contact-detail-value">(02) 8527-0871</div>
+                    </div>
+                    <div className="contact-detail-item contact-detail-item-hours">
+                      <div className="contact-detail-label">Office Hours</div>
+                      <div className="contact-detail-value">
+                        <span>Monday - Friday</span>
+                        <span>8:00 AM - 5:00 PM</span>
+                      </div>
+                      <div className="contact-detail-note">Except holidays</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

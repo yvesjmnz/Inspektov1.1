@@ -120,7 +120,7 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
             <img
               src="/X icon.png"
               alt="Close"
-              style={{ width: 14, height: 14, filter: 'brightness(0) invert(1)' }}
+              className="modal-close-icon"
             />
           </button>
         </div>

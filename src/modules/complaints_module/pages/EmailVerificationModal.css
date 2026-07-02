@@ -119,9 +119,20 @@
   line-height: 1;
 }
 
+.modal-close-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+  filter: brightness(0) saturate(100%) invert(18%) sepia(12%) saturate(771%) hue-rotate(177deg) brightness(96%) contrast(92%);
+}
+
 .modal-close-btn:hover {
   background: #f3f4f6;
   color: #6b7280;
+}
+
+.modal-close-btn:hover .modal-close-icon {
+  filter: brightness(0) saturate(100%) invert(37%) sepia(10%) saturate(539%) hue-rotate(177deg) brightness(96%) contrast(88%);
 }
 
 .modal-close-btn:active {
