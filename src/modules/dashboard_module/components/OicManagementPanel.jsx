@@ -3,6 +3,18 @@ import { supabase } from '../../../lib/supabase';
 
 const SIGNATURE_BUCKET = 'signatory-signatures';
 
+const CARD_STYLE = {
+  border: '1px solid #e2e8f0',
+  borderRadius: 12,
+  background: '#ffffff',
+  boxShadow: '0 4px 14px rgba(15, 23, 42, 0.05)',
+};
+
+const CONTROL_STYLE = {
+  border: '1px solid #cbd5e1',
+  borderRadius: 10,
+};
+
 function formatDate(value) {
   if (!value) return '-';
   const date = new Date(value);
@@ -21,6 +33,15 @@ function profileName(profile, fallback = '-') {
   return profile?.full_name
     || [profile?.first_name, profile?.middle_name, profile?.last_name].filter(Boolean).join(' ')
     || fallback;
+}
+
+function initials(value) {
+  return String(value || '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('') || 'OIC';
 }
 
 function statusLabel(status) {
@@ -51,11 +72,22 @@ function StatusPill({ status }) {
   );
 }
 
+function PeriodStatusPill({ status }) {
+  const tones = {
+    open: { label: 'No OIC Assigned Yet', bg: '#dbeafe', fg: '#1d4ed8', border: '#bfdbfe' },
+    assigned: { label: 'OIC Assigned', bg: '#dcfce7', fg: '#166534', border: '#bbf7d0' },
+    expired: { label: 'Expired', bg: '#f1f5f9', fg: '#64748b', border: '#e2e8f0' },
+    cancelled: { label: 'Cancelled', bg: '#fee2e2', fg: '#991b1b', border: '#fecaca' },
+  };
+  const tone = tones[status] || { label: statusLabel(status), bg: '#f8fafc', fg: '#475569', border: '#e2e8f0' };
+  return <span style={{ display: 'inline-flex', width: 'fit-content', padding: '4px 9px', borderRadius: 999, border: `1px solid ${tone.border}`, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>{tone.label}</span>;
+}
+
 function FieldLabel({ children }) {
   return <span style={{ color: '#475569', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>{children}</span>;
 }
 
-function SignatureCanvas({ value, onChange }) {
+function SignatureCanvas({ value, onChange, footerAction = null }) {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
 
@@ -126,11 +158,14 @@ function SignatureCanvas({ value, onChange }) {
         onPointerMove={move}
         onPointerUp={end}
         onPointerCancel={end}
-        style={{ width: '100%', height: 150, border: '1px solid #94a3b8', borderRadius: 4, background: '#ffffff', touchAction: 'none', cursor: 'crosshair' }}
+        style={{ width: '100%', height: 150, border: '1px solid #94a3b8', borderRadius: 10, background: '#ffffff', touchAction: 'none', cursor: 'crosshair' }}
       />
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ color: '#64748b', fontSize: 12, fontWeight: 700 }}>Optional: draw the Director confirmation signature.</span>
-        <button type="button" className="btn btn-secondary" onClick={clear} style={{ minHeight: 32 }}>Clear</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-secondary" onClick={clear} style={{ minHeight: 40 }}>Clear</button>
+          {footerAction}
+        </div>
       </div>
     </div>
   );
@@ -153,7 +188,13 @@ export default function OicManagementPanel({ mode = 'head_inspector' }) {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [comments, setComments] = useState({});
-  const [directorSignatures, setDirectorSignatures] = useState({});
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('all');
+  const [historyPage, setHistoryPage] = useState(1);
+  const [selectedHistoryRequest, setSelectedHistoryRequest] = useState(null);
+  const [periodSearch, setPeriodSearch] = useState('');
+  const [periodStatus, setPeriodStatus] = useState('all');
+  const [periodPage, setPeriodPage] = useState(1);
   const [directorPeriodSignature, setDirectorPeriodSignature] = useState('');
   const [periodForm, setPeriodForm] = useState({
     start: toLocalInput(),
@@ -329,18 +370,12 @@ export default function OicManagementPanel({ mode = 'head_inspector' }) {
     setError('');
     setToast('');
     try {
-      let confirmationPath = null;
-      const dataUrl = directorSignatures[request.id];
-      if (decision === 'approved' && dataUrl) {
-        const blob = await dataUrlToBlob(dataUrl);
-        confirmationPath = await uploadFile({ file: blob, folder: `confirmations/${request.id}`, fallbackName: 'director-confirmation' });
-      }
       const { error: rpcError } = await supabase.rpc('director_review_oic_request', {
         p_request_id: request.id,
         p_decision: decision,
         p_comment: comments[request.id] || null,
-        p_confirmation_bucket: confirmationPath ? SIGNATURE_BUCKET : null,
-        p_confirmation_path: confirmationPath,
+        p_confirmation_bucket: null,
+        p_confirmation_path: null,
       });
       if (rpcError) throw rpcError;
       setToast(decision === 'approved' ? 'OIC assignment activated for new documents.' : 'OIC request rejected.');
@@ -383,11 +418,11 @@ export default function OicManagementPanel({ mode = 'head_inspector' }) {
         <StatusPill status={request.status} />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-        <div style={{ padding: 11, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4 }}><FieldLabel>Requested By</FieldLabel><div style={{ marginTop: 5, fontWeight: 900 }}>{profileName(profiles.get(request.requested_by), String(request.requested_by || '').slice(0, 8))}</div></div>
-        <div style={{ padding: 11, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4 }}><FieldLabel>Requested At</FieldLabel><div style={{ marginTop: 5, fontWeight: 900 }}>{formatDate(request.requested_at)}</div></div>
-        <div style={{ padding: 11, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4 }}><FieldLabel>Validity</FieldLabel><div style={{ marginTop: 5, fontWeight: 900 }}>{request.validity_start && request.validity_end ? `${formatDate(request.validity_start)} to ${formatDate(request.validity_end)}` : '-'}</div></div>
+        <div style={{ padding: 11, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10 }}><FieldLabel>Requested By</FieldLabel><div style={{ marginTop: 5, fontWeight: 900 }}>{profileName(profiles.get(request.requested_by), String(request.requested_by || '').slice(0, 8))}</div></div>
+        <div style={{ padding: 11, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10 }}><FieldLabel>Requested At</FieldLabel><div style={{ marginTop: 5, fontWeight: 900 }}>{formatDate(request.requested_at)}</div></div>
+        <div style={{ padding: 11, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10 }}><FieldLabel>Validity</FieldLabel><div style={{ marginTop: 5, fontWeight: 900 }}>{request.validity_start && request.validity_end ? `${formatDate(request.validity_start)} to ${formatDate(request.validity_end)}` : '-'}</div></div>
       </div>
-      <div style={{ padding: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4, color: '#334155', lineHeight: 1.5 }}>
+      <div style={{ padding: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, color: '#334155', lineHeight: 1.5 }}>
         <div><strong>Reason:</strong> {request.reason}</div>
         {request.unavailability_period_id ? <div style={{ marginTop: 6, color: '#991b1b' }}><strong>Director declared unavailable:</strong> {formatDate(periodMap.get(request.unavailability_period_id)?.unavailable_start)} to {formatDate(periodMap.get(request.unavailability_period_id)?.unavailable_end)}. {periodMap.get(request.unavailability_period_id)?.reason}</div> : null}
         {request.director_unavailable ? <div style={{ marginTop: 6, color: '#854d0e' }}><strong>Special approval justification:</strong> {request.director_unavailable_justification}</div> : null}
@@ -397,13 +432,131 @@ export default function OicManagementPanel({ mode = 'head_inspector' }) {
   );
 
   const queue = isDirector ? directorQueue : finalQueue;
+  const historyPageSize = 5;
+  const filteredHistory = useMemo(() => {
+    const query = historySearch.trim().toLowerCase();
+    return requests.filter((request) => {
+      const requester = profileName(profiles.get(request.requested_by), '');
+      const matchesSearch = !query || [
+        request.proposed_signatory_name,
+        request.proposed_signatory_title,
+        requester,
+        request.id,
+      ].some((value) => String(value || '').toLowerCase().includes(query));
+      const matchesStatus = historyStatus === 'all' || request.status === historyStatus;
+      return matchesSearch && matchesStatus;
+    });
+  }, [historySearch, historyStatus, profiles, requests]);
+  const historyPageCount = Math.max(1, Math.ceil(filteredHistory.length / historyPageSize));
+  const safeHistoryPage = Math.min(historyPage, historyPageCount);
+  const visibleHistory = filteredHistory.slice((safeHistoryPage - 1) * historyPageSize, safeHistoryPage * historyPageSize);
+  const periodPageSize = 5;
+  const filteredPeriods = useMemo(() => {
+    const query = periodSearch.trim().toLowerCase();
+    return unavailablePeriods.filter((period) => {
+      const declarer = profileName(profiles.get(period.created_by), '');
+      const matchesSearch = !query || [period.reason, declarer, period.id].some((value) => String(value || '').toLowerCase().includes(query));
+      const matchesStatus = periodStatus === 'all' || period.status === periodStatus;
+      return matchesSearch && matchesStatus;
+    });
+  }, [periodSearch, periodStatus, profiles, unavailablePeriods]);
+  const periodPageCount = Math.max(1, Math.ceil(filteredPeriods.length / periodPageSize));
+  const safePeriodPage = Math.min(periodPage, periodPageCount);
+  const visiblePeriods = filteredPeriods.slice((safePeriodPage - 1) * periodPageSize, safePeriodPage * periodPageSize);
+
+  const DirectorApprovalCard = ({ request }) => {
+    const period = periodMap.get(request.unavailability_period_id);
+
+    return (
+      <article style={{ ...CARD_STYLE, overflow: 'hidden' }}>
+        <div className="oic-approval-summary" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', columnGap: 0, rowGap: 18, padding: 18, alignItems: 'start' }}>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', minWidth: 0, gridColumn: 1, gridRow: 1, padding: '4px 24px 0 4px' }}>
+            <div aria-hidden="true" style={{ width: 50, height: 50, flex: '0 0 50px', borderRadius: '50%', display: 'grid', placeItems: 'center', background: '#e8efff', color: '#2254d8', fontSize: 17, fontWeight: 900 }}>
+              {initials(request.proposed_signatory_name)}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: '#0f172a', fontSize: 17, fontWeight: 900, lineHeight: 1.25 }}>{request.proposed_signatory_name}</div>
+              <div style={{ marginTop: 3, color: '#64748b', fontSize: 13, fontWeight: 700 }}>{request.proposed_signatory_title}</div>
+              <div style={{ marginTop: 8, color: '#475569', fontSize: 12, fontWeight: 700 }}>
+                {request.validity_start && request.validity_end ? `${formatDate(request.validity_start)} – ${formatDate(request.validity_end)}` : 'Validity not specified'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ minWidth: 0, gridColumn: 1, gridRow: 2, padding: '0 24px 4px 4px' }}>
+            <FieldLabel>Assignment Reason</FieldLabel>
+            <p style={{ margin: '7px 0 0', color: '#334155', fontSize: 14, lineHeight: 1.55, fontWeight: 600 }}>{request.reason}</p>
+            {period ? (
+              <div style={{ marginTop: 9, color: '#64748b', fontSize: 12, lineHeight: 1.45 }}>
+                Director unavailable: {formatDate(period.unavailable_start)} – {formatDate(period.unavailable_end)}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="oic-approval-actions" style={{ display: 'grid', gap: 10, alignSelf: 'stretch', gridColumn: 2, gridRow: '1 / span 2', padding: '4px 0 4px 24px', borderLeft: '1px solid #e2e8f0' }}>
+            <label style={{ display: 'grid', gap: 7 }}>
+              <FieldLabel>Director's Remarks</FieldLabel>
+              <textarea rows={2} value={comments[request.id] || ''} onChange={(event) => setComments((current) => ({ ...current, [request.id]: event.target.value }))} placeholder="Enter notes..." style={{ ...CONTROL_STYLE, minHeight: 58, padding: 10, resize: 'vertical', background: '#ffffff' }} />
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 9 }}>
+              <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => directorReview(request, 'approved')} style={{ minHeight: 38, width: '100%' }}>Approve</button>
+              <button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={() => directorReview(request, 'rejected')} style={{ minHeight: 38, width: '100%' }}>Reject</button>
+            </div>
+          </div>
+        </div>
+      </article>
+    );
+  };
+
+  const HeadInspectorApprovalCard = ({ request }) => (
+    <article style={{ ...CARD_STYLE, overflow: 'hidden' }}>
+      <div className="oic-approval-summary" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', padding: 18, alignItems: 'stretch' }}>
+        <div className="oic-approval-overview" style={{ minWidth: 0, padding: '4px 24px 4px 4px' }}>
+          <div className="oic-approval-identity" style={{ display: 'flex', gap: 14, alignItems: 'center', minWidth: 0 }}>
+            <div aria-hidden="true" style={{ width: 48, height: 48, flex: '0 0 48px', borderRadius: '50%', display: 'grid', placeItems: 'center', background: '#e8efff', color: '#2254d8', fontSize: 16, fontWeight: 900 }}>
+              {initials(request.proposed_signatory_name)}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: '#0f172a', fontSize: 17, fontWeight: 900, lineHeight: 1.25 }}>{request.proposed_signatory_name}</div>
+              <div style={{ marginTop: 3, color: '#64748b', fontSize: 13, fontWeight: 700 }}>{request.proposed_signatory_title}</div>
+              <div style={{ marginTop: 8, color: '#64748b', fontSize: 12, fontWeight: 700 }}>
+                {request.validity_start && request.validity_end ? `${formatDate(request.validity_start)} to ${formatDate(request.validity_end)}` : 'Validity not specified'}
+              </div>
+            </div>
+          </div>
+
+          <div className="oic-approval-reason" style={{ minWidth: 0, marginTop: 18 }}>
+            <FieldLabel>Assignment Reason</FieldLabel>
+            <p style={{ margin: '7px 0 0', color: '#334155', fontSize: 14, lineHeight: 1.5, fontWeight: 600 }}>{request.reason}</p>
+          </div>
+        </div>
+
+        <div className="oic-approval-actions" style={{ display: 'grid', gap: 10, alignSelf: 'stretch', padding: '4px 0 4px 24px', borderLeft: '1px solid #e2e8f0' }}>
+          <label style={{ display: 'grid', gap: 7 }}>
+            <FieldLabel>Head Inspector's Remarks</FieldLabel>
+            <textarea
+              rows={2}
+              value={comments[request.id] || ''}
+              onChange={(event) => setComments((current) => ({ ...current, [request.id]: event.target.value }))}
+              placeholder="Enter notes..."
+              style={{ ...CONTROL_STYLE, minHeight: 58, padding: 10, resize: 'vertical', background: '#ffffff' }}
+            />
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 9 }}>
+            <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => finalReview(request, 'approved')} style={{ minHeight: 38, width: '100%' }}>Approve</button>
+            <button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={() => finalReview(request, 'rejected')} style={{ minHeight: 38, width: '100%' }}>Reject</button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
       {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 
-      <section style={{ border: '1px solid #dbe3ef', borderRadius: 6, background: '#ffffff', overflow: 'hidden' }}>
+      <section style={{ ...CARD_STYLE, overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 320px)', gap: 16, padding: 16, alignItems: 'center' }}>
           <div>
             <FieldLabel>Active Signatory For New Documents</FieldLabel>
@@ -411,63 +564,189 @@ export default function OicManagementPanel({ mode = 'head_inspector' }) {
             <div style={{ color: '#475569', fontWeight: 800 }}>{activeSignature?.signatory_title || '-'}</div>
             {activeSignature?.active_until ? <div style={{ marginTop: 8, color: '#854d0e', fontSize: 12, fontWeight: 800 }}>Until {formatDate(activeSignature.active_until)}</div> : null}
           </div>
-          <div style={{ minHeight: 100, border: '1px dashed #cbd5e1', borderRadius: 4, background: '#f8fafc', display: 'grid', placeItems: 'center', padding: 10 }}>
+          <div style={{ minHeight: 100, border: '1px dashed #cbd5e1', borderRadius: 10, background: '#f8fafc', display: 'grid', placeItems: 'center', padding: 10 }}>
             {activePreview ? <img src={activePreview} alt="Active document signature" style={{ maxWidth: '100%', maxHeight: 90, objectFit: 'contain' }} /> : <span style={{ color: '#64748b', fontWeight: 800 }}>No preview</span>}
           </div>
         </div>
       </section>
 
       {isDirector ? (
-        <section style={{ border: '1px solid #dbe3ef', borderRadius: 6, background: '#ffffff', padding: 18, display: 'grid', gap: 15 }}>
+        <section style={{ ...CARD_STYLE, padding: 18, display: 'grid', gap: 15 }}>
           <div><h3 style={{ margin: 0, color: '#0f172a', fontSize: 18 }}>Declare Unavailable Period</h3><p style={{ margin: '5px 0 0', color: '#64748b', fontSize: 13, fontWeight: 700 }}>These dates become selectable by the Head Inspector when assigning a temporary OIC.</p></div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 13 }}>
-            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Unavailable Start</FieldLabel><input type="datetime-local" value={periodForm.start} onChange={(e) => setPeriodForm((p) => ({ ...p, start: e.target.value }))} style={{ minHeight: 42, border: '1px solid #cbd5e1', borderRadius: 4, padding: '0 10px' }} /></label>
-            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Unavailable End</FieldLabel><input type="datetime-local" value={periodForm.end} onChange={(e) => setPeriodForm((p) => ({ ...p, end: e.target.value }))} style={{ minHeight: 42, border: '1px solid #cbd5e1', borderRadius: 4, padding: '0 10px' }} /></label>
+            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Start Date</FieldLabel><input type="datetime-local" value={periodForm.start} onChange={(e) => setPeriodForm((p) => ({ ...p, start: e.target.value }))} style={{ ...CONTROL_STYLE, minHeight: 42, padding: '0 10px' }} /></label>
+            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>End Date</FieldLabel><input type="datetime-local" value={periodForm.end} onChange={(e) => setPeriodForm((p) => ({ ...p, end: e.target.value }))} style={{ ...CONTROL_STYLE, minHeight: 42, padding: '0 10px' }} /></label>
           </div>
-          <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Reason</FieldLabel><textarea rows={3} value={periodForm.reason} onChange={(e) => setPeriodForm((p) => ({ ...p, reason: e.target.value }))} style={{ border: '1px solid #cbd5e1', borderRadius: 4, padding: 11, resize: 'vertical', fontWeight: 700 }} /></label>
-          <SignatureCanvas value={directorPeriodSignature} onChange={setDirectorPeriodSignature} />
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" className="btn btn-primary" onClick={declareUnavailablePeriod} disabled={Boolean(busy)} style={{ minHeight: 40, minWidth: 190 }}>{busy === 'declare-period' ? 'Saving...' : 'Save Unavailable Period'}</button></div>
+          <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Reason</FieldLabel><textarea rows={3} value={periodForm.reason} onChange={(e) => setPeriodForm((p) => ({ ...p, reason: e.target.value }))} style={{ ...CONTROL_STYLE, padding: 11, resize: 'vertical', fontWeight: 700 }} /></label>
+          <SignatureCanvas
+            value={directorPeriodSignature}
+            onChange={setDirectorPeriodSignature}
+            footerAction={<button type="button" className="btn btn-primary" onClick={declareUnavailablePeriod} disabled={Boolean(busy)} style={{ minHeight: 40, minWidth: 190 }}>{busy === 'declare-period' ? 'Saving...' : 'Save Unavailable Period'}</button>}
+          />
         </section>
       ) : null}
 
       {!isDirector ? (
-        <section style={{ border: '1px solid #dbe3ef', borderRadius: 6, background: '#ffffff', padding: 18, display: 'grid', gap: 15 }}>
-          <div><h3 style={{ margin: 0, color: '#0f172a', fontSize: 18 }}>Prepare Temporary OIC Assignment</h3><p style={{ margin: '5px 0 0', color: '#64748b', fontSize: 13, fontWeight: 700 }}>Temporary OIC assignments must be tied to a Director-declared unavailable period.</p></div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 13 }}>
-            <div style={{ display: 'grid', gap: 7 }}><FieldLabel>Change Type</FieldLabel><div style={{ minHeight: 42, border: '1px solid #cbd5e1', borderRadius: 4, padding: '10px', fontWeight: 900, background: '#f8fafc' }}>Temporary OIC</div></div>
-            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>New Signatory Signature</FieldLabel><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setForm((p) => ({ ...p, file: e.target.files?.[0] || null }))} style={{ minHeight: 42, border: '1px solid #cbd5e1', borderRadius: 4, padding: 8 }} /></label>
-            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Signatory Name</FieldLabel><input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} style={{ minHeight: 42, border: '1px solid #cbd5e1', borderRadius: 4, padding: '0 10px', fontWeight: 800 }} /></label>
-            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Signatory Title</FieldLabel><input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} style={{ minHeight: 42, border: '1px solid #cbd5e1', borderRadius: 4, padding: '0 10px', fontWeight: 800 }} /></label>
+        <section style={{ ...CARD_STYLE, padding: 18, display: 'grid', gap: 15 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}><div><h3 style={{ margin: 0, color: '#0f172a', fontSize: 18 }}>Prepare Temporary OIC Assignment</h3><p style={{ margin: '5px 0 0', color: '#64748b', fontSize: 13, fontWeight: 700 }}>Temporary OIC assignments must be tied to a Director-declared unavailable period.</p></div><span style={{ padding: '5px 9px', borderRadius: 999, background: '#e8efff', color: '#2254d8', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Temporary OIC</span></div>
+          <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Select Open Unavailable Period</FieldLabel><select value={form.unavailabilityPeriodId} onChange={(e) => setForm((p) => ({ ...p, unavailabilityPeriodId: e.target.value }))} style={{ ...CONTROL_STYLE, minHeight: 42, padding: '0 10px', fontWeight: 800 }}><option value="">Choose a Director-declared absence...</option>{openPeriods.map((period) => <option key={period.id} value={period.id}>{formatDate(period.unavailable_start)} to {formatDate(period.unavailable_end)} - {period.reason}</option>)}</select>{!openPeriods.length ? <span style={{ color: '#991b1b', fontSize: 12, fontWeight: 800 }}>No open Director-declared unavailable periods yet.</span> : null}</label>
+          <div className="oic-assignment-name-grid">
+            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>OIC Name</FieldLabel><input value={form.name} placeholder="Enter OIC name..." onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} style={{ ...CONTROL_STYLE, minHeight: 42, padding: '0 10px', fontWeight: 800 }} /></label>
+            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>OIC Title</FieldLabel><input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} style={{ ...CONTROL_STYLE, minHeight: 42, padding: '0 10px', fontWeight: 800 }} /></label>
           </div>
-          <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Director-Declared Unavailable Period</FieldLabel><select value={form.unavailabilityPeriodId} onChange={(e) => setForm((p) => ({ ...p, unavailabilityPeriodId: e.target.value }))} style={{ minHeight: 42, border: '1px solid #cbd5e1', borderRadius: 4, padding: '0 10px', fontWeight: 800 }}><option value="">Select unavailable period</option>{openPeriods.map((period) => <option key={period.id} value={period.id}>{formatDate(period.unavailable_start)} to {formatDate(period.unavailable_end)} - {period.reason}</option>)}</select>{!openPeriods.length ? <span style={{ color: '#991b1b', fontSize: 12, fontWeight: 800 }}>No open Director-declared unavailable periods yet.</span> : null}</label>
-          <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Reason</FieldLabel><textarea rows={3} value={form.reason} onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))} style={{ border: '1px solid #cbd5e1', borderRadius: 4, padding: 11, resize: 'vertical', fontWeight: 700 }} /></label>
-          <div style={{ padding: 13, background: '#f8fafc', border: '1px solid #dbe3ef', borderRadius: 4, display: 'grid', gap: 9 }}>
+          <label className="oic-signature-upload">
+            <FieldLabel>OIC Signature Image</FieldLabel>
+            <span className="oic-signature-dropzone"><strong>{form.file ? form.file.name : 'Click to upload the OIC digital signature'}</strong><small>PNG, JPG, or WEBP</small></span>
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setForm((p) => ({ ...p, file: e.target.files?.[0] || null }))} />
+          </label>
+          <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Assignment Reason</FieldLabel><textarea rows={3} value={form.reason} placeholder="Describe the purpose and scope of this delegation..." onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))} style={{ ...CONTROL_STYLE, padding: 11, resize: 'vertical', fontWeight: 700 }} /></label>
+          <div style={{ padding: 13, background: '#f8fafc', border: '1px solid #dbe3ef', borderRadius: 10, display: 'grid', gap: 9 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 9, color: '#0f172a', fontWeight: 900 }}>
               <input type="checkbox" checked={form.directorCannotApprove} onChange={(e) => setForm((p) => ({ ...p, directorCannotApprove: e.target.checked }))} />
               Director cannot approve this OIC request; use Head Inspector special approval.
             </label>
             <div style={{ color: '#64748b', fontSize: 12, fontWeight: 700 }}>{form.directorCannotApprove ? 'This request will stay with Head Inspector for special approval.' : 'This request will be routed to Director for final approval and activation.'}</div>
-            {form.directorCannotApprove ? <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Special Approval Justification</FieldLabel><textarea rows={3} value={form.specialJustification} onChange={(e) => setForm((p) => ({ ...p, specialJustification: e.target.value }))} style={{ border: '1px solid #cbd5e1', borderRadius: 4, padding: 11, resize: 'vertical' }} /></label> : null}
+            {form.directorCannotApprove ? <label style={{ display: 'grid', gap: 7 }}><FieldLabel>Special Approval Justification</FieldLabel><textarea rows={3} value={form.specialJustification} onChange={(e) => setForm((p) => ({ ...p, specialJustification: e.target.value }))} style={{ ...CONTROL_STYLE, padding: 11, resize: 'vertical' }} /></label> : null}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" className="btn btn-primary" onClick={submitRequest} disabled={Boolean(busy)} style={{ minHeight: 40, minWidth: 170 }}>{busy === 'submit' ? 'Submitting...' : 'Submit Request'}</button></div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" className="btn btn-primary" onClick={submitRequest} disabled={Boolean(busy)} style={{ minHeight: 40, minWidth: 190 }}>{busy === 'submit' ? 'Submitting...' : 'Submit OIC Assignment'}</button></div>
         </section>
       ) : null}
 
-      <section style={{ display: 'grid', gap: 12 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}><h3 style={{ margin: 0, color: '#0f172a', fontSize: 18 }}>{isDirector ? 'Pending Director Approval' : 'Pending Head Inspector Special Approval'}</h3><button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>Refresh</button></div>
-        {loading && !queue.length ? <div style={{ padding: 28, textAlign: 'center', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>Loading...</div> : !queue.length ? <div style={{ padding: 28, textAlign: 'center', color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>No pending requests.</div> : queue.map((request) => (
-          <article key={request.id} style={{ border: '1px solid #cbd5e1', borderRadius: 6, background: '#ffffff', padding: 16, display: 'grid', gap: 14 }}>
-            <RequestDetails request={request} />
-            {isDirector ? <SignatureCanvas value={directorSignatures[request.id] || ''} onChange={(value) => setDirectorSignatures((p) => ({ ...p, [request.id]: value }))} /> : null}
-            <label style={{ display: 'grid', gap: 7 }}><FieldLabel>{isDirector ? 'Director Approval Notes' : 'Special Approval Notes'}</FieldLabel><textarea rows={3} value={comments[request.id] || ''} onChange={(e) => setComments((p) => ({ ...p, [request.id]: e.target.value }))} style={{ border: '1px solid #cbd5e1', borderRadius: 4, padding: 11, resize: 'vertical' }} /></label>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}><button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={() => (isDirector ? directorReview(request, 'rejected') : finalReview(request, 'rejected'))}>Reject</button><button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => (isDirector ? directorReview(request, 'approved') : finalReview(request, 'approved'))}>Approve and Activate</button></div>
-          </article>
+      <section style={{ display: 'grid', gap: 12, padding: isDirector ? 16 : 0, border: isDirector ? '1px solid #e2e8f0' : 'none', borderRadius: isDirector ? 14 : 0, background: isDirector ? '#f8fafc' : 'transparent' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <h3 style={{ margin: 0, color: '#0f172a', fontSize: 18 }}>{isDirector ? 'Approval Inbox' : 'Pending Head Inspector Special Approval'}</h3>
+            {isDirector && directorQueue.length ? <span style={{ padding: '4px 9px', borderRadius: 999, background: '#e8efff', color: '#2254d8', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>{directorQueue.length} pending</span> : null}
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>Refresh</button>
+        </div>
+        {loading && !queue.length ? <div style={{ padding: 28, textAlign: 'center', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12 }}>Loading...</div> : !queue.length ? <div style={{ padding: 28, textAlign: 'center', color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12 }}>No pending requests.</div> : queue.map((request) => (
+          isDirector ? <DirectorApprovalCard key={request.id} request={request} /> : <HeadInspectorApprovalCard key={request.id} request={request} />
         ))}
       </section>
 
-      <section style={{ display: 'grid', gap: 10 }}><h3 style={{ margin: 0, color: '#0f172a', fontSize: 18 }}>Director Unavailable Periods</h3>{!unavailablePeriods.length ? <div style={{ padding: 24, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>No unavailable periods yet.</div> : unavailablePeriods.map((period) => <article key={`period-${period.id}`} style={{ border: '1px solid #e2e8f0', borderRadius: 6, background: '#ffffff', padding: 14, display: 'grid', gap: 8 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><div><div style={{ fontWeight: 1000, color: '#0f172a' }}>{formatDate(period.unavailable_start)} to {formatDate(period.unavailable_end)}</div><div style={{ color: '#475569', fontWeight: 700 }}>{period.reason}</div><div style={{ color: '#64748b', fontSize: 12, fontWeight: 800 }}>Declared by {profileName(profiles.get(period.created_by), String(period.created_by || '').slice(0, 8))}</div></div><StatusPill status={period.status} /></div></article>)}</section>
+      <section style={{ ...CARD_STYLE, padding: 16, display: 'grid', gap: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0, color: '#0f172a', fontSize: 18 }}>Director Unavailable Periods</h3>
+          <span style={{ padding: '4px 8px', borderRadius: 999, background: '#f1f5f9', color: '#64748b', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>{unavailablePeriods.length} total</span>
+        </div>
+        <div className="oic-history-toolbar">
+          <input type="search" value={periodSearch} onChange={(event) => { setPeriodSearch(event.target.value); setPeriodPage(1); }} placeholder="Search periods by reason, declarer, or ID..." aria-label="Search Director unavailable periods" style={{ ...CONTROL_STYLE, minHeight: 40, padding: '0 12px', width: '100%' }} />
+          <select value={periodStatus} onChange={(event) => { setPeriodStatus(event.target.value); setPeriodPage(1); }} aria-label="Filter unavailable periods by status" style={{ ...CONTROL_STYLE, minHeight: 40, padding: '0 10px', background: '#ffffff', fontWeight: 700 }}>
+            <option value="all">All statuses</option><option value="open">No OIC assigned yet</option><option value="assigned">OIC assigned</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+        <div className="oic-history-table-wrap">
+          <table className="oic-history-table oic-period-table">
+            <thead><tr><th>Date Range</th><th>Reason</th><th>Declared By</th><th>Status</th></tr></thead>
+            <tbody>
+              {!visiblePeriods.length ? <tr><td colSpan={4} className="oic-history-empty">No matching unavailable periods.</td></tr> : visiblePeriods.map((period) => (
+                <tr key={`period-row-${period.id}`}>
+                  <td><strong>{formatDate(period.unavailable_start)}</strong><span>to {formatDate(period.unavailable_end)}</span></td>
+                  <td><strong>{period.reason}</strong></td>
+                  <td><strong>{profileName(profiles.get(period.created_by), String(period.created_by || '').slice(0, 8))}</strong><span>Director</span></td>
+                  <td><PeriodStatusPill status={period.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="oic-history-pagination">
+          <span>Showing {filteredPeriods.length ? ((safePeriodPage - 1) * periodPageSize) + 1 : 0}–{Math.min(safePeriodPage * periodPageSize, filteredPeriods.length)} of {filteredPeriods.length} periods</span>
+          <div><button type="button" disabled={safePeriodPage <= 1} onClick={() => setPeriodPage((page) => Math.max(1, page - 1))}>Prev</button><span>Page {safePeriodPage} of {periodPageCount}</span><button type="button" disabled={safePeriodPage >= periodPageCount} onClick={() => setPeriodPage((page) => Math.min(periodPageCount, page + 1))}>Next</button></div>
+        </div>
+      </section>
 
-      <section style={{ display: 'grid', gap: 10 }}><h3 style={{ margin: 0, color: '#0f172a', fontSize: 18 }}>Request History</h3>{!requests.length ? <div style={{ padding: 24, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>No OIC requests yet.</div> : requests.map((request) => <article key={`history-${request.id}`} style={{ border: '1px solid #e2e8f0', borderRadius: 6, background: '#ffffff', padding: 14 }}><RequestDetails request={request} /></article>)}</section>
+      <section style={{ ...CARD_STYLE, padding: 16, display: 'grid', gap: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0, color: '#0f172a', fontSize: 18 }}>Request History</h3>
+          <span style={{ padding: '4px 8px', borderRadius: 999, background: '#f1f5f9', color: '#64748b', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>{requests.length} records</span>
+        </div>
+
+        <div className="oic-history-toolbar">
+          <input
+            type="search"
+            value={historySearch}
+            onChange={(event) => { setHistorySearch(event.target.value); setHistoryPage(1); }}
+            placeholder="Search by name, requester, or ID..."
+            aria-label="Search OIC request history"
+            style={{ ...CONTROL_STYLE, minHeight: 40, padding: '0 12px', width: '100%' }}
+          />
+          <select value={historyStatus} onChange={(event) => { setHistoryStatus(event.target.value); setHistoryPage(1); }} aria-label="Filter request history by status" style={{ ...CONTROL_STYLE, minHeight: 40, padding: '0 10px', background: '#ffffff', fontWeight: 700 }}>
+            <option value="all">All statuses</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="pending_director">Director approval</option>
+            <option value="pending_head_inspector">Special approval</option>
+          </select>
+        </div>
+
+        <div className="oic-history-table-wrap">
+          <table className="oic-history-table">
+            <thead><tr><th>Candidate</th><th>Requested By</th><th>Validity Period</th><th>Status</th><th>Details</th></tr></thead>
+            <tbody>
+              {!visibleHistory.length ? <tr><td colSpan={5} className="oic-history-empty">No matching requests.</td></tr> : visibleHistory.map((request) => (
+                <tr key={`history-row-${request.id}`}>
+                  <td><strong>{request.proposed_signatory_name}</strong><span>{request.proposed_signatory_title}</span></td>
+                  <td><strong>{profileName(profiles.get(request.requested_by), String(request.requested_by || '').slice(0, 8))}</strong><span>Requester</span></td>
+                  <td><strong>{formatDate(request.validity_start)}</strong><span>to {formatDate(request.validity_end)}</span></td>
+                  <td><StatusPill status={request.status} /></td>
+                  <td><button type="button" className="oic-history-details" onClick={() => setSelectedHistoryRequest(request)}>View Details</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="oic-history-pagination">
+          <span>Showing {filteredHistory.length ? ((safeHistoryPage - 1) * historyPageSize) + 1 : 0}–{Math.min(safeHistoryPage * historyPageSize, filteredHistory.length)} of {filteredHistory.length} records</span>
+          <div>
+            <button type="button" disabled={safeHistoryPage <= 1} onClick={() => setHistoryPage((page) => Math.max(1, page - 1))}>Prev</button>
+            <span>Page {safeHistoryPage} of {historyPageCount}</span>
+            <button type="button" disabled={safeHistoryPage >= historyPageCount} onClick={() => setHistoryPage((page) => Math.min(historyPageCount, page + 1))}>Next</button>
+          </div>
+        </div>
+      </section>
+
+      {selectedHistoryRequest ? (
+        <div className="oic-history-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedHistoryRequest(null); }}>
+          <aside className="oic-history-drawer" role="dialog" aria-modal="true" aria-labelledby="oic-history-drawer-title">
+            <div className="oic-history-drawer-header">
+              <div className="oic-history-drawer-title"><span aria-hidden="true">▣</span><h3 id="oic-history-drawer-title">Request Details</h3></div>
+              <button type="button" aria-label="Close request details" onClick={() => setSelectedHistoryRequest(null)}>×</button>
+            </div>
+            <div className="oic-history-drawer-body">
+              <div className="oic-drawer-person">
+                <div>{initials(selectedHistoryRequest.proposed_signatory_name)}</div>
+                <span><strong>{selectedHistoryRequest.proposed_signatory_name}</strong><small>{selectedHistoryRequest.proposed_signatory_title}</small></span>
+                <StatusPill status={selectedHistoryRequest.status} />
+              </div>
+              <div className="oic-drawer-grid">
+                <div><FieldLabel>Assignment Type</FieldLabel><strong>{selectedHistoryRequest.change_type === 'temporary' ? 'Temporary OIC' : statusLabel(selectedHistoryRequest.change_type)}</strong></div>
+                <div><FieldLabel>Requested By</FieldLabel><strong>{profileName(profiles.get(selectedHistoryRequest.requested_by), '-')}</strong></div>
+              </div>
+              <div>
+                <FieldLabel>Date Range</FieldLabel>
+                <div className="oic-drawer-dates">
+                  <div><small>From</small><strong>{formatDate(selectedHistoryRequest.validity_start)}</strong></div>
+                  <span aria-hidden="true">→</span>
+                  <div><small>To</small><strong>{formatDate(selectedHistoryRequest.validity_end)}</strong></div>
+                </div>
+              </div>
+              <div className="oic-drawer-section"><FieldLabel>Assignment Reason</FieldLabel><p>{selectedHistoryRequest.reason}</p></div>
+              {selectedHistoryRequest.director_unavailable_justification ? <div className="oic-drawer-section"><FieldLabel>Special Approval Justification</FieldLabel><p>{selectedHistoryRequest.director_unavailable_justification}</p></div> : null}
+              {selectedHistoryRequest.director_comment || selectedHistoryRequest.final_comment ? <div className="oic-drawer-section oic-drawer-remarks"><FieldLabel>Approval Remarks</FieldLabel><p>{selectedHistoryRequest.director_comment || selectedHistoryRequest.final_comment}</p></div> : null}
+              <div className="oic-drawer-section">
+                <FieldLabel>Audit Trail</FieldLabel>
+                <div className="oic-audit-item"><span /> <p><strong>Requested</strong><small>{formatDate(selectedHistoryRequest.requested_at)}</small></p></div>
+                {selectedHistoryRequest.director_reviewed_at ? <div className="oic-audit-item"><span /> <p><strong>Director reviewed</strong><small>{formatDate(selectedHistoryRequest.director_reviewed_at)}</small></p></div> : null}
+                {selectedHistoryRequest.final_reviewed_at ? <div className="oic-audit-item"><span /> <p><strong>Head Inspector reviewed</strong><small>{formatDate(selectedHistoryRequest.final_reviewed_at)}</small></p></div> : null}
+                {selectedHistoryRequest.implemented_at ? <div className="oic-audit-item"><span /> <p><strong>Assignment activated</strong><small>{formatDate(selectedHistoryRequest.implemented_at)}</small></p></div> : null}
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
     </div>
   );
 }
