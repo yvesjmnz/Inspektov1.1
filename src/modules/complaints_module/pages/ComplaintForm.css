@@ -3,12 +3,12 @@
   display: flex;
   flex-direction: column;
   background: linear-gradient(rgba(0, 102, 204, 0.3), rgba(0, 82, 163, 0.3)), url('/bg.jpg') center/cover fixed;
-  padding: 40px 20px;
+  padding: 40px 20px 56px;
 }
 
 .complaint-form-card {
   /* Responsive: scale up on larger screens, but stay comfortable on mobile */
-  width: min(92vw, 980px);
+  width: min(100%, 980px);
   margin: 0 auto;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(6px);
@@ -28,6 +28,10 @@
 .complaint-form-card p {
   margin: 0 0 18px;
   color: #475569;
+}
+
+.complaint-form {
+  min-width: 0;
 }
 
 .complaint-steps {
@@ -65,6 +69,7 @@
 
 .form-group {
   margin-bottom: 16px;
+  min-width: 0;
 }
 
 .form-group label {
@@ -77,10 +82,11 @@
 .form-input,
 .form-textarea {
   width: 100%;
+  min-width: 0;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 14px;
+  padding: 12px 14px;
+  font-size: 15px;
   outline: none;
   background: #fff;
   color: #0f172a;
@@ -148,6 +154,49 @@
   margin-top: 6px;
   font-size: 12px;
   color: #475569;
+}
+
+.business-mode-toggle {
+  margin-top: 10px;
+}
+
+.business-search-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.search-input-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.search-input-shell .form-input {
+  padding-right: 46px;
+}
+
+.input-clear-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  padding: 0;
+  line-height: 28px;
+  text-align: center;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.nearby-toggle {
+  white-space: nowrap;
+  min-width: 120px;
 }
 
 .row {
@@ -348,6 +397,139 @@
   background: #f1f5f9;
   border: 1px solid #e2e8f0;
   color: #0f172a;
+}
+
+@media (max-width: 1024px) {
+  .complaint-form-container {
+    background-attachment: scroll;
+    padding: 30px 16px 44px;
+  }
+
+  .complaint-form-card {
+    padding: 24px 22px;
+    border-radius: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .complaint-form-container {
+    padding: 24px 12px 36px;
+  }
+
+  .complaint-form-card {
+    padding: 22px 18px;
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+
+  .complaint-form-card h1 {
+    font-size: clamp(20px, 7vw, 32px);
+    line-height: 1.08;
+  }
+
+  .complaint-form-card p {
+    margin-bottom: 16px;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  .business-item {
+    padding: 12px;
+  }
+
+  .business-address {
+    line-height: 1.45;
+  }
+
+  .check-row {
+    padding: 10px 12px;
+  }
+
+  .check-row label {
+    line-height: 1.45;
+  }
+
+  .dropzone {
+    min-height: 140px;
+    padding: 16px;
+  }
+
+  .map-box {
+    height: 280px;
+  }
+
+  .camera-box {
+    height: 400px;
+  }
+}
+
+@media (max-width: 640px) {
+  .business-search-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .nearby-toggle {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .form-nav {
+    flex-direction: column-reverse;
+  }
+
+  .form-nav .btn {
+    width: 100%;
+  }
+
+  .review-image-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .complaint-form-container {
+    padding: 18px 10px 30px;
+  }
+
+  .complaint-form-card {
+    padding: 18px 14px;
+    border-radius: 12px;
+  }
+
+  .form-input,
+  .form-textarea {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
+
+  .inline-note {
+    line-height: 1.5;
+  }
+
+  .check-row {
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .check-row input {
+    margin-top: 3px;
+  }
+
+  .business-list {
+    max-height: 220px;
+  }
+
+  .small-pill {
+    font-size: 11px;
+  }
+
+  .map-box {
+    height: 240px;
+  }
+
+  .camera-box {
+    height: 320px;
+  }
 }
 
 .btn-secondary:hover {

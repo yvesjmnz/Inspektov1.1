@@ -9,6 +9,15 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
   const [success, setSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const turnstileRef = useRef(null);
+  const turnstileWidgetIdRef = useRef(null);
+
+  const resetModalState = () => {
+    setEmail('');
+    setLoading(false);
+    setError(null);
+    setSuccess(false);
+    setSubmitted(false);
+  };
 
   // Handle Escape key press
   useEffect(() => {
@@ -75,30 +84,37 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
       return;
     }
 
+    turnstileRef.current.innerHTML = '';
+
     // Render the widget
-    window.turnstile.render('#cf-turnstile-widget', {
+    turnstileWidgetIdRef.current = window.turnstile.render('#cf-turnstile-widget', {
       sitekey: siteKey,
       theme: 'light',
     });
 
     // Cleanup: remove widget when modal closes
     return () => {
-      if (window.turnstile && turnstileRef.current) {
-        window.turnstile.remove();
+      if (window.turnstile && turnstileWidgetIdRef.current !== null) {
+        try {
+          window.turnstile.remove(turnstileWidgetIdRef.current);
+        } catch {
+          // Ignore Turnstile cleanup failures so the modal can still unmount.
+        }
       }
+      turnstileWidgetIdRef.current = null;
     };
   }, [isOpen]);
 
   const handleClose = () => {
-    // Reset state when closing
-    setEmail('');
-    setError(null);
-    setSuccess(false);
-    setSubmitted(false);
-    // Reset Turnstile widget
-    if (window.turnstile) {
-      window.turnstile.reset();
+    if (window.turnstile && turnstileWidgetIdRef.current !== null) {
+      try {
+        window.turnstile.reset(turnstileWidgetIdRef.current);
+      } catch {
+        // Ignore Turnstile reset failures so closing always succeeds.
+      }
     }
+
+    resetModalState();
     onClose();
   };
 
@@ -116,7 +132,7 @@ export default function EmailVerificationModal({ isOpen, onClose }) {
       <div className="modal-content">
         <div className="modal-header">
           <h2 className="modal-title">Email Verification</h2>
-          <button className="modal-close-btn" onClick={handleClose} aria-label="Close modal">
+          <button type="button" className="modal-close-btn" onClick={handleClose} aria-label="Close modal">
             <img
               src="/X icon.png"
               alt="Close"

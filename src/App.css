@@ -13,3 +13,9 @@ body {
   background: linear-gradient(rgba(0, 102, 204, 0.3), rgba(0, 82, 163, 0.3)), url('/bg.jpg') center/cover fixed;
   color: #1f2937;
 }
+
+@media (max-width: 1024px) {
+  body {
+    background-attachment: scroll;
+  }
+}

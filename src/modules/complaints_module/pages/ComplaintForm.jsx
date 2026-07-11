@@ -1229,7 +1229,7 @@ export default function ComplaintForm({ verifiedEmail, accessToken }) {
           {step === 1 ? (
             <>
               <div className="form-group">
-                <div className="check-row" style={{ marginTop: 10 }}>
+                <div className="check-row business-mode-toggle">
                   <input
                     id="businessNotInDb"
                     type="checkbox"
@@ -1272,8 +1272,8 @@ export default function ComplaintForm({ verifiedEmail, accessToken }) {
 
                 {!businessNotInDb && (!firstSearchDone || !formData.business_name) && (
                   <>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <div style={{ position: 'relative', flex: 1 }}>
+                    <div className="business-search-toolbar">
+                      <div className="search-input-shell">
                         <input
                           id="business_search"
                           aria-label="Business Search"
@@ -1290,7 +1290,7 @@ export default function ComplaintForm({ verifiedEmail, accessToken }) {
                             onClick={clearBusinessSearch}
                             aria-label="Clear search"
                             title="Clear"
-                            className="btn"
+                            className="input-clear-btn"
                             style={{
                               position: 'absolute',
                               right: 10,
@@ -1333,8 +1333,7 @@ export default function ComplaintForm({ verifiedEmail, accessToken }) {
                           setNearbyBusinessesCache([]);
                         }}
                         disabled={loading}
-                        className={`btn ${nearbyOnly ? 'btn-primary' : 'btn-secondary'}`}
-                        style={{ whiteSpace: 'nowrap' }}
+                        className={`btn nearby-toggle ${nearbyOnly ? 'btn-primary' : 'btn-secondary'}`}
                         aria-pressed={nearbyOnly ? 'true' : 'false'}
                         title={nearbyOnly ? 'Nearby filter is ON' : 'Nearby filter is OFF'}
                       >
@@ -1367,7 +1366,7 @@ export default function ComplaintForm({ verifiedEmail, accessToken }) {
                 {!businessNotInDb && firstSearchDone && formData.business_name ? (
                   <div className="form-group" style={{ marginTop: 8 }}>
                     <label htmlFor="business_name_search">Business Name</label>
-                    <div style={{ position: 'relative' }}>
+                    <div className="search-input-shell">
                       <input
                         id="business_name_search"
                         type="text"
@@ -1383,7 +1382,7 @@ export default function ComplaintForm({ verifiedEmail, accessToken }) {
                           onClick={clearNameSearch}
                           aria-label="Clear business name search"
                           title="Clear"
-                          className="btn"
+                          className="input-clear-btn"
                           style={{
                             position: 'absolute',
                             right: 10,

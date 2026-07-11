@@ -7,6 +7,7 @@
 
 .header-content {
   max-width: 1200px;
+  width: 100%;
   margin: 0 auto;
   padding: 0 40px;
   display: flex;
@@ -19,6 +20,7 @@
   align-items: center;
   gap: 12px;
   justify-content: flex-start;
+  min-width: 0;
 }
 
 .logo-image {
@@ -34,6 +36,7 @@
   flex-direction: column;
   gap: 4px;
   text-align: left;
+  min-width: 0;
 }
 
 .logo {
@@ -49,10 +52,15 @@
   opacity: 0.9;
   margin: 0;
   font-weight: 500;
+  line-height: 1.35;
   text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 @media (max-width: 768px) {
+  .header-content {
+    padding: 0 24px;
+  }
+
   .logo-image {
     width: 40px;
     height: 40px;
@@ -72,8 +80,12 @@
     padding: 12px 0;
   }
 
+  .header-content {
+    padding: 0 16px;
+  }
+
   .logo-section {
-    gap: 12px;
+    gap: 10px;
   }
 
   .logo-image {
@@ -85,7 +97,7 @@
     font-size: 18px;
   }
 
-  .tagline {
+.tagline {
     font-size: 11px;
   }
 }

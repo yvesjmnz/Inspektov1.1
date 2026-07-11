@@ -103,7 +103,7 @@ function LandingPage({ onOpenVerificationModal }) {
                     and other special complaints that require direct assistance, please contact the Bureau of Permits.
                   </p>
 
-                  <a className="text-link" href="https://www.facebook.com/bureauofpermitsmnl/" target="_blank" rel="noopener noreferrer">Visit Bureau of Permits →</a>
+                  <a className="text-link" href="https://www.facebook.com/bureauofpermitsmnl/" target="_blank" rel="noopener noreferrer">Visit Bureau of Permits &rarr;</a>
 
                   <div className="contact-detail-list">
                     <div className="contact-detail-item contact-detail-item-email">
