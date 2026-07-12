@@ -22,7 +22,7 @@ export default function ComplaintConfirmation() {
       <Header />
       <main className="confirm-main">
         <section className="confirm-card">
-          <div className="confirm-icon">✓</div>
+          <div className="confirm-icon">{'\u2713'}</div>
           <h2 className="confirm-title">Complaint Submitted</h2>
           <p className="confirm-subtitle">
             Keep your Complaint ID to track the status of your report.
@@ -31,13 +31,24 @@ export default function ComplaintConfirmation() {
           <div className="confirm-id">
             <div className="confirm-id-label">Complaint ID</div>
             <div className="confirm-id-wrapper">
-              <div className="confirm-id-value">{complaintCode || '—'}</div>
+              <div className="confirm-id-value">{complaintCode || '\u2014'}</div>
               <button
-                className="btn btn-primary"
+                className={`btn btn-primary confirm-copy-btn${copied ? ' is-copied' : ''}`}
                 onClick={handleCopyId}
-                title="Copy Complaint ID"
+                title={copied ? 'Complaint ID copied' : 'Copy Complaint ID'}
+                aria-label={copied ? 'Complaint ID copied' : 'Copy Complaint ID'}
+                disabled={!complaintCode}
               >
-                {copied ? '✓ Copied' : 'Copy'}
+                {copied ? (
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <rect x="8" y="8" width="11" height="11" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                )}
               </button>
             </div>
           </div>

@@ -17,6 +17,7 @@
   width: 100%;
   max-width: 720px;
   background: rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
   border-radius: 16px;
   padding: 28px;
@@ -100,14 +101,56 @@
   box-shadow: none;
 }
 
-/* Copy button slightly smaller than primary actions */
-.confirm-id-wrapper .btn {
+/* Compact icon button for copying the complaint ID */
+.confirm-id-wrapper .confirm-copy-btn {
+  width: 38px;
+  min-width: 38px;
   height: 36px;
-  padding: 0 12px;
-  border-radius: 12px;
-  font-size: 13px;
+  padding: 0;
+  border-radius: 10px;
 }
 
+.confirm-copy-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.confirm-copy-btn.is-copied {
+  background: #16a34a;
+}
+
+.confirm-copy-btn.is-copied:hover {
+  background: #15803d;
+}
+
+.confirm-copy-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (max-width: 480px) {
+  .confirm-id-wrapper {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .confirm-id-wrapper .confirm-copy-btn {
+    width: 34px;
+    min-width: 34px;
+    height: 32px;
+    border-radius: 9px;
+  }
+
+  .confirm-copy-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+}
 
 .confirm-note {
   margin-top: 14px;
