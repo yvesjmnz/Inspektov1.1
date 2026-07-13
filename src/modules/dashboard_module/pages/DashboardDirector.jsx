@@ -2308,11 +2308,11 @@ export default function DashboardDirector() {
   return (
     <div className="dash-container">
             <main className="dash-main">
-        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
+        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 260 }}>
           <aside
             className="dash-side"
             title="Menu"
-            style={{ width: navCollapsed ? 72 : 240, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+            style={{ width: navCollapsed ? 72 : 260, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
             onClick={(e) => {
               const t = e.target;
               if (t && typeof t.closest === 'function' && t.closest('.dash-nav-item')) return;
@@ -2337,7 +2337,7 @@ export default function DashboardDirector() {
                 <div className="hamburger-bar"></div>
               </div>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 2, display: 'grid', gap: 12 }}>
+            <div className="dash-nav-scroll" style={{ flex: 1, overflowY: 'auto', paddingRight: 2, display: 'grid', gap: 12 }}>
             <ul className="dash-nav">
               <li className="dash-nav-section">
                 <span className="dash-nav-section-label" style={{ display: navCollapsed ? 'none' : 'inline' }}>Complaints</span>
@@ -2657,11 +2657,11 @@ export default function DashboardDirector() {
                           style={{
                             minHeight: 54,
                             padding: '0 28px',
-                            borderRadius: 12,
+                            borderRadius: 4,
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: 10,
-                            boxShadow: '0 10px 20px rgba(37, 99, 235, 0.22)',
+                            boxShadow: '0 4px 10px rgba(29, 78, 216, 0.22)',
                           }}
                         >
                           <span style={{ display: 'inline-flex' }} aria-hidden="true">
@@ -2738,74 +2738,6 @@ export default function DashboardDirector() {
                 </div>
               </section>
 
-              <section
-                style={{
-                  background: '#ffffff',
-                  border: '1px solid #d6e4f5',
-                  borderRadius: 18,
-                  padding: '30px 34px 34px',
-                  display: 'grid',
-                  gap: 24,
-                  boxShadow: '0 10px 24px rgba(11, 34, 73, 0.08)',
-                }}
-              >
-                <h4 style={{ margin: 0, fontSize: 22, fontWeight: 950, color: '#0f172a', letterSpacing: '-0.02em' }}>How it works</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24, alignItems: 'stretch' }}>
-                  {[
-                    {
-                      icon: '/ui_icons/special-envelope.svg',
-                      title: '1. Enter email',
-                      text: 'Provide the official recipient email address.',
-                    },
-                    {
-                      icon: '/ui_icons/special-shield-check.svg',
-                      title: '2. Access is sent',
-                      text: 'A secure link is emailed instantly to the recipient.',
-                    },
-                    {
-                      icon: '/ui_icons/special-clipboard-check.svg',
-                      title: '3. Complaint submitted',
-                      text: 'The recipient verifies access and submits the complaint securely.',
-                    },
-                  ].map((step) => (
-                    <div
-                      key={step.title}
-                      style={{
-                        minHeight: 178,
-                        padding: '26px 28px',
-                        border: '1px solid #dbeafe',
-                        borderRadius: 18,
-                        background: 'linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)',
-                        display: 'grid',
-                        gridTemplateColumns: '112px 1fr',
-                        gap: 22,
-                        alignItems: 'center',
-                        minWidth: 0,
-                        boxShadow: '0 8px 18px rgba(11, 34, 73, 0.05)',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 104,
-                          height: 104,
-                          borderRadius: '50%',
-                          background: '#eff6ff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <img src={step.icon} alt="" aria-hidden="true" style={{ width: 94, height: 94, objectFit: 'contain', display: 'block' }} />
-                      </div>
-                      <div>
-                        <div style={{ color: '#0f172a', fontWeight: 950, fontSize: 17 }}>{step.title}</div>
-                        <div style={{ marginTop: 10, color: '#64748b', fontSize: 14, lineHeight: 1.55 }}>{step.text}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
             </div>
           ) : tab === 'reports' ? (
             <DirectorReports />

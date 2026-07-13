@@ -887,7 +887,7 @@ export default function InspectionSlipReview() {
   return (
     <div className="dash-container">
       <main className="dash-main">
-        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
+        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 260 }}>
           <DashboardSidebar
             role={role === 'head_inspector' ? 'head_inspector' : 'director'}
             onLogout={async () => {

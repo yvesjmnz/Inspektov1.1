@@ -65,6 +65,12 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
           section: null,
         },
         {
+          label: 'Special Complaint Form',
+          icon: '/ui_icons/document.png',
+          href: '/dashboard/director?tab=special-complaint-form',
+          section: null,
+        },
+        {
           label: 'Mission Orders',
           section: 'MISSION ORDERS',
         },
@@ -313,6 +319,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
       if (tab === 'naming-approvals') return 'Naming Approvals';
       if (tab === 'oic-review') return 'OIC Review';
       if (tab === 'reporter-bans') return 'Reporter Access';
+      if (tab === 'special-complaint-form') return 'Special Complaint Form';
       if (tab === 'reports') return 'Performance Report';
       // Director dashboard overview tab was removed; default highlight to queue.
       return 'Review Complaints';
@@ -368,7 +375,7 @@ export default function DashboardSidebar({ role, onLogout, collapsed = false, on
     <aside
       className="dash-side"
       title="Menu"
-      style={{ width: navCollapsed ? 72 : 240, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+      style={{ width: navCollapsed ? 72 : 260, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
       onClick={handleCollapse}
       onKeyDown={handleKeyDown}
     >

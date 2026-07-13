@@ -121,19 +121,19 @@ export default function ReporterBanPanel() {
         </div>
         <form onSubmit={submitBan} style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 0.8fr) minmax(280px, 1.4fr) auto', gap: 10, marginTop: 16 }}>
           <input
+            className="dash-form-control"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="reporter@example.com"
             required
-            style={{ minHeight: 42, border: '1px solid #cbd5e1', borderRadius: 10, padding: '0 12px' }}
           />
           <input
+            className="dash-form-control"
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             placeholder="Reason for blocking"
             required
-            style={{ minHeight: 42, border: '1px solid #cbd5e1', borderRadius: 10, padding: '0 12px' }}
           />
           <button className="dash-btn dash-btn-danger" type="submit" disabled={Boolean(savingEmail)}>
             Block reporter
@@ -186,10 +186,11 @@ export default function ReporterBanPanel() {
             <div style={{ marginTop: 3, color: '#64748b', fontSize: 13 }}>Active and previously removed bans.</div>
           </div>
           <input
+            className="dash-form-control"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search email"
-            style={{ minHeight: 38, border: '1px solid #cbd5e1', borderRadius: 10, padding: '0 12px' }}
+            style={{ minHeight: 38 }}
           />
         </div>
         {visibleBans.map((ban) => (

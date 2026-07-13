@@ -699,7 +699,7 @@ export default function ComplaintReview() {
   return (
     <div className="dash-container">
       <main className="dash-main">
-        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
+        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 260 }}>
           {/* Sidebar - Using reusable DashboardSidebar component */}
           <DashboardSidebar
             role="director"

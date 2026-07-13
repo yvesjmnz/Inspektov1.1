@@ -13,6 +13,9 @@ const CARD_STYLE = {
 const CONTROL_STYLE = {
   border: '1px solid #cbd5e1',
   borderRadius: 10,
+  background: '#ffffff',
+  color: '#0f172a',
+  outline: 'none',
 };
 
 function formatDate(value) {
@@ -552,7 +555,7 @@ export default function OicManagementPanel({ mode = 'head_inspector' }) {
   );
 
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
+    <div className="dashboard-themed-panel oic-management-panel" style={{ display: 'grid', gap: 16 }}>
       {toast ? <div className="dash-alert dash-alert-success">{toast}</div> : null}
       {error ? <div className="dash-alert dash-alert-error">{error}</div> : null}
 

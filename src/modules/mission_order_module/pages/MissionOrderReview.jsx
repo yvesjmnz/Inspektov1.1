@@ -657,7 +657,7 @@ export default function MissionOrderReview() {
   return (
     <div className="dash-container" style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif' }}>
       <main className="dash-main">
-        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
+        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 260 }}>
           <DashboardSidebar
             role="director"
             onLogout={handleLogout}

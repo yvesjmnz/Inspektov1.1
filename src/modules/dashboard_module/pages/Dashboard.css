@@ -19,7 +19,7 @@
   width: 100%;
   max-width: none;
   box-sizing: border-box;
-  padding: 0 0 0 240px; /* no top/right/bottom padding; offset only for sidebar */
+  padding: 0 0 0 260px; /* no top/right/bottom padding; offset only for sidebar */
   display: grid;
   grid-template-columns: 1fr; /* sidebar is fixed; content uses full width */
   gap: 0;
@@ -37,14 +37,15 @@
   left: 0;
   top: 0;
   height: 100vh;
-  width: 240px; /* expanded sidebar width (fixed for now) */
+  width: 260px;
+  box-sizing: border-box;
   transition: width 160ms ease;
   z-index: 1000;
 }
 
 .dash-side:hover,
 .dash-side:focus-within {
-  width: 240px; /* expanded width on hover */
+  width: 260px;
 }
 
 .dash-side-brand {
@@ -120,6 +121,10 @@
   opacity: 1;
   width: auto;
   white-space: nowrap;
+}
+
+.dash-nav-scroll {
+  overflow-x: hidden;
 }
 
 /* Card and core styles */
@@ -521,19 +526,134 @@
   padding: 0 12px;
   outline: none;
   font-size: 14px;
+  background: #ffffff;
+  color: #0f172a;
+  caret-color: #0f172a;
 }
 
-.dash-input:focus {
+.dash-form-control {
+  min-height: 42px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0 12px;
+  outline: none;
+  background: #ffffff;
+  color: #0f172a;
+  caret-color: #0f172a;
+  font: inherit;
+}
+
+.dash-input::placeholder,
+.dash-form-control::placeholder {
+  color: #94a3b8;
+  opacity: 1;
+}
+
+.dash-input:focus,
+.dash-form-control:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.dash-input:disabled,
+.dash-form-control:disabled {
+  background: #f8fafc;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+/* Shared visual system for dashboard administration panels. */
+.dashboard-themed-panel {
+  color: #0f172a;
+}
+
+.dashboard-themed-panel input:not([type='checkbox']):not([type='file']),
+.dashboard-themed-panel select,
+.dashboard-themed-panel textarea {
+  box-sizing: border-box;
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  caret-color: #0f172a;
+  font-family: inherit;
+}
+
+.dashboard-themed-panel input::placeholder,
+.dashboard-themed-panel textarea::placeholder {
+  color: #94a3b8;
+  opacity: 1;
+}
+
+.dashboard-themed-panel input:not([type='checkbox']):not([type='file']):focus,
+.dashboard-themed-panel select:focus,
+.dashboard-themed-panel textarea:focus {
+  border-color: #1d4ed8 !important;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.14);
+}
+
+.dashboard-themed-panel .btn {
+  min-height: 40px;
+  border-radius: 4px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dashboard-themed-panel .btn-primary {
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 3px 8px rgba(29, 78, 216, 0.18);
+}
+
+.dashboard-themed-panel .btn-primary:hover:not(:disabled) {
+  background: #1e40af !important;
+  border-color: #1e40af !important;
+}
+
+.dashboard-themed-panel .btn-secondary {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: none;
+}
+
+.dashboard-themed-panel .btn-secondary:hover:not(:disabled) {
+  background: #f8fafc !important;
+  border-color: #94a3b8 !important;
+}
+
+.dashboard-themed-panel .btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.dashboard-themed-panel > section,
+.business-naming-panel > div > section {
+  border-color: #dbe3ef !important;
+}
+
+@media (max-width: 820px) {
+  .business-naming-panel .dash-table-wrap {
+    overflow-x: auto;
+  }
+
+  .business-naming-panel .dash-table {
+    min-width: 760px;
+  }
 }
 
 .dash-btn {
   height: 42px;
   padding: 0 14px;
   border: none;
-  border-radius: 10px;
-  background: #2563eb;
+  border-radius: 4px;
+  background: #1d4ed8;
   color: #fff;
   font-weight: 700 !important; /* uniform font-weight */
   cursor: pointer;
@@ -543,6 +663,11 @@
   text-align: center;
   letter-spacing: 0.2px;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+}
+
+.dash-btn:hover {
+  background: #1e40af;
+  border-color: transparent;
 }
 
 .dash-btn-icon {

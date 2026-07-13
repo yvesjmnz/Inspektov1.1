@@ -122,10 +122,11 @@ export async function getComplaintById(complaintId) {
     .select('*');
 
   const { data, error } = UUID_PATTERN.test(lookup)
-    ? await query.eq('id', lookup).single()
-    : await query.eq('complaint_code', lookup).single();
+    ? await query.eq('id', lookup).limit(1).maybeSingle()
+    : await query.eq('complaint_code', lookup).limit(1).maybeSingle();
 
   if (error) throw new Error(error.message);
+  if (!data) throw new Error('Complaint ID not found. Please check the ID and try again.');
   return data;
 }
 

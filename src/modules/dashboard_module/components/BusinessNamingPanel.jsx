@@ -315,7 +315,7 @@ export default function BusinessNamingPanel({ mode = 'head_inspector' }) {
   };
 
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
+    <div className="dashboard-themed-panel business-naming-panel" style={{ display: 'grid', gap: 16 }}>
       {!isDirector ? (
         <div style={{ display: 'grid', gap: 12 }}>
           <input

@@ -1205,20 +1205,10 @@ export default function MissionOrderEditor() {
     setShowDirectorCommentsEditor(true);
   };
 
-  const closeHeadInspectorWindow = () => {
+  const returnToHeadInspectorDashboard = () => {
     setTimeout(() => {
-      try {
-        window.close();
-      } catch {
-        // ignore
-      }
-      try {
-        if (!window.closed) {
-          window.location.assign(`/dashboard/head-inspector#${sourceTab}`);
-        }
-      } catch {
-        // ignore
-      }
+      const nextTab = String(sourceTab || 'todo').trim() || 'todo';
+      window.location.assign(`/dashboard/head-inspector#${encodeURIComponent(nextTab)}`);
     }, 250);
   };
 
@@ -1271,7 +1261,7 @@ export default function MissionOrderEditor() {
 
       setToast('Submitted');
 
-      closeHeadInspectorWindow();
+      returnToHeadInspectorDashboard();
     } catch (e) {
       setError(e?.message || 'Failed to submit to Director.');
     } finally {
@@ -1803,7 +1793,7 @@ export default function MissionOrderEditor() {
         window.open(missionOrder.generated_docx_url, '_blank');
       }
 
-      closeHeadInspectorWindow();
+      returnToHeadInspectorDashboard();
     } catch (e) {
       setError(e?.message || 'Failed to update status.');
     }
@@ -1920,7 +1910,7 @@ export default function MissionOrderEditor() {
       }));
 
       setToast(`Mission order archived (verification score: ${verificationResult.matchScore}%).`);
-      closeHeadInspectorWindow();
+      returnToHeadInspectorDashboard();
     } catch (e) {
       setError(e?.message || 'Failed to archive mission order.');
     } finally {
@@ -1956,7 +1946,7 @@ export default function MissionOrderEditor() {
   return (
     <div className="dash-container" style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif' }}>
       <main className="dash-main">
-        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 240 }}>
+        <section className="dash-shell" style={{ paddingLeft: navCollapsed ? 72 : 260 }}>
           <DashboardSidebar
             role={viewerRole}
             onLogout={handleLogout}
